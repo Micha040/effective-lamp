@@ -14,7 +14,7 @@ Die Datei wird **nicht von Hand geschrieben**: `tools/package.py` erzeugt sie be
   "release": "v1.0.0",               // Tag des Releases
   "published": "2026-11-06",
   "repo": "Micha040/effective-lamp",
-  "launcher": {                      // neueste Launcher-Version (für das Selbst-Update)
+  "launcher": {                      // neueste Launcher-Version (für das Selbst-Update) – Aufbau bleibt in allen Formaten gleich
     "version": "1.0.0", "file": "EfficientLamp.exe",
     "url": "https://github.com/…/releases/download/v1.0.0/EfficientLamp.exe",
     "size": 707584, "sha256": "…"
@@ -42,7 +42,12 @@ Die Datei wird **nicht von Hand geschrieben**: `tools/package.py` erzeugt sie be
 | `detect.versionFile` | Version aus dieser Datei lesen (`Version = "1.2.3"`), für Programme ohne Registry-Eintrag |
 | `install`, `uninstall`, `open` | was ausgeführt wird (siehe unten) |
 
-Pfade dürfen nur mit `%LOCALAPPDATA%\` oder `%APPDATA%\` beginnen und kein `..` enthalten.
+Pfade dürfen nur mit `%LOCALAPPDATA%\` oder `%APPDATA%\` beginnen und kein `..` enthalten. Versionen bestehen aus
+Ziffern, Buchstaben, `.` und `-` und beginnen mit einer Ziffer. Ein Eintrag, der eine Regel verletzt, wird übersprungen
+(und im Protokoll des Launchers genannt) – die übrigen Programme erscheinen trotzdem.
+
+Ändert sich das Format (`schema`), lesen ältere Launcher nur noch den Abschnitt `launcher` und bieten ihr eigenes Update
+an. Deshalb ändert sich dessen Aufbau nie.
 
 ### Befehle
 
@@ -54,8 +59,9 @@ Pfade dürfen nur mit `%LOCALAPPDATA%\` oder `%APPDATA%\` beginnen und kein `..`
 
 - `script`: nur ein Dateiname im entpackten Paket. Der Launcher startet es in einem eigenen Konsolenfenster
   (`cmd.exe /d /c ""<Paket>\<script>" <args>"`) und wartet auf das Ende (`"wait": false`: nicht warten).
-- `exe`: ein installiertes Programm unter `%LOCALAPPDATA%` bzw. `%APPDATA%`.
-- `args` darf keine Zeichen enthalten, mit denen sich Befehle verketten lassen (`& | < > ^`, Zeilenumbrüche).
+- `exe`: ein installiertes Programm – nur innerhalb von `installDir` des Programms.
+- `args` darf keine Zeichen enthalten, mit denen `cmd.exe` Befehle verkettet oder Variablen einsetzt
+  (`& | < > ^ % ! "`, Steuerzeichen).
 - `label`: Beschriftung des Knopfs (Standard „Öffnen“).
 
 Pakete landen in `%LOCALAPPDATA%\EfficientLamp\packages\<id>\<version>`; ältere Versionen räumt der Launcher nach

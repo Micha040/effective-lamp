@@ -56,8 +56,8 @@ Später zeigt der Launcher, was läuft und wofür es ein Update gibt – ein Kli
 
 | | Programm | Kurz gesagt | Version |
 |:-:|---|---|:-:|
-| <img src="docs/media/tiles/deskcats.png" width="40" alt=""> | **[DeskCats](#deskcats)** | Zwei Pixel-Katzen wohnen auf Taskleiste und Fenstern | 1.0.0 |
-| <img src="docs/media/tiles/snowdesk.png" width="40" alt=""> | **[SnowDesk](#snowdesk)** | Schnee, Regen und echtes Wetter auf dem Desktop | 1.1.0 |
+| <img src="docs/media/tiles/deskcats.png" width="40" alt=""> | **[DeskCats](#deskcats)** | Zwei Pixel-Katzen wohnen auf Taskleiste und Fenstern | 1.0.1 |
+| <img src="docs/media/tiles/snowdesk.png" width="40" alt=""> | **[SnowDesk](#snowdesk)** | Schnee, Regen und echtes Wetter auf dem Desktop | 1.1.1 |
 | <img src="docs/media/tiles/triggerswitch.png" width="40" alt=""> | **[TriggerSwitch](#triggerswitch)** | Trigger der Razer Basilisk V3 Pro per Hotkey umschalten | 1.1.0 |
 | <img src="docs/media/tiles/wavemutesync.png" width="40" alt=""> | **[WaveMuteSync](#wavemutesync)** | Wave:3 stummschalten → Discord und Teams stumm | 1.1.0 |
 
@@ -71,7 +71,7 @@ mit dem Wollknäuel spielen lassen, streicheln und herumtragen – alles über d
 
 - bewegt sich mit, wenn du Fenster verschiebst, schließt oder minimierst
 - mehrere Monitore mit unterschiedlicher Skalierung
-- schläft ein, wenn nichts passiert, und braucht dann praktisch keine Rechenzeit; bei Spielen im Vollbild pausiert sie ganz
+- schläft ein, wenn nichts passiert, und braucht dann praktisch keine Rechenzeit; ausgeblendet, bei Spielen und im Vollbild ruht DeskCats ganz
 
 <p align="center"><img src="docs/media/deskcats.gif" width="640" alt="DeskCats: die Katzen spielen mit dem Wollknäuel"></p>
 

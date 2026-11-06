@@ -30,6 +30,15 @@ sh apps/deskcats/tests/run.sh        # Katzen: Dauertest mit drei Monitoren, sec
 sh apps/snowdesk/tests/run.sh        # Schnee-Simulation und "Echtes Wetter"
 ```
 
+Die Setup-Skripte von DeskCats und SnowDesk lassen sich mit PowerShell 7 auch unter Linux durchspielen
+(Windows-Befehle und Registry sind nachgebildet – inklusive der Eigenheit, dass `New-Item -Force` einen vorhandenen
+Registry-Schlüssel samt Inhalt neu anlegt):
+
+```sh
+pwsh apps/deskcats/tools/ps_check.ps1 -SetupPath apps/deskcats/setup/Setup.ps1
+pwsh apps/snowdesk/tools/ps_check.ps1 -SetupPath apps/snowdesk/setup/Setup.ps1
+```
+
 Der Launcher lässt sich unter Windows (oder Wine) ohne GitHub ausprobieren:
 
 ```
