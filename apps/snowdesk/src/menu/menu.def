@@ -1,0 +1,5 @@
+; Exporte des Kontextmenü-COM-Servers (siehe menu.c)
+LIBRARY SnowDeskMenu
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

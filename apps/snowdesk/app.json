@@ -1,0 +1,52 @@
+{
+  "id": "snowdesk",
+  "order": 2,
+  "name": "SnowDesk",
+  "version": "1.1.0",
+  "versionCheck": [
+    {
+      "file": "setup/Setup.ps1",
+      "pattern": "\\$AppVersion\\s*=\\s*'([^']+)'"
+    },
+    {
+      "file": "src/app/main.cpp",
+      "pattern": "kVersion\\[?\\]?\\s*=\\s*L?\"([^\"]+)\""
+    },
+    {
+      "file": "res/snowdesk.rc",
+      "pattern": "VALUE \"ProductVersion\", \"([0-9.]+)\\.0\""
+    }
+  ],
+  "tagline": "Schnee, Regen und echtes Wetter auf dem Desktop",
+  "description": "Schnee und Regen auf dem Desktop – Flocken bleiben auf Fenstern liegen, auf Wunsch passend zum echten Wetter.",
+  "requires": "",
+  "color": "#3B82F6",
+  "process": "SnowDesk.exe",
+  "installDir": "%LOCALAPPDATA%\\Programs\\SnowDesk",
+  "detect": {
+    "uninstallKey": "SnowDesk",
+    "exe": "%LOCALAPPDATA%\\Programs\\SnowDesk\\SnowDesk.exe"
+  },
+  "install": {
+    "script": "Setup.cmd"
+  },
+  "uninstall": {
+    "script": "Uninstall.cmd"
+  },
+  "open": {
+    "exe": "%LOCALAPPDATA%\\Programs\\SnowDesk\\SnowDesk.exe",
+    "label": "Öffnen",
+    "wait": false
+  },
+  "package": {
+    "folder": "SnowDesk",
+    "files": {
+      "SnowDesk.exe": "build/SnowDesk.exe",
+      "SnowDeskMenu.dll": "build/SnowDeskMenu.dll",
+      "Setup.cmd": "setup/Setup.cmd",
+      "Setup.ps1": "setup/Setup.ps1",
+      "Uninstall.cmd": "setup/Uninstall.cmd",
+      "README.md": "README.md"
+    }
+  }
+}
