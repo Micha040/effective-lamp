@@ -1,0 +1,48 @@
+{
+  "id": "deskcats",
+  "order": 1,
+  "name": "DeskCats",
+  "version": "1.0.0",
+  "versionCheck": [
+    {
+      "file": "setup/Setup.ps1",
+      "pattern": "\\$AppVersion\\s*=\\s*'([^']+)'"
+    },
+    {
+      "file": "res/deskcats.rc",
+      "pattern": "VALUE \"ProductVersion\", \"([0-9.]+)\\.0\""
+    }
+  ],
+  "tagline": "Fatos und Kosta wohnen auf deinem Desktop",
+  "description": "Zwei Pixel-Katzen laufen über deine Fenster und die Taskleiste, schlafen, spielen und lassen sich füttern.",
+  "requires": "",
+  "color": "#8B5CF6",
+  "process": "DeskCats.exe",
+  "installDir": "%LOCALAPPDATA%\\Programs\\DeskCats",
+  "detect": {
+    "uninstallKey": "DeskCats",
+    "exe": "%LOCALAPPDATA%\\Programs\\DeskCats\\DeskCats.exe"
+  },
+  "install": {
+    "script": "Setup.cmd"
+  },
+  "uninstall": {
+    "script": "Uninstall.cmd"
+  },
+  "open": {
+    "exe": "%LOCALAPPDATA%\\Programs\\DeskCats\\DeskCats.exe",
+    "label": "Öffnen",
+    "wait": false
+  },
+  "package": {
+    "folder": "DeskCats",
+    "files": {
+      "DeskCats.exe": "build/DeskCats.exe",
+      "DeskCatsMenu.dll": "build/DeskCatsMenu.dll",
+      "Setup.cmd": "setup/Setup.cmd",
+      "Setup.ps1": "setup/Setup.ps1",
+      "Uninstall.cmd": "setup/Uninstall.cmd",
+      "README.md": "README.md"
+    }
+  }
+}
