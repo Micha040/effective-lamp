@@ -10,17 +10,32 @@ on:
 permissions:
   contents: read
 
+# Ein neuer Push ersetzt einen noch laufenden (oder hängenden) Lauf desselben Zweigs
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Testen und bauen
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: MinGW-w64 installieren
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64
+          # Paketquellen hängen gelegentlich: kurze Zeitlimits, bis zu drei Versuche
+          APT="sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for try in 1 2 3; do
+            if timeout 240 $APT update && timeout 400 $APT install -y --no-install-recommends \
+                 g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64; then
+              break
+            fi
+            [ "$try" = 3 ] && exit 1
+            echo "Versuch $try fehlgeschlagen – neuer Versuch in 20 s"; sleep 20
+          done
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
 
