@@ -1,14 +1,15 @@
-# Neuer Tag vX.Y.Z -> testen, bauen, Pakete + catalog.json erzeugen und als GitHub-Release veröffentlichen.
+# Release veröffentlichen: per Tag-Push (vX.Y.Z) oder von Hand über "Run workflow" (mit Tag-Namen).
+# Testet, baut, erzeugt Pakete + catalog.json und veröffentlicht alles als GitHub-Release.
 # Der Launcher liest catalog.json aus dem jeweils neuesten Release.
 name: Release
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
+  workflow_dispatch:   # "Actions › Release › Run workflow": legt den Tag selbst an, falls es ihn noch nicht gibt
     inputs:
       tag:
-        description: 'Vorhandener Tag, z. B. v1.0.1'
+        description: 'Tag für das Release, z. B. v1.0.0 (neu oder vorhanden)'
         required: true
 
 permissions:
@@ -29,7 +30,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0   # mit Tags
+
+      - name: Stand festlegen
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::Tag muss wie v1.2.3 aussehen (war: $TAG)"; exit 1; fi
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git checkout -q "refs/tags/$TAG"
+            echo "TARGET=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+            echo "Release aus vorhandenem Tag $TAG"
+          else
+            echo "TARGET=$GITHUB_SHA" >> "$GITHUB_ENV"
+            echo "Tag $TAG gibt es noch nicht – er wird beim Veröffentlichen auf $GITHUB_SHA angelegt"
+          fi
 
       - name: MinGW-w64 installieren
         timeout-minutes: 15
@@ -66,7 +79,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # z. B. auf der Release-Seite angelegt: Dateien (neu) hochladen, leere Beschreibung füllen
             gh release upload "$TAG" dist/* --clobber
+            if [ -z "$(gh release view "$TAG" --json body -q .body)" ]; then gh release edit "$TAG" --notes-file release-notes.md; fi
           else
-            gh release create "$TAG" dist/* --verify-tag --title "efficient lamp ${TAG#v}" --notes-file release-notes.md --latest
+            gh release create "$TAG" dist/* --target "$TARGET" --title "efficient lamp ${TAG#v}" --notes-file release-notes.md --latest
           fi

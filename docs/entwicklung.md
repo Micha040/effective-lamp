@@ -51,11 +51,14 @@ EfficientLamp.exe --render bild.png --theme dark --demo --scale 200      # Fenst
 
 1. Versionsnummern anpassen – je Programm in `app.json` und an den Stellen aus `versionCheck`,
    für den Launcher in `launcher/src/win/common.h`, `launcher/res/launcher.rc` und `launcher/res/app.manifest`.
-2. Committen, dann taggen und pushen:
-   ```sh
-   git tag v1.0.1
-   git push origin main v1.0.1
-   ```
+2. Committen und pushen, dann das Release starten – auf einem der beiden Wege:
+   - auf GitHub unter **Actions › Release › Run workflow** den neuen Tag eintragen (z. B. `v1.0.1`) und starten –
+     der Workflow legt den Tag selbst auf dem gewählten Stand an, oder
+   - selbst taggen und pushen:
+     ```sh
+     git tag v1.0.1
+     git push origin main v1.0.1
+     ```
 3. Der Workflow [release.yml](../.github/workflows/release.yml) testet, baut, schnürt die Pakete und veröffentlicht
    das Release mit allen Dateien. Ab dann sehen alle Launcher die neuen Versionen (unveränderte Programme behalten
    ihre Version und werden nicht erneut angeboten).

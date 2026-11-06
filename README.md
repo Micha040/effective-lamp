@@ -191,7 +191,7 @@ tools/             build-all.sh (alles bauen) · package.py (ZIPs + catalog.json
 ```
 
 Gebaut wird unter Linux mit MinGW-w64 (`sh tools/build-all.sh`), Release-Pakete erzeugt `tools/package.py`.
-Ein neuer Tag `vX.Y.Z` baut und veröffentlicht automatisch ein Release.
+Ein neuer Tag `vX.Y.Z` (oder **Actions › Release › Run workflow**) baut und veröffentlicht automatisch ein Release.
 Details: [docs/entwicklung.md](docs/entwicklung.md) · Aufbau von `catalog.json`: [docs/katalog.md](docs/katalog.md)
 
 ## Lizenz
