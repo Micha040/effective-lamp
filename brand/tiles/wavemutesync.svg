@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- WaveMuteSync – Mikrofon, stummgeschaltet -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FE3C9"/>
+      <stop offset="1" stop-color="#0E8A80"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <rect x="98" y="44" width="60" height="104" rx="30" fill="#FFFFFF"/>
+  <g stroke="#0E8A80" stroke-opacity="0.35" stroke-width="5" stroke-linecap="round">
+    <line x1="112" y1="74" x2="144" y2="74"/>
+    <line x1="112" y1="90" x2="144" y2="90"/>
+    <line x1="112" y1="106" x2="144" y2="106"/>
+  </g>
+  <path d="M78 116 C78 150 100 172 128 172 C156 172 178 150 178 116" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M128 172 L128 202 M100 208 L156 208" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+  <line x1="70" y1="58" x2="186" y2="200" stroke="#0E8A80" stroke-width="26" stroke-linecap="round"/>
+  <line x1="70" y1="58" x2="186" y2="200" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round"/>
+</svg>

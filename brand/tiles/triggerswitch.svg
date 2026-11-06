@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- TriggerSwitch – Maus mit Seiten-Trigger und Umschalt-Pfeilen -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF8A8A"/>
+      <stop offset="1" stop-color="#E0283F"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <path d="M128 46 C164 46 186 72 186 112 L186 160 C186 194 162 214 128 214 C94 214 70 194 70 160 L70 112 C70 72 92 46 128 46 Z" fill="#FFFFFF"/>
+  <path d="M70 116 L186 116" stroke="#E0283F" stroke-opacity="0.55" stroke-width="6"/>
+  <path d="M128 46 L128 116" stroke="#E0283F" stroke-opacity="0.55" stroke-width="6"/>
+  <rect x="119" y="70" width="18" height="34" rx="9" fill="#E0283F"/>
+  <rect x="58" y="128" width="20" height="44" rx="10" fill="#FFD166" stroke="#E0283F" stroke-width="5"/>
+  <g fill="none" stroke="#E0283F" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M104 150 L152 150 M140 138 L152 150 L140 162"/>
+    <path d="M152 182 L104 182 M116 170 L104 182 L116 194"/>
+  </g>
+</svg>

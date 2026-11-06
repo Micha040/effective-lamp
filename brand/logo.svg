@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- efficient lamp – Logo (ab 32 px; für 16–24 px gibt es logo-small.svg) -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26344D"/>
+      <stop offset="1" stop-color="#0D1320"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="128" cy="106" r="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB23E" stop-opacity="0.55"/>
+      <stop offset="0.45" stop-color="#FF9F1C" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FF9F1C" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glass" cx="112" cy="86" r="78" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFBEA"/>
+      <stop offset="0.38" stop-color="#FFE08A"/>
+      <stop offset="0.78" stop-color="#FFB627"/>
+      <stop offset="1" stop-color="#F08C0A"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7D899C"/>
+      <stop offset="0.42" stop-color="#E6EBF2"/>
+      <stop offset="1" stop-color="#6E7A8D"/>
+    </linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="clip"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
+  </defs>
+
+  <!-- Kachel mit warmem Schein -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#tile)"/>
+  <g clip-path="url(#clip)">
+    <circle cx="128" cy="106" r="118" fill="url(#glow)"/>
+  </g>
+  <rect x="9" y="9" width="238" height="238" rx="55" fill="none" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="2"/>
+
+  <!-- Strahlen -->
+  <g stroke="#FFC44D" stroke-width="9" stroke-linecap="round">
+    <line x1="128" y1="44" x2="128" y2="30"/>
+    <line x1="83.2" y1="62.4" x2="73.3" y2="52.5"/>
+    <line x1="172.8" y1="62.4" x2="182.7" y2="52.5"/>
+    <line x1="64.6" y1="106" x2="50.6" y2="106"/>
+    <line x1="191.4" y1="106" x2="205.4" y2="106"/>
+  </g>
+
+  <!-- Glaskolben -->
+  <path d="M92.6 141.4 A50 50 0 1 1 163.4 141.4 C156.2 149 151.5 158.5 151.5 171 L104.5 171 C104.5 158.5 99.8 149 92.6 141.4 Z" fill="url(#glass)"/>
+  <path d="M96 92 A34 34 0 0 1 116 72" fill="none" stroke="#FFFFFF" stroke-opacity="0.75" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Glühfaden (Edison-Schlaufe) mit Leuchten -->
+  <ellipse cx="128" cy="118" rx="24" ry="16" fill="#FFFFFF" fill-opacity="0.85" filter="url(#blur)"/>
+  <path d="M118 170 L118 132 C118 120 110 112 116 106 C122 100 128 108 128 118 C128 108 134 100 140 106 C146 112 138 120 138 132 L138 170"
+        fill="none" stroke="#A15C00" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Sockel -->
+  <rect x="102" y="174" width="52" height="10" rx="5" fill="url(#metal)"/>
+  <rect x="104" y="187" width="48" height="10" rx="5" fill="url(#metal)"/>
+  <rect x="108" y="200" width="40" height="9" rx="4.5" fill="url(#metal)"/>
+  <path d="M117 211 L139 211 Q137 222 128 222 Q119 222 117 211 Z" fill="#5E6A7C"/>
+</svg>
