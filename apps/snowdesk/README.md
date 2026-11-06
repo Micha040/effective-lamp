@@ -137,3 +137,10 @@ Für das Kontextmenü-Paket fragt Windows evtl. nach Adminrechten.
 SnowDesk.exe --cmd on | off | toggle | light | medium | storm | weather | shake | settings | exit
 SnowDesk.exe --diag
 ```
+
+## Versionen
+
+- **1.1.1** – Das Setup lässt die Autostart-Einträge anderer Programme in Ruhe (bis 1.1.0 hat es beim Installieren
+  alle Autostarts des Benutzers gelöscht) und behält gespeicherte Einstellungen.
+- **1.1.0** – Echtes Wetter: Regen, Schneeregen, Nebel, Gewitter, Wind und Tauwetter passend zum Ort.
+- **1.0.0** – erste Version.

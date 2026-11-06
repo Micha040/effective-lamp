@@ -32,7 +32,7 @@ $RegKey         = 'HKCU:\Software\SnowDesk'
 $RunKey         = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $ClassicKey     = 'HKCU:\Software\Classes\DesktopBackground\Shell\SnowDesk'
 $UninstallKey   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SnowDesk'
-$AppVersion     = '1.1.0'
+$AppVersion     = '1.1.1'
 $LogPath        = Join-Path $DataDir 'SnowDesk.log'
 $PowerShellExe  = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
@@ -42,6 +42,12 @@ function Write-Step([string]$Text) { Write-Host ''; Write-Host "» $Text" -Foreg
 function Write-Ok([string]$Text) { Write-Host "  ✓ $Text" -ForegroundColor Green }
 function Write-Note([string]$Text) { Write-Host "  · $Text" -ForegroundColor Gray }
 function Write-Problem([string]$Text) { Write-Host "  ! $Text" -ForegroundColor Yellow }
+
+# Schlüssel nur anlegen, wenn er fehlt. Achtung: "New-Item -Force" auf einen vorhandenen Registry-Schlüssel
+# löscht ihn samt allen Werten und legt ihn leer neu an – beim Run-Schlüssel wären das alle Autostarts!
+function New-KeyIfMissing([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+}
 
 # Eine Taste aus $Keys (z. B. 'JN'); Enter = $Default. Im -Quiet-Modus sofort $Default.
 function Read-Choice([string]$Question, [string]$Keys, [string]$Default) {
@@ -221,7 +227,7 @@ function Register-MenuPackage {
         Write-Problem 'Das Paket ist registriert, aber nicht für dieses Benutzerkonto (wurde ein anderes Administrator-Konto benutzt?).'
         return $false
     }
-    New-Item -Path $RegKey -Force | Out-Null
+    New-KeyIfMissing $RegKey
     Set-ItemProperty -Path $RegKey -Name MenuLocation -Value $InstallDir
     return $true
 }
@@ -373,7 +379,7 @@ function Install-SnowDesk {
     Install-Menu
 
     Write-Step 'Autostart'
-    New-Item -Path $RunKey -Force -ErrorAction SilentlyContinue | Out-Null
+    New-KeyIfMissing $RunKey
     Set-ItemProperty -Path $RunKey -Name $AppName -Value ('"' + $ExePath + '" --autostart')
     Write-Ok 'SnowDesk startet mit Windows (abschaltbar in den Einstellungen).'
     try { Register-Uninstaller; Write-Ok 'Unter Einstellungen > Apps > Installierte Apps eingetragen (zum Deinstallieren).' }

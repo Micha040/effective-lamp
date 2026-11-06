@@ -40,7 +40,7 @@ namespace app {
 
 namespace {
 
-const wchar_t* kVersion = L"1.1.0";
+const wchar_t* kVersion = L"1.1.1";
 int g_headlessSeconds = 0;   // --headless-test: zeichnet offscreen statt auf den Desktop (Tests unter Wine)
 const wchar_t* kMutexName = L"Local\\SnowDesk.Instance";
 constexpr UINT WM_APP_COMMAND = WM_APP + 1;
