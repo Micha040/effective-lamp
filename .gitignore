@@ -1,0 +1,24 @@
+# Build-Ausgaben
+build/
+dist/
+*.o
+*.obj
+*.exe
+*.dll
+
+# Test- und Werkzeugausgaben
+out/
+tests/out/
+__pycache__/
+*.pyc
+*.ppm
+*.raw
+*.tmp
+
+# Editor/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+pscheck-run/

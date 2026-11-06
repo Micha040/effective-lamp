@@ -1,0 +1,16 @@
+# Zeilenenden: Windows-Skripte und C#-Quelltext mit CRLF auschecken, alles andere mit LF.
+# (tools/package.py vereinheitlicht die Skripte in den Release-ZIPs zusätzlich.)
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.cs  text eol=crlf
+
+*.png  binary
+*.ico  binary
+*.gif  binary
+*.webp binary
+*.mp4  binary
+*.exe  binary
+*.dll  binary
+*.zip  binary
