@@ -1,0 +1,44 @@
+{
+  "id": "wavemutesync",
+  "order": 4,
+  "name": "WaveMuteSync",
+  "version": "1.1.0",
+  "versionCheck": [
+    {
+      "file": "WaveMuteSync.cs",
+      "pattern": "Version\\s*=\\s*\"([^\"]+)\""
+    }
+  ],
+  "tagline": "Wave:3 stumm → Discord und Teams stumm",
+  "description": "Antippen am Elgato Wave:3 schaltet dich in Discord und in laufenden Teams-Anrufen stumm – und wieder laut.",
+  "requires": "braucht Wave Link 3 und die Discord-App",
+  "color": "#14B8A6",
+  "process": "WaveMuteSync.exe",
+  "installDir": "%LOCALAPPDATA%\\WaveMuteSync",
+  "detect": {
+    "exe": "%LOCALAPPDATA%\\WaveMuteSync\\WaveMuteSync.exe",
+    "versionFile": "%LOCALAPPDATA%\\WaveMuteSync\\WaveMuteSync.cs"
+  },
+  "install": {
+    "script": "Setup.cmd",
+    "args": "-Action Install"
+  },
+  "uninstall": {
+    "script": "Setup.cmd",
+    "args": "-Action Uninstall"
+  },
+  "open": {
+    "script": "Setup.cmd",
+    "label": "Einstellungen",
+    "wait": false
+  },
+  "package": {
+    "folder": "WaveMuteSync",
+    "files": {
+      "README.md": "README.md",
+      "Setup.cmd": "Setup.cmd",
+      "Setup.ps1": "Setup.ps1",
+      "WaveMuteSync.cs": "WaveMuteSync.cs"
+    }
+  }
+}
