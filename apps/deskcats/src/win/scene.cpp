@@ -373,19 +373,35 @@ HWND Scene::hwndOf(uint64_t platform) const {
     return it == platHwnd_.end() ? nullptr : it->second;
 }
 
-int Scene::fullscreenMonitor(const std::vector<MonitorInfo>& mons) const {
+// Auf welchen Monitoren läuft ein Programm im Vollbild? Je Monitor zählt das vorderste Fenster, das ihn berührt:
+// bedeckt es den ganzen Monitor (nicht nur den Arbeitsbereich wie ein maximiertes Fenster), ist dort Vollbild.
+// So bleibt ein Vollbild-Video auf Monitor 2 frei von Katzen, während man auf Monitor 1 arbeitet.
+std::vector<char> Scene::fullscreenMonitors(const std::vector<MonitorInfo>& mons) const {
+    std::vector<char> out(mons.size(), 0);
+    auto covers = [](const RECT& r, const RECT& m) { return r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom; };
+    // 1) Vordergrundfenster direkt fragen – das ist immer aktuell, auch bevor die Fensterliste neu gebaut wurde
     HWND fg = GetForegroundWindow();
-    if (!fg || fg == GetDesktopWindow() || fg == GetShellWindow()) return -1;   // Desktop selbst ist kein Vollbild-Programm
-    wchar_t cls[64] = {0};
-    GetClassNameW(fg, cls, 63);
-    if (isDesktopClass(cls) || wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"#32769") == 0) return -1;
-    RECT r;
-    if (!GetWindowRect(fg, &r)) return -1;
-    for (size_t i = 0; i < mons.size(); ++i) {
-        const RECT& m = mons[i].rect;
-        if (r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom) return (int)i;
+    if (fg && fg != GetDesktopWindow() && fg != GetShellWindow()) {
+        wchar_t cls[64] = {0};
+        GetClassNameW(fg, cls, 63);
+        RECT r;
+        if (!isDesktopClass(cls) && wcscmp(cls, L"Shell_TrayWnd") != 0 && wcscmp(cls, L"#32769") != 0 && GetWindowRect(fg, &r))
+            for (size_t i = 0; i < mons.size(); ++i)
+                if (covers(r, mons[i].rect)) out[i] = 1;
     }
-    return -1;
+    // 2) übrige Monitore: vorderstes Fenster aus der Fensterliste (Stapelreihenfolge, vorderstes zuerst)
+    for (size_t i = 0; i < mons.size(); ++i) {
+        if (out[i]) continue;
+        const RECT& m = mons[i].rect;
+        for (const Item& t : list_) {
+            RECT x;
+            if (!t.coverer || !IntersectRect(&x, &t.vis, &m)) continue;
+            RECT r;
+            if (GetWindowRect(t.hwnd, &r) && covers(r, m) && IsWindowVisible(t.hwnd) && !IsIconic(t.hwnd)) out[i] = 1;
+            break;   // nur das vorderste zählt
+        }
+    }
+    return out;
 }
 
 std::wstring Scene::describe() const {

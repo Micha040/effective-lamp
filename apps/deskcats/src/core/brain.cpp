@@ -207,8 +207,16 @@ void CatBrain::followPlatform(const Senses& s) {
     if (plat_ == 0 || mode_ == Mode::Air || mode_ == Mode::Carried) return;
     const Platform* p = s.world->find(plat_);
     const int sc = scale(s);
-    if (!p) {   // Fenster zu, minimiert, maximiert ...
-        startFall(0, 0);
+    if (!p) {   // Fenster zu, minimiert, maximiert ... – oder dieselbe Kante kommt unter neuer ID wieder
+        const Platform* q = nullptr;   // (z. B. Boden wird zur Taskleiste, wenn "Auf der Taskleiste" eingeschaltet wird)
+        for (const Platform& o : s.world->plats)
+            if (std::abs(o.y - y_) <= 3 && x_ >= o.x0 && x_ <= o.x1 && (!q || o.z < q->z)) q = &o;
+        if (q) {
+            setPlatform(*q);
+            y_ = q->y;
+        } else {
+            startFall(0, 0);
+        }
         return;
     }
     int dx = p->x0 - platX0_, dy = p->y - platY_;
@@ -230,6 +238,23 @@ void CatBrain::followPlatform(const Senses& s) {
             startFall((left_ ? -1 : 1) * 30.0 * sc, 0);
         }
     }
+}
+
+// Wohin mit einer Katze, die aus dem Bild gefallen ist? Am liebsten auf eine feste Fläche (Taskleiste oder Boden)
+// unter ihr, sonst auf die nächstgelegene feste Fläche, notfalls auf irgendeine.
+const Platform* CatBrain::rescuePlatform(const Senses& s) const {
+    const Platform* best = nullptr;
+    double bestD = 0;
+    for (int pass = 0; pass < 2 && !best; ++pass)
+        for (const Platform& p : s.world->plats) {
+            if (pass == 0 && p.kind == PlatKind::Window) continue;
+            double d = x_ < p.x0 ? p.x0 - x_ : (x_ > p.x1 ? x_ - p.x1 : 0.0);
+            if (!best || d < bestD) {
+                best = &p;
+                bestD = d;
+            }
+        }
+    return best;
 }
 
 void CatBrain::startFall(double vx, double vy) {
@@ -803,13 +828,14 @@ double CatBrain::tick(const Senses& s) {
                     y_ = ny;
                     int bottom = -1000000;
                     for (const Monitor& m : s.world->monitors) bottom = std::max(bottom, m.y1);
-                    if (!s.world->monitors.empty() && y_ > bottom + 200) {   // Sicherheitsnetz
-                        const Platform* f = nullptr;
-                        for (const Platform& p : s.world->plats)
-                            if (p.kind == PlatKind::Floor && (!f || std::fabs((p.x0 + p.x1) / 2.0 - x_) < std::fabs((f->x0 + f->x1) / 2.0 - x_))) f = &p;
+                    if (!s.world->monitors.empty() && y_ > bottom + 200) {   // Sicherheitsnetz: aus dem Bild gefallen
+                        const Platform* f = rescuePlatform(s);
                         if (f) {
                             x_ = clampv(x_, (double)f->x0 + 10, (double)f->x1 - 10);
                             land(s, *f);
+                        } else {   // gerade gar keine Fläche (z. B. Bildschirme werden umgestellt): unten warten
+                            y_ = bottom + 200;
+                            vx_ = vy_ = 0;
                         }
                     }
                 }
@@ -1164,6 +1190,15 @@ void CatBrain::release(const Senses& s) {
     // vom Nackenfell (Haltepunkt) auf die Pfoten umrechnen: hängt etwa 34 Sprite-Pixel tiefer
     x_ = carryX_;
     y_ = carryY_ + 34.0 * sc;
+    // Über einer festen Fläche (Taskleiste/Boden) losgelassen? Die Füße landen sonst schon unterhalb ihrer
+    // Oberkante, und die Katze fiele durch alles hindurch.
+    for (const Platform& p : s.world->plats) {
+        if (p.kind == PlatKind::Window || x_ < p.x0 || x_ > p.x1 || y_ <= p.y) continue;
+        int bottom = p.y + 200 * sc;
+        for (const Monitor& m : s.world->monitors)
+            if (x_ >= m.x0 && x_ < m.x1 && p.y >= m.y0 && p.y < m.y1) bottom = m.y1;
+        if (y_ <= bottom) y_ = p.y - 1;
+    }
     double vx = clampv(carryVx_, -900.0 * sc / 3, 900.0 * sc / 3), vy = clampv(carryVy_, -900.0 * sc / 3, 600.0 * sc / 3);
     if (s.now - lastDrag_ > 0.15) vx = vy = 0;   // Maus stand still: einfach loslassen
     startFall(vx, vy);

@@ -2,7 +2,7 @@
   "id": "deskcats",
   "order": 1,
   "name": "DeskCats",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "versionCheck": [
     {
       "file": "setup/Setup.ps1",

@@ -46,7 +46,7 @@ public:
     static bool isFloor(uint64_t platform) { return (platform & 0xFFFF000000000000ull) == kFloorBase; }
     HWND desktopTop() const { return desktopTop_; }   // oberstes Desktop-Fenster (Progman/WorkerW): Boden-Katzen darüber
     // Vollbild im Vordergrund? Monitor-Index (in mons) oder -1
-    int fullscreenMonitor(const std::vector<MonitorInfo>& mons) const;
+    std::vector<char> fullscreenMonitors(const std::vector<MonitorInfo>& mons) const;   // je Monitor: Vollbild?
     double lastBuildMicros() const { return lastUs_; }
     std::wstring describe() const;
 

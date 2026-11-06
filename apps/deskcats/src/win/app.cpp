@@ -96,9 +96,23 @@ struct CatSlot {
     bool lastValid = false;
     uint64_t viewPlat = 0;     // Fläche beim letzten Bild (für das flüssige Mitfahren beim Fensterziehen)
     int viewPlatX0 = 0, viewPlatY = 0;
-    std::unordered_map<uint64_t, cat::PixelImage> cache;
+    struct Cached {
+        cat::PixelImage img;
+        uint64_t used = 0;
+    };
+    std::unordered_map<uint64_t, Cached> cache;   // fertige Bilder je Pose (zuletzt benutzte bleiben)
+    uint64_t useClock = 0;
     bool hidden = false;
 };
+
+// Bildspeicher klein halten: bei 160 Bildern die ältere Hälfte verwerfen (ein Bild hat 10–15 KB)
+static void trimCache(CatSlot& c) {
+    std::vector<std::pair<uint64_t, uint64_t>> ages;   // (zuletzt benutzt, Schlüssel)
+    ages.reserve(c.cache.size());
+    for (const auto& e : c.cache) ages.emplace_back(e.second.used, e.first);
+    std::sort(ages.begin(), ages.end());
+    for (size_t i = 0; i < ages.size() / 2; ++i) c.cache.erase(ages[i].second);
+}
 
 class App {
 public:
@@ -119,7 +133,8 @@ private:
     void presentItem(cat::Item& it, SpriteWindow& w, bool force);
     void updateZ(SpriteWindow& w, uint64_t plat, bool airborne, bool force);
     void scheduleNext(double delay);
-    bool pausedNow(std::wstring* why);
+    bool pausedNow(std::wstring* why, bool* needsPoll = nullptr);
+    void updateHousekeeping();
     void hideAll();
     void onMouse(int id, UINT msg, POINT pt);
     void catMenu(int id, POINT pt);
@@ -151,6 +166,7 @@ private:
     std::wstring pauseWhy_;
     double lastBuild_ = -100, nextGameCheck_ = 0;
     bool timerArmed_ = false;
+    bool housekeepingOn_ = false;
     double timerDue_ = 0;
     bool itemsWake_ = false;
     bool followOn_ = false;
@@ -204,8 +220,12 @@ int App::run(const std::wstring& startCmd, bool autostart, int selftest) {
     syncCats();
     startT_ = nowSec();
     startCpu_ = processCpuSeconds();
-    SetTimer(host_, kHousekeepingTimer, 5000, nullptr);
     if (selftest_ > 0) SetTimer(host_, kSelftestTimer, (UINT)std::min(selftest_, 10) * 1000, nullptr);
+    if (set_.visible) {   // läuft schon ein Spiel? Nicht erst nach 5 s merken
+        std::wstring which;
+        gameRunning_ = pause_.gameRunning(set_.games, &which);
+        if (gameRunning_) logLine(L"Spiel erkannt (%ls): Katzen schlafen", which.c_str());
+    }
     if (!startCmd.empty()) command(startCmd);
     heartbeat();
 
@@ -251,7 +271,8 @@ LRESULT App::onMessage(UINT msg, WPARAM wp, LPARAM lp) {
                 // Spiele-Liste prüfen (Prozessliste, keine fremden Prozesse öffnen) und ggf. aufwachen
                 bool before = gameRunning_;
                 std::wstring which;
-                if (set_.visible) gameRunning_ = pause_.gameRunning(set_.games, &which);   // ausgeblendet: nichts zu prüfen
+                if (set_.visible && !pause_.locked() && !pause_.displayOff())   // ausgeblendet/gesperrt: nichts zu prüfen
+                    gameRunning_ = pause_.gameRunning(set_.games, &which);
                 if (gameRunning_ != before) {
                     logLine(gameRunning_ ? L"Spiel erkannt (%ls): Katzen schlafen" : L"Spiel beendet: Katzen sind wieder da", which.c_str());
                     heartbeat();
@@ -457,7 +478,10 @@ cat::Senses App::senses(int i, double now, POINT cur, bool curValid) {
 
 // ------------------------------------------------------------------ Takt
 
-bool App::pausedNow(std::wstring* why) {
+// needsPoll: nur "System beschäftigt" meldet sein Ende nicht selbst – Sperre, Bildschirm aus und Ausblenden kommen als
+// Nachricht, das Ende eines Spiels erkennt der Wartungstakt an der Prozessliste.
+bool App::pausedNow(std::wstring* why, bool* needsPoll) {
+    if (needsPoll) *needsPoll = false;
     if (!set_.visible) {
         if (why) *why = L"ausgeblendet";
         return true;
@@ -474,7 +498,19 @@ bool App::pausedNow(std::wstring* why) {
         if (why) *why = L"Spiel läuft";
         return true;
     }
-    return pause_.systemBusy(why);
+    bool busy = pause_.systemBusy(why);
+    if (needsPoll) *needsPoll = busy;
+    return busy;
+}
+
+// Wartungstakt (Spiele-Liste, Sicherheitsnetz) nur, wenn er etwas zu tun hat: nicht ausgeblendet, nicht gesperrt,
+// Bildschirm an
+void App::updateHousekeeping() {
+    const bool want = selftest_ > 0 || (set_.visible && !pause_.locked() && !pause_.displayOff());
+    if (want == housekeepingOn_) return;
+    housekeepingOn_ = want;
+    if (want) SetTimer(host_, kHousekeepingTimer, 5000, nullptr);
+    else KillTimer(host_, kHousekeepingTimer);
 }
 
 void App::hideAll() {
@@ -499,7 +535,9 @@ void App::scheduleNext(double delay) {
 void App::heartbeat() {
     const double now = nowSec();
     std::wstring why;
-    bool paused = pausedNow(&why);
+    bool needsPoll = false;
+    bool paused = pausedNow(&why, &needsPoll);
+    updateHousekeeping();
     if (paused) {
         if (!pausedState_) {
             logLine(L"Pause: %ls", why.c_str());
@@ -507,14 +545,20 @@ void App::heartbeat() {
             pausedState_ = true;
             KillTimer(host_, kFollowTimer);
             followOn_ = false;
+            scene_.stop();   // keine Fensterereignisse mehr empfangen, solange nichts zu sehen ist
         }
-        // Ausgeblendet: gar kein Takt. Sonst selten nachsehen (Vollbild endet, Sperre endet ...)
-        if (set_.visible) scheduleNext(2.0);
+        // Ruhe: kein Takt. Nur "System beschäftigt" muss gelegentlich nachgesehen werden.
+        if (needsPoll) scheduleNext(5.0);
+        else {
+            KillTimer(host_, kTickTimer);
+            timerArmed_ = false;
+        }
         return;
     }
     if (pausedState_) {
         pausedState_ = false;
         logLine(L"Weiter");
+        if (!scene_.start()) logLine(L"Fenster-Beobachtung eingeschränkt (keine WinEvent-Hooks)");
         scene_.markDirty();
         for (auto& c : cats_) c->nextT = now;
     }
@@ -533,7 +577,7 @@ void App::heartbeat() {
 
     POINT cur{0, 0};
     bool curValid = GetCursorPos(&cur) != FALSE;
-    const int fsMon = scene_.fullscreenMonitor(mons_);
+    const std::vector<char> fsMons = scene_.fullscreenMonitors(mons_);
     const bool zCheck = scene_.zChanged();
     scene_.clearZChanged();
     double next = 30.0;
@@ -549,7 +593,7 @@ void App::heartbeat() {
             const RECT& r = mons_[m].rect;
             if (c.brain->x() >= r.left && c.brain->x() < r.right && c.brain->y() - 10 >= r.top && c.brain->y() - 10 < r.bottom) mi = (int)m;
         }
-        if (fsMon >= 0 && mi == fsMon) {
+        if (mi >= 0 && mi < (int)fsMons.size() && fsMons[mi]) {
             if (!c.hidden) {
                 c.win.hide();
                 c.hidden = true;
@@ -672,21 +716,58 @@ void App::follow() {
 
 // ------------------------------------------------------------------ Zeichnen
 
+namespace {
+bool isTaskbarWindow(HWND h) {
+    wchar_t cls[32] = {0};
+    GetClassNameW(h, cls, 31);
+    return wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0;
+}
+}  // namespace
+
+// Stapelreihenfolge pflegen, ohne sich mit anderen Programmen zu "streiten": Muss eine Katze kurz nach dem letzten
+// Nachbessern schon wieder nachgebessert werden, drängt sich offenbar etwas ständig nach vorne – dann mit wachsender
+// Pause (1, 2, 4, 8, 16 s) und auch dann, wenn gerade viele Fensterereignisse kommen (force).
 void App::updateZ(SpriteWindow& w, uint64_t plat, bool airborne, bool force) {
     SpriteWindow::ZState& z = w.z;
-    if (airborne || plat == 0 || Scene::isTaskbar(plat)) {
-        if (force || z.mode != 1) {
-            w.zTopmost();
-            z.mode = 1;
-            z.plat = plat;
+    const double now = nowSec();
+    auto noteFix = [&](bool ok) {
+        const bool fight = now - z.lastFix < 2.0;
+        z.lastFix = now;
+        if (ok && !fight) {
+            z.fails = 0;
+            z.retryAt = 0;
+            return;
         }
+        z.fails = std::min(z.fails + 1, 5);
+        z.retryAt = now + 0.5 * (1 << z.fails);
+    };
+    auto fresh = [&](int mode) {
+        z.mode = mode;
+        z.plat = plat;
+        z.fails = 0;
+        z.retryAt = 0;
+        z.lastFix = now;
+    };
+    if (airborne || plat == 0 || Scene::isTaskbar(plat)) {
+        if (z.mode != 1) {
+            w.zTopmost();
+            fresh(1);
+            return;
+        }
+        // Ganz oben bleiben – nachgebessert wird nur, wenn die Taskleiste die Katze verdeckt (z. B. nach einem Klick
+        // auf die Taskleiste), nicht wegen Tooltips, Vorschaubildern oder anderer "immer oben"-Fenster.
+        if (!force || now < z.retryAt || !w.coveredBy(isTaskbarWindow)) return;
+        w.zTopmost();
+        noteFix(true);
         return;
     }
     if (Scene::isFloor(plat)) {
-        if (force || z.mode != 2) {
+        if (z.mode != 2) {
             w.zAboveDesktop(scene_.desktopTop());
-            z.mode = 2;
-            z.plat = plat;
+            fresh(2);
+        } else if (force && now >= z.retryAt) {
+            w.zAboveDesktop(scene_.desktopTop());
+            noteFix(true);
         }
         return;
     }
@@ -701,27 +782,16 @@ void App::updateZ(SpriteWindow& w, uint64_t plat, bool airborne, bool force) {
     const bool same = z.mode == 0 && z.plat == plat;
     HWND blocker = nullptr;
     if (same) {
-        if (w.directlyAbove(ph, own, &blocker)) {
-            z.fails = 0;
-            return;
-        }
-        // eben erst vergeblich versucht: nicht bei jedem Bild umsortieren (kein Hin und Her mit anderen Programmen)
-        if (!force && nowSec() < z.retryAt) return;
+        if (w.directlyAbove(ph, own, &blocker)) return;
+        if (now < z.retryAt) return;   // nach Gerangel: abwarten, auch wenn gerade viele Ereignisse kommen
     }
     w.zAbove(ph);
-    z.mode = 0;
-    z.plat = plat;
     ++zPlaced_;
     HWND still = nullptr;
     const bool ok = w.directlyAbove(ph, own, &still);
-    if (ok) {
-        z.fails = 0;
-        z.retryAt = 0;
-    } else {
-        ++zFailed_;
-        z.fails = std::min(z.fails + 1, 5);
-        z.retryAt = nowSec() + 0.5 * (1 << z.fails);   // 1, 2, 4, 8, 16 s
-    }
+    if (!ok) ++zFailed_;
+    if (same) noteFix(ok);
+    else fresh(0);   // neue Fläche (Katze ist umgezogen): kein Gerangel
     if (selftest_ > 0 && (same || !ok)) {   // Testlauf: unerwartetes Verrutschen protokollieren
         wchar_t bc[48] = {0}, sc[48] = {0};
         if (blocker) GetClassNameW(blocker, bc, 47);
@@ -737,14 +807,15 @@ void App::present(CatSlot& c, bool force) {
     uint64_t key = cat::poseKey(p) ^ (v.facingLeft ? 0x9E3779B97F4A7C15ull : 0ull);
     auto it = c.cache.find(key);
     if (it == c.cache.end()) {
-        if (c.cache.size() > 700) c.cache.clear();   // grob begrenzen (ein Bild hat nur ein paar KB)
-        cat::PixelImage img;
+        if (c.cache.size() >= 160) trimCache(c);
+        CatSlot::Cached entry;
         cat::PixelStyle st;
-        cat::renderPixelCat(c.lk, p, v.facingLeft, st, img);
+        cat::renderPixelCat(c.lk, p, v.facingLeft, st, entry.img);
         ++renders_;
-        it = c.cache.emplace(key, std::move(img)).first;
+        it = c.cache.emplace(key, std::move(entry)).first;
     }
-    const cat::PixelImage& img = it->second;
+    it->second.used = ++c.useClock;
+    const cat::PixelImage& img = it->second.img;
     const int sc = world_.scaleAt((int)v.x, (int)v.y - 8);
     float ax = p.anchor.x * kPpc, ay = p.anchor.y * kPpc;
     float apx = img.originX + (v.facingLeft ? -ax : ax), apy = img.originY - ay;
@@ -1008,7 +1079,8 @@ void App::onMouse(int id, UINT msg, POINT pt) {
 
 void App::catMenu(int index, POINT pt) {
     if (index < 0 || index >= (int)cats_.size()) return;
-    CatSlot& c = *cats_[index];
+    const CatSlot& c = *cats_[index];
+    const int lookOfMenu = c.look;   // nach dem Menü nicht mehr auf c verlassen
     enum { kPet = 1, kFeed, kPlay, kSleep, kWake, kSettings, kHide, kExit };
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING, kPet, c.look == 0 ? L"Fatos streicheln" : L"Kosta streicheln");
@@ -1027,10 +1099,16 @@ void App::catMenu(int index, POINT pt) {
     DestroyMenu(m);
     switch (cmd) {
         case kPet: {
-            cat::Senses s = senses(index, nowSec(), pt, true);
-            c.brain->pet(s);
-            c.nextT = 0;
-            heartbeat();
+            // während des Menüs kann sich die Katzenliste ändern (Einstellungen per Befehl): neu nachschlagen
+            const int look = lookOfMenu;
+            for (size_t i = 0; i < cats_.size(); ++i) {
+                if (cats_[i]->look != look) continue;
+                cat::Senses s = senses((int)i, nowSec(), pt, true);
+                cats_[i]->brain->pet(s);
+                cats_[i]->nextT = 0;
+                heartbeat();
+                break;
+            }
             break;
         }
         case kFeed: command(L"feed"); break;

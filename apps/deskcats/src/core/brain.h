@@ -110,6 +110,7 @@ private:
     bool onPlatform(const Senses& s, const Platform*& p) const;
     void setPlatform(const Platform& p);
     void startFall(double vx, double vy);
+    const Platform* rescuePlatform(const Senses& s) const;
     void startJump(const Senses& s, const Platform& to, int landX);
     void land(const Senses& s, const Platform& p);
     void goPosture(Posture target, Mode after);

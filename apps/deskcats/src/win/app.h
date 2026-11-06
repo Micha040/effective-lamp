@@ -4,7 +4,7 @@
 
 namespace app {
 
-constexpr const wchar_t* kVersion = L"1.0.0";
+constexpr const wchar_t* kVersion = L"1.0.1";
 
 // Läuft schon eine Instanz? Dann Befehl hinschicken.
 bool sendToRunning(const std::wstring& cmd);

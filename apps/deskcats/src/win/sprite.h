@@ -31,6 +31,8 @@ public:
     bool isTopmost() const { return topmost_; }
     // Liegt direkt unter uns (eigene Fenster übersprungen) dieses Fenster? blocker: was stattdessen dazwischen liegt
     bool directlyAbove(HWND platform, const std::function<bool(HWND)>& isOwn, HWND* blocker = nullptr) const;
+    // Liegt ein sichtbares, überlappendes Fenster, auf das match zutrifft, über uns?
+    bool coveredBy(const std::function<bool(HWND)>& match) const;
 
     // Wo das Fenster in der Stapelreihenfolge zuletzt hingelegt wurde (verwaltet von App::updateZ)
     struct ZState {
@@ -38,6 +40,7 @@ public:
         uint64_t plat = ~0ull;
         int fails = 0;            // vergebliche Versuche hintereinander
         double retryAt = 0;       // vorher nicht erneut versuchen (kein Hin und Her mit anderen Programmen)
+        double lastFix = -100;    // wann zuletzt neu eingeordnet (häufiges Nachbessern = Gerangel -> Pause verlängern)
     } z;
 
 private:

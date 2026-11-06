@@ -17,6 +17,7 @@ $null = New-Item -ItemType Directory -Path $src
 'dll' | Set-Content -LiteralPath (Join-Path $src 'DeskCatsMenu.dll')
 'readme' | Set-Content -LiteralPath (Join-Path $src 'README.md')
 $text = [IO.File]::ReadAllText($SetupPath)
+$expectedVersion = ([regex]::Match($text, '\$AppVersion\s*=\s*''([^'']+)''')).Groups[1].Value
 $origLine = 'function Get-OsVersion { return [Environment]::OSVersion.Version }'
 if ([regex]::Matches($text, [regex]::Escape($origLine)).Count -ne 1) { throw 'Get-OsVersion-Zeile nicht gefunden' }
 $text = $text.Replace($origLine, 'function Get-OsVersion { return $global:FakeOsVersion }')
@@ -51,6 +52,12 @@ function global:New-Item {
     $regs = @($Path | Where-Object { Test-RegPath $_ })
     if ($regs.Count -eq 0) { return Microsoft.PowerShell.Management\New-Item @PSBoundParameters }
     foreach ($p in $regs) {
+        if ($global:Reg.ContainsKey($p)) {
+            # wie der echte Registry-Provider: ein vorhandener Schlüssel wird mit -Force samt Werten und
+            # Unterschlüsseln gelöscht und leer neu angelegt (ohne -Force: Fehler)
+            if (-not $Force) { Write-Error "Schlüssel existiert schon: $p"; continue }
+            foreach ($sub in @($global:Reg.Keys | Where-Object { $_ -eq $p -or $_ -like "$p\*" })) { $global:Reg.Remove($sub) }
+        }
         $parts = $p.Split('\')
         for ($i = 1; $i -le $parts.Count; $i++) {
             $k = ($parts[0..($i - 1)] -join '\')
@@ -155,6 +162,13 @@ function Invoke-Setup([string]$Dir, [string[]]$SetupArgs, [string]$Label) {
 }
 $home0 = (Get-Location).Path
 
+# Andere Autostarts und vorhandene Einstellungen müssen jede Installation überstehen
+foreach ($k in 'HKCU:', 'HKCU:\Software', 'HKCU:\Software\Microsoft', 'HKCU:\Software\Microsoft\Windows', 'HKCU:\Software\Microsoft\Windows\CurrentVersion', $runKey) {
+    if (-not $global:Reg.ContainsKey($k)) { $global:Reg[$k] = @{} }
+}
+$global:Reg[$runKey]['Steam'] = '"C:\Program Files (x86)\Steam\steam.exe" -silent'
+$global:Reg[$regKeyApp] = @{ Size = 3 }
+
 "1) Installation -Quiet aus dem ZIP-Ordner (Windows 10, klassisches Menü):"
 $r = Invoke-Setup $src @('-Quiet') 'install quiet'
 Assert ($r.Code -eq 0) "Exit-Code 0 ($($r.Code))"
@@ -164,7 +178,7 @@ Assert ($global:Reg.ContainsKey($ukey)) 'Eintrag unter Installierte Apps angeleg
 if ($global:Reg.ContainsKey($ukey)) {
     $u = $global:Reg[$ukey]
     $expected = '"' + $psExe + '" -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $installed 'Setup.ps1') + '" -Uninstall -Pause'
-    Assert ($u['DisplayName'] -eq 'DeskCats' -and $u['DisplayVersion'] -eq '1.0.0' -and $u['Publisher'] -eq 'DeskCats') 'Name/Version/Herausgeber'
+    Assert ($u['DisplayName'] -eq 'DeskCats' -and $u['DisplayVersion'] -eq $expectedVersion -and $u['Publisher'] -eq 'DeskCats') 'Name/Version/Herausgeber'
     Assert ($u['UninstallString'] -eq $expected) "UninstallString = $($u['UninstallString'])"
     Assert ($u['DisplayIcon'] -eq ('"' + (Join-Path $installed 'DeskCats.exe') + '",0')) 'DisplayIcon'
     Assert ($u['InstallLocation'] -eq $installed) 'InstallLocation'
@@ -172,6 +186,8 @@ if ($global:Reg.ContainsKey($ukey)) {
     Assert ($u['EstimatedSize'] -ge 4 -and $u['EstimatedSize#type'] -eq 'DWord') "EstimatedSize = $($u['EstimatedSize']) KB (4 Dateien)"
 }
 Assert ($global:Reg.ContainsKey($runKey) -and $global:Reg[$runKey]['DeskCats'] -like '*--autostart') 'Autostart eingetragen'
+Assert ($global:Reg[$runKey]['Steam'] -like '*steam.exe*') 'anderer Autostart (Steam) bleibt erhalten'
+Assert ($global:Reg[$regKeyApp]['Size'] -eq 3) 'vorhandene Einstellung (Size) bleibt erhalten'
 Assert ($global:Reg.ContainsKey($classicKey)) 'klassisches Kontextmenü eingetragen'
 Assert ($global:Prompts.Count -eq 0) 'keine Rückfrage bei -Quiet'
 Assert (@($global:Procs).Count -eq 1) 'DeskCats läuft'
@@ -200,6 +216,7 @@ $r = Invoke-Setup $src @() 'install interactive'
 Assert ($r.Code -eq 0) "Exit-Code 0 ($($r.Code))"
 Assert ($global:Prompts.Count -eq 0) "keine Rückfragen ($($global:Prompts -join ' | '))"
 Assert ($global:Reg.ContainsKey($regKeyApp) -and $global:Reg[$regKeyApp]['Visible'] -eq 1) 'Visible=1 vor dem Start'
+Assert ($global:Reg[$runKey]['Steam'] -like '*steam.exe*') 'andere Autostarts (Steam) nach vier Installationen noch da'
 
 "6) Deinstallation wie aus 'Installierte Apps' (installierte Setup.ps1 -Uninstall -Pause):"
 $null = New-Item -ItemType Directory -Path $dataDir -Force

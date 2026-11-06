@@ -114,3 +114,13 @@ Für das Kontextmenü-Paket fragt Windows evtl. nach Adminrechten.
 DeskCats.exe --cmd feed | play | call | sleep | wake | show | hide | toggle | settings | exit
 DeskCats.exe --selftest <Sekunden>
 ```
+
+## Versionen
+
+- **1.0.1** – Das Setup lässt die Autostart-Einträge anderer Programme in Ruhe (1.0.0 hat beim Installieren alle
+  Autostarts des Benutzers gelöscht) und behält die Einstellungen bei einem Update. Katzen können nicht mehr ins
+  Bodenlose fallen (über der Taskleiste fallen gelassen, über den Rand geworfen, Monitor abgezogen). Ausgeblendet oder
+  pausiert arbeitet DeskCats wirklich gar nicht mehr. Vollbild wird je Monitor erkannt. Kein Gerangel mehr mit
+  Programmen, die sich ständig nach vorne drängen. Das Einstellungsfenster passt sich beim Wechsel auf einen Monitor
+  mit anderer Skalierung an.
+- **1.0.0** – erste Version.

@@ -26,6 +26,7 @@ bool SpriteWindow::create(HINSTANCE inst, int id, MouseFn fn) {
         if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
         registered = true;
     }
+    if (hwnd_) destroy();   // nicht doppelt anlegen
     id_ = id;
     mouse_ = std::move(fn);
     hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, this);
@@ -34,7 +35,12 @@ bool SpriteWindow::create(HINSTANCE inst, int id, MouseFn fn) {
     BOOL off = TRUE;
     DwmSetWindowAttribute(hwnd_, DWMWA_TRANSITIONS_FORCEDISABLED, &off, sizeof(off));
     memDC_ = CreateCompatibleDC(nullptr);
-    return memDC_ != nullptr;
+    if (!memDC_) {   // knapp an GDI-Objekten: Fenster nicht verwaist zurücklassen (wird beim nächsten Versuch neu angelegt)
+        DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
+        return false;
+    }
+    return true;
 }
 
 void SpriteWindow::destroy() {
@@ -80,7 +86,7 @@ void SpriteWindow::show(const cat::PixelImage& img, int scale, int left, int top
     const int W = img.w * scale, H = img.h * scale;
     if (contentChanged || W != curW_ || H != curH_ || !shown_) {
         ensureDib(W, H);
-        if (!bits_) return;
+        if (!bits_ || W > dibW_ || H > dibH_) return;   // größere Bitmap ging nicht: lieber nichts zeigen als überschreiben
         // ganzzahlig vergrößern (harte Pixel); Werte sind schon vormultipliziert (Alpha 0 oder 255)
         for (int y = 0; y < img.h; ++y) {
             uint32_t* row = bits_ + (size_t)y * scale * dibW_;
@@ -129,6 +135,17 @@ void SpriteWindow::zAbove(HWND platform) {
     // ganz oben (bzw. nur "immer oben"-Fenster darüber): an die Spitze der normalen Fenster
     if (!prev || (GetWindowLongPtrW(prev, GWL_EXSTYLE) & WS_EX_TOPMOST)) after = HWND_TOP;
     SetWindowPos(hwnd_, after, 0, 0, 0, 0, kZFlags);
+}
+
+bool SpriteWindow::coveredBy(const std::function<bool(HWND)>& match) const {
+    if (!hwnd_ || !shown_) return false;
+    RECT me = rect(), r, x;
+    int n = 0;
+    for (HWND h = GetWindow(hwnd_, GW_HWNDPREV); h && n < 256; h = GetWindow(h, GW_HWNDPREV), ++n) {   // alles, was über uns liegt
+        if (!IsWindowVisible(h) || !GetWindowRect(h, &r) || !IntersectRect(&x, &r, &me)) continue;
+        if (match(h)) return true;
+    }
+    return false;
 }
 
 void SpriteWindow::zTopmost() {

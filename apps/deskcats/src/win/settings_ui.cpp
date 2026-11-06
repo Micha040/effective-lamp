@@ -110,6 +110,19 @@ void build(HWND w) {
     SetDlgItemTextW(w, kIdGames, joinGames(g.s.games).c_str());
 }
 
+void makeFonts() {
+    if (g.font) DeleteObject(g.font);
+    if (g.bold) DeleteObject(g.bold);
+    NONCLIENTMETRICSW ncm{};
+    ncm.cbSize = sizeof(ncm);
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+    LOGFONTW lf = ncm.lfMessageFont;
+    lf.lfHeight = -MulDiv(9, (int)g.dpi, 72);
+    g.font = CreateFontIndirectW(&lf);
+    lf.lfWeight = FW_SEMIBOLD;
+    g.bold = CreateFontIndirectW(&lf);
+}
+
 LRESULT CALLBACK proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE:
@@ -127,6 +140,25 @@ LRESULT CALLBACK proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
             } else if (id == kIdCancel || id == IDCANCEL) {
                 DestroyWindow(w);
             }
+            return 0;
+        }
+        case WM_DPICHANGED: {   // auf einen Bildschirm mit anderer Skalierung gezogen: neu aufbauen, Eingaben behalten
+            g.s = collect();
+            bool autostart = checked(kIdAutostart);
+            std::wstring games;
+            {
+                wchar_t buf[4096] = {0};
+                GetDlgItemTextW(w, kIdGames, buf, 4095);
+                games = buf;
+            }
+            while (HWND child = GetWindow(w, GW_CHILD)) DestroyWindow(child);
+            g.dpi = HIWORD(wp) >= 48 ? HIWORD(wp) : 96;
+            makeFonts();
+            build(w);
+            check(kIdAutostart, autostart);
+            SetDlgItemTextW(w, kIdGames, games.c_str());
+            const RECT* r = reinterpret_cast<const RECT*>(lp);
+            SetWindowPos(w, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
         }
         case WM_CTLCOLORSTATIC: {
@@ -187,14 +219,7 @@ void showSettingsWindow(HINSTANCE inst, const Settings& current, std::function<v
     UINT dx = 96, dy = 96;
     if (auto fn = (GetDpiForMonitorFn)(void*)GetProcAddress(LoadLibraryW(L"shcore.dll"), "GetDpiForMonitor")) fn(mon, 0, &dx, &dy);
     g.dpi = dx >= 48 ? dx : 96;
-    NONCLIENTMETRICSW ncm{};
-    ncm.cbSize = sizeof(ncm);
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-    LOGFONTW lf = ncm.lfMessageFont;
-    lf.lfHeight = -MulDiv(9, (int)g.dpi, 72);
-    g.font = CreateFontIndirectW(&lf);
-    lf.lfWeight = FW_SEMIBOLD;
-    g.bold = CreateFontIndirectW(&lf);
+    makeFonts();
     RECT r{0, 0, px(372), px(436)};   // Inhalt endet bei y = 420 (Knöpfe)
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
     AdjustWindowRectEx(&r, style, FALSE, 0);
