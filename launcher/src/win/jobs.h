@@ -8,6 +8,7 @@
 #include <string>
 
 #include "../core/catalog.h"
+#include "net.h"
 
 namespace lamp {
 
@@ -34,7 +35,8 @@ public:
     bool busy() const;
     bool setupRunning() const;                       // gerade ist ein Setup-Fenster offen
     bool cancel(const std::string& appId);           // aus der Warteschlange nehmen oder Download abbrechen
-    void stop();                                     // beim Beenden: Downloads abbrechen, Setups laufen weiter
+    bool stop(DWORD waitMs);                         // beim Beenden: Downloads abbrechen, Setups laufen weiter.
+                                                     // false: der Thread läuft noch – dann das Objekt nicht freigeben
 
     static std::wstring packageRoot(const std::string& appId);
 
@@ -55,9 +57,9 @@ private:
     mutable CRITICAL_SECTION cs_;
     std::deque<Job> queue_;
     std::string current_;
-    std::atomic<bool> cancelCurrent_{false};
+    DownloadCancel cancel_;                          // Abbruch des laufenden Downloads
     std::atomic<bool> quit_{false};
-    std::atomic<bool> setupRunning_{false};
+    std::atomic<bool> setupRunning_{false};          // nur unter cs_ setzen
 };
 
 }  // namespace lamp

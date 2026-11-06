@@ -42,8 +42,7 @@ DWORD WINAPI waitThenRefresh(LPVOID p) {
 Jobs::Jobs() { InitializeCriticalSection(&cs_); }
 
 Jobs::~Jobs() {
-    stop();
-    DeleteCriticalSection(&cs_);
+    if (stop(2000)) DeleteCriticalSection(&cs_);   // läuft der Thread noch, bleibt alles stehen (Prozessende)
 }
 
 std::wstring Jobs::packageRoot(const std::string& appId) { return joinPath(joinPath(dataDir(), L"packages"), widen(appId)); }
@@ -55,16 +54,20 @@ void Jobs::start(HWND notify) {
     thread_ = CreateThread(nullptr, 0, threadMain, this, 0, nullptr);
 }
 
-void Jobs::stop() {
-    if (!thread_) return;
+bool Jobs::stop(DWORD waitMs) {
+    if (!thread_) return true;
     quit_ = true;
-    cancelCurrent_ = true;
+    cancel_.cancel();   // schließt auch eine hängende Verbindung
     SetEvent(g_quit);
     SetEvent(wake_);
-    WaitForSingleObject(thread_, 5000);
+    if (WaitForSingleObject(thread_, waitMs) != WAIT_OBJECT_0) {
+        logLine(L"Arbeits-Thread reagiert nicht – Launcher wird trotzdem beendet");
+        return false;   // Thread, Ereignis und Sperre bleiben gültig, bis der Prozess endet
+    }
     CloseHandle(thread_);
     CloseHandle(wake_);
     thread_ = nullptr;
+    return true;
 }
 
 void Jobs::add(JobKind kind, const cat::App& app) {
@@ -105,7 +108,7 @@ bool Jobs::cancel(const std::string& appId) {
             break;
         }
     if (!done && current_ == appId && !setupRunning_) {
-        cancelCurrent_ = true;   // greift beim nächsten Download-Stück
+        cancel_.cancel();   // bricht den Download sofort ab; vor dem Setup wird noch einmal geprüft
         done = true;
     }
     LeaveCriticalSection(&cs_);
@@ -137,7 +140,7 @@ void Jobs::loop() {
             job = queue_.front();
             queue_.pop_front();
             current_ = job.app.id;
-            cancelCurrent_ = false;
+            cancel_.reset();
             have = true;
         }
         LeaveCriticalSection(&cs_);
@@ -164,7 +167,7 @@ bool Jobs::ensurePackage(const Job& job, std::wstring& dir, std::wstring& err) {
     std::string zipData;
     ULONGLONG lastPost = 0;
     bool ok = download(widen(app.url), zipData, err, [&](uint64_t done, uint64_t total) {
-        if (cancelCurrent_) return false;
+        if (cancel_.cancelled()) return false;
         if (!total) total = app.size;
         ULONGLONG now = GetTickCount64();
         if (total && now - lastPost > 80) {
@@ -172,7 +175,7 @@ bool Jobs::ensurePackage(const Job& job, std::wstring& dir, std::wstring& err) {
             post(job, JobPhase::Download, double(done) / double(total));
         }
         return true;
-    });
+    }, 64u << 20, &cancel_);
     if (!ok) {
         err = L"Download fehlgeschlagen: " + err;
         return false;
@@ -257,25 +260,42 @@ void Jobs::run(const Job& job) {
     }
     if (!ensurePackage(job, dir, err)) {
         logLine(L"%ls: %ls", widen(app.name).c_str(), err.c_str());
-        post(job, JobPhase::Finished, -1, false, cancelCurrent_ ? L"abgebrochen" : err);
+        post(job, JobPhase::Finished, -1, false, cancel_.cancelled() ? L"abgebrochen" : err);
         return;
     }
     if (quit_) return;
+    // Ab hier lässt sich nichts mehr abbrechen: Abbruchwunsch und Setup-Start unter derselben Sperre entscheiden
+    EnterCriticalSection(&cs_);
+    bool cancelled = cancel_.cancelled();
+    if (!cancelled && cmd.wait) setupRunning_ = true;
+    LeaveCriticalSection(&cs_);
+    if (cancelled) {
+        post(job, JobPhase::Finished, -1, false, L"abgebrochen");
+        return;
+    }
     post(job, JobPhase::Setup);
     HANDLE proc = startScript(dir, widen(cmd.script), widen(cmd.args), err);
     if (!proc) {
+        setupRunning_ = false;
         post(job, JobPhase::Finished, -1, false, err);
         return;
     }
     if (!cmd.wait) {   // z. B. Einstellungsmenü: nicht blockieren
-        CreateThread(nullptr, 0, waitThenRefresh, new Waiter{proc, hwnd_}, 0, nullptr);
+        auto* w = new Waiter{proc, hwnd_};
+        HANDLE t = CreateThread(nullptr, 0, waitThenRefresh, w, 0, nullptr);
+        if (t) CloseHandle(t);
+        else {
+            CloseHandle(proc);
+            delete w;
+        }
         post(job, JobPhase::Finished, -1, true);
         return;
     }
-    setupRunning_ = true;
     HANDLE hs[2] = {proc, g_quit};
     DWORD w = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
+    EnterCriticalSection(&cs_);
     setupRunning_ = false;
+    LeaveCriticalSection(&cs_);
     DWORD code = 0;
     GetExitCodeProcess(proc, &code);
     CloseHandle(proc);

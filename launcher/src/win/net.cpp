@@ -36,18 +36,59 @@ std::wstring winhttpError(DWORD e) {
     }
 }
 
-bool isLocalPath(const std::wstring& url) {
-    if (url.rfind(L"https://", 0) == 0 || url.rfind(L"http://", 0) == 0) return false;
-    return true;
-}
+std::atomic<bool> g_allowLocal{false};
+
+bool startsWith(const std::wstring& s, const wchar_t* prefix) { return s.rfind(prefix, 0) == 0; }
+
+// Request-Handle schließen – außer ein Abbruch hat es schon geschlossen
+struct RequestGuard {
+    HINTERNET h = nullptr;
+    DownloadCancel* cancel = nullptr;
+    ~RequestGuard() {
+        if (h && (!cancel || cancel->detach())) WinHttpCloseHandle(h);
+    }
+};
 
 }  // namespace
 
-bool download(const std::wstring& url, std::string& out, std::wstring& error, const Progress& progress, size_t maxBytes) {
+void DownloadCancel::cancel() {
+    EnterCriticalSection(&cs_);
+    cancelled_ = true;
+    if (request_) {   // bricht auch ein blockierendes WinHttpReadData ab
+        WinHttpCloseHandle(static_cast<HINTERNET>(request_));
+        request_ = nullptr;
+    }
+    LeaveCriticalSection(&cs_);
+}
+
+bool DownloadCancel::attach(void* request) {
+    EnterCriticalSection(&cs_);
+    bool ok = !cancelled_;
+    if (ok) request_ = request;
+    LeaveCriticalSection(&cs_);
+    return ok;
+}
+
+bool DownloadCancel::detach() {
+    EnterCriticalSection(&cs_);
+    bool own = request_ != nullptr;
+    request_ = nullptr;
+    LeaveCriticalSection(&cs_);
+    return own;
+}
+
+void allowLocalSources(bool allow) { g_allowLocal = allow; }
+
+bool download(const std::wstring& url, std::string& out, std::wstring& error, const Progress& progress, size_t maxBytes, DownloadCancel* cancel) {
     out.clear();
     error.clear();
-    if (isLocalPath(url)) {   // Testbetrieb: Katalog/Pakete aus einem Ordner
-        std::wstring path = url.rfind(L"file:///", 0) == 0 ? url.substr(8) : url;
+    const bool isHttps = startsWith(url, L"https://"), isHttp = startsWith(url, L"http://");
+    if (!isHttps && !g_allowLocal) {   // im Normalbetrieb nur HTTPS – keine Dateipfade, keine Netzwerkfreigaben
+        error = L"unsichere Adresse abgelehnt (nur https://)";
+        return false;
+    }
+    if (!isHttps && !isHttp) {   // Testbetrieb: Katalog/Pakete aus einem Ordner
+        std::wstring path = startsWith(url, L"file:///") ? url.substr(8) : url;
         for (wchar_t& c : path)
             if (c == L'/') c = L'\\';
         if (!readFile(path, out, maxBytes)) {
@@ -88,18 +129,28 @@ bool download(const std::wstring& url, std::string& out, std::wstring& error, co
 
     Handle conn;
     conn.h = WinHttpConnect(session.h, host, uc.nPort, 0);
-    Handle req;
+    RequestGuard req;
     if (conn.h)
         req.h = WinHttpOpenRequest(conn.h, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, https ? WINHTTP_FLAG_SECURE : 0);
     if (!req.h) {
         error = winhttpError(GetLastError());
         return false;
     }
+    if (cancel) {
+        if (!cancel->attach(req.h)) {
+            WinHttpCloseHandle(req.h);
+            req.h = nullptr;
+            error = L"abgebrochen";
+            return false;
+        }
+        req.cancel = cancel;
+    }
+    auto failed = [&](DWORD e) { return cancel && cancel->cancelled() ? std::wstring(L"abgebrochen") : winhttpError(e); };
     DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof redirect);
     if (!WinHttpSendRequest(req.h, L"Cache-Control: no-cache\r\n", DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(req.h, nullptr)) {
-        error = winhttpError(GetLastError());
+        error = failed(GetLastError());
         return false;
     }
     DWORD status = 0, size = sizeof status;
@@ -121,7 +172,7 @@ bool download(const std::wstring& url, std::string& out, std::wstring& error, co
     for (;;) {
         DWORD avail = 0;
         if (!WinHttpQueryDataAvailable(req.h, &avail)) {
-            error = winhttpError(GetLastError());
+            error = failed(GetLastError());
             return false;
         }
         if (avail == 0) break;
@@ -133,7 +184,7 @@ bool download(const std::wstring& url, std::string& out, std::wstring& error, co
         out.resize(old + avail);
         DWORD got = 0;
         if (!WinHttpReadData(req.h, &out[old], avail, &got)) {
-            error = winhttpError(GetLastError());
+            error = failed(GetLastError());
             return false;
         }
         out.resize(old + got);

@@ -116,7 +116,7 @@ bool installAndRelaunch(const std::wstring& extraArgs) {
     return launch(target, L"--welcome" + (extraArgs.empty() ? L"" : L" " + extraArgs));
 }
 
-bool applyUpdate(const std::string& exeData, std::wstring& err) {
+bool applyUpdate(const std::string& exeData, std::wstring& err, const std::wstring& extraArgs) {
     std::wstring self = selfPath();
     std::wstring dir = parentDir(self);
     std::wstring fresh = joinPath(dir, L"EfficientLamp.new.exe");
@@ -137,7 +137,7 @@ bool applyUpdate(const std::string& exeData, std::wstring& err) {
         return false;
     }
     logLine(L"Launcher aktualisiert, starte neu");
-    if (!launch(self, L"--updated")) {
+    if (!launch(self, L"--updated" + (extraArgs.empty() ? L"" : L" " + extraArgs))) {
         err = L"neue Version konnte nicht gestartet werden";
         return false;
     }
@@ -154,13 +154,16 @@ bool uninstallSelf(HWND owner) {
     DeleteFileW(shortcutPath().c_str());
     RegDeleteTreeW(HKEY_CURRENT_USER, kUninstallKey);
     deleteTree(dataDir());
+    // Erst die Meldung, dann das Aufräumen starten – die laufende .exe kann sich nicht selbst löschen,
+    // deshalb versucht ein kleiner Hilfsprozess es bis zu 40 Sekunden lang, bis dieser Prozess beendet ist.
+    MessageBoxW(owner, L"efficient lamp wurde entfernt.", L"efficient lamp", MB_OK | MB_ICONINFORMATION);
     std::wstring dir = installDir();
     if (dirExists(dir)) {
-        // Die laufende .exe kann sich nicht selbst löschen: kurz warten lassen, dann Ordner entfernen
         wchar_t sys[MAX_PATH];
         GetSystemDirectoryW(sys, MAX_PATH);
         std::wstring cmd = joinPath(sys, L"cmd.exe");
-        std::wstring line = L"\"" + cmd + L"\" /d /c ping -n 3 127.0.0.1 >nul & rd /s /q \"" + dir + L"\"";
+        std::wstring line = L"\"" + cmd + L"\" /d /c \"for /l %i in (1,1,20) do (ping -n 3 127.0.0.1 >nul & rd /s /q \"" + dir +
+                            L"\" 2>nul & if not exist \"" + dir + L"\\\" exit)\"";
         STARTUPINFOW si = {};
         si.cb = sizeof si;
         si.dwFlags = STARTF_USESHOWWINDOW;
@@ -173,7 +176,6 @@ bool uninstallSelf(HWND owner) {
             CloseHandle(pi.hProcess);
         }
     }
-    MessageBoxW(owner, L"efficient lamp wurde entfernt.", L"efficient lamp", MB_OK | MB_ICONINFORMATION);
     return true;
 }
 

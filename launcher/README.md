@@ -24,6 +24,17 @@ Ein einzelnes, statisch gelinktes Win32-Programm (C++17, GDI+), ca. 0,7 MB, für
 Aufträge laufen nacheinander. „Alle aktualisieren“ reiht alle Updates ein. Beim Selbst-Update wird die neue Version
 geprüft, die laufende `.exe` umbenannt (`EfficientLamp.old.exe`), die neue an ihren Platz gelegt und gestartet.
 
+## Sicherheit
+
+- Geladen wird nur über **HTTPS** von GitHub; jede Datei muss zu Größe und SHA-256 aus `catalog.json` passen.
+- Der Katalog darf nur Skripte **aus dem jeweiligen Paket** starten und Programme nur **aus dem Installationsordner**
+  des Programms (unter `%LOCALAPPDATA%`/`%APPDATA%`); Argumente ohne Zeichen, mit denen sich in `cmd.exe` Befehle
+  verketten oder Variablen einsetzen lassen. Fehlerhafte Einträge werden übersprungen.
+- Entpackt wird nur der Programmordner aus dem ZIP; Namen mit `..`, Laufwerken oder Windows-Gerätenamen (`CON`, `NUL` …)
+  werden abgelehnt.
+- Kennt ein älterer Launcher das Format einer neuen Programmliste nicht, lässt er die Programme in Ruhe und bietet
+  nur das eigene Update an.
+
 ## Befehlszeile
 
 | Aufruf | Wirkung |
@@ -31,7 +42,7 @@ geprüft, die laufende `.exe` umbenannt (`EfficientLamp.old.exe`), die neue an i
 | `EfficientLamp.exe` | normal starten (läuft schon einer, wird dessen Fenster nach vorne geholt) |
 | `--portable` | nicht einrichten, direkt aus dem aktuellen Ordner laufen |
 | `--uninstall` | Launcher entfernen (Startmenü, Eintrag, Zwischenspeicher); die Programme bleiben |
-| `--catalog <URL oder Pfad>` | andere Programmliste verwenden (Tests, Spiegel) |
+| `--catalog <URL oder Pfad>` | Testbetrieb: andere Programmliste (auch lokale Dateien); der Zwischenspeicher bleibt unberührt |
 | `--theme dark` / `--theme light` | Farbschema erzwingen (sonst wie Windows) |
 | `--render <datei.png> [--size 760x600] [--scale 200] [--demo]` | Fenster nur als Bild zeichnen |
 

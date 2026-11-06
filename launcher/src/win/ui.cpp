@@ -270,7 +270,9 @@ public:
         if (opt.updated) setBanner(BannerKind::Updated, std::wstring(L"Der Launcher ist jetzt auf Version ") + kVersion + L".");
     }
 
-    ~Ui() { jobs_.stop(); }
+    ~Ui() {
+        if (jobs_->stop(1500)) delete jobs_;   // sonst bewusst stehen lassen: der Thread endet mit dem Prozess
+    }
 
     bool create() {
         WNDCLASSEXW wc = {};
@@ -312,7 +314,8 @@ public:
         hwnd_ = CreateWindowExW(0, kWindowClass, kAppName, WS_OVERLAPPEDWINDOW, x, y, w, h, nullptr, nullptr, inst_, this);
         if (!hwnd_) return false;
         applyWindowTheme();
-        jobs_.start(hwnd_);
+        jobs_->start(hwnd_);
+        if (banner_ == BannerKind::Welcome || banner_ == BannerKind::Updated) SetTimer(hwnd_, kTimerBanner, 12000, nullptr);
         refreshStates();
         fetchCatalog();
         ShowWindow(hwnd_, SW_SHOWNORMAL);
@@ -371,6 +374,7 @@ private:
 
     std::unique_ptr<Bitmap> logo_;
     std::map<std::string, std::unique_ptr<Bitmap>> tiles_;
+    std::map<std::string, std::unique_ptr<Bitmap>> scaled_;   // Bilder in Zielgröße (je DPI einmal berechnet)
     std::unique_ptr<FontFamily> famText_, famSemi_;
     bool semiIsBold_ = false;
     std::unique_ptr<Font> fWord_, fTitle_, fBody_, fSmall_, fSmallBold_, fButton_, fEmpty_;
@@ -379,15 +383,18 @@ private:
     std::vector<AppView> apps_;
     CatalogState catalogState_ = CatalogState::Loading;
     std::wstring catalogError_;
+    bool catalogOffline_ = false;   // Fehler beim Laden (true) oder beim Lesen (false)
+    bool catalogTooNew_ = false;    // Programmliste in einem Format, das dieser Launcher nicht kennt
     std::wstring checkedAt_;
     std::wstring cacheTime_;
     bool fetching_ = false;
+    bool minimized_ = false;
 
     BannerKind banner_ = BannerKind::None;
     std::wstring bannerText_;
     bool selfUpdating_ = false;
 
-    Jobs jobs_;
+    Jobs* jobs_ = new Jobs();
     std::vector<Hit> hits_;
     std::vector<RectF> cardRects_;   // Kartenflächen der letzten Zeichnung (Index = Programm)
     float viewTop_ = 0, viewBottom_ = 0;
@@ -408,7 +415,34 @@ private:
     int px(float dip) const { return int(std::lround(dip * scale_)); }
     float s(float dip) const { return dip * scale_; }
 
+    // Bild einmal hochwertig auf die Zielgröße bringen und dann nur noch 1:1 kopieren
+    Bitmap* scaledImage(const std::string& key, Bitmap* src, int size) {
+        std::string k = key + "@" + std::to_string(size);
+        auto it = scaled_.find(k);
+        if (it != scaled_.end()) return it->second.get();
+        auto* b = new Bitmap(size, size, PixelFormat32bppPARGB);
+        {
+            Graphics g(b);
+            g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+            g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
+            ImageAttributes ia;
+            ia.SetWrapMode(WrapModeTileFlipXY);   // keine hellen Ränder an den Kanten
+            g.DrawImage(src, Rect(0, 0, size, size), 0, 0, int(src->GetWidth()), int(src->GetHeight()), UnitPixel, &ia);
+        }
+        scaled_[k].reset(b);
+        return b;
+    }
+
+    void blit(Graphics& g, Bitmap* b, float x, float y) {
+        InterpolationMode old = g.GetInterpolationMode();
+        g.SetInterpolationMode(InterpolationModeNearestNeighbor);
+        g.DrawImage(b, Rect(int(std::lround(x)), int(std::lround(y)), int(b->GetWidth()), int(b->GetHeight())), 0, 0, int(b->GetWidth()),
+                    int(b->GetHeight()), UnitPixel);
+        g.SetInterpolationMode(old);
+    }
+
     void setScale(UINT dpi) {
+        scaled_.clear();
         dpi_ = dpi ? dpi : 96;
         scale_ = float(dpi_) / 96.0f;
         if (!famText_) {
@@ -468,6 +502,16 @@ private:
             logLine(L"Katalog ungültig: %ls", err.c_str());
             return false;
         }
+        for (const std::string& why : c.skipped) logLine(L"Katalog: Eintrag übersprungen – %ls", widen(why).c_str());
+        if (!c.supported) {
+            // Neueres Format: Programme nicht anfassen (der bisherige Stand bleibt), aber Launcher-Update anbieten
+            catalogTooNew_ = true;
+            catalog_.launcher = c.launcher;
+            logLine(L"Katalog-Format %d ist neuer als dieser Launcher", c.schema);
+            updateLauncherBanner();
+            return true;
+        }
+        catalogTooNew_ = false;
         std::vector<AppView> next;
         for (const cat::App& a : c.apps) {
             AppView v;
@@ -520,14 +564,16 @@ private:
         std::unique_ptr<CatalogResult> res(r);
         fetching_ = false;
         std::wstring err;
-        if (res->ok && applyCatalogText(res->text, !opt_.demo, err)) {
+        if (res->ok && applyCatalogText(res->text, !opt_.demo && opt_.catalogUrl.empty(), err)) {
             catalogState_ = CatalogState::Ok;
+            catalogOffline_ = false;
             catalogError_.clear();
             checkedAt_ = timeNow();
             logLine(L"Katalog geladen: %ls, %u Programme", widen(catalog_.release).c_str(), unsigned(catalog_.apps.size()));
         } else {
             catalogState_ = CatalogState::Failed;
-            catalogError_ = res->ok ? L"Programmliste ist beschädigt: " + err : res->error;
+            catalogOffline_ = !res->ok;
+            catalogError_ = res->ok ? L"Programmliste unlesbar: " + err : res->error;
             logLine(L"Katalog nicht geladen: %ls", catalogError_.c_str());
         }
         refreshStates();
@@ -539,7 +585,10 @@ private:
         const cat::Launcher& l = catalog_.launcher;
         bool newer = !l.version.empty() && !l.url.empty() && l.sha256.size() == 64 && cat::compareVersions(l.version, kVersionA) > 0;
         if (newer && banner_ != BannerKind::Error)
-            setBanner(BannerKind::LauncherUpdate, L"Version " + widen(l.version) + L" des Launchers ist da.");
+            setBanner(BannerKind::LauncherUpdate, catalogTooNew_ ? L"Für die neue Programmliste braucht es Launcher " + widen(l.version) + L"."
+                                                                 : L"Version " + widen(l.version) + L" des Launchers ist da.");
+        else if (catalogTooNew_ && banner_ != BannerKind::Error)
+            setBanner(BannerKind::Error, L"Die Programmliste ist neuer als dieser Launcher – bitte EfficientLamp.exe neu von GitHub laden.");
         else if (!newer && banner_ == BannerKind::LauncherUpdate)
             setBanner(BannerKind::None, L"");
     }
@@ -597,11 +646,13 @@ private:
         return n;
     }
 
+    // Laufende Animation nur für kurze Phasen (Suche, Entpacken, Launcher-Update). Während ein Setup-Fenster offen ist
+    // oder ein Auftrag wartet, steht die Anzeige still – kein Neuzeichnen im Hintergrund.
     bool anyAnimation() const {
-        if (fetching_) return true;
+        if (fetching_ || banner_ == BannerKind::Updating) return true;
         for (const AppView& v : apps_)
-            if (v.busy && v.progress < 0) return true;
-        return banner_ == BannerKind::Updating;
+            if (v.busy && v.phase == JobPhase::Extract) return true;
+        return false;
     }
 
     void onJob(JobEvent* e) {
@@ -642,14 +693,14 @@ private:
     // ---------------------------------------------------------- Aktionen
 
     void startJob(AppView& v, JobKind kind) {
-        if (jobs_.pending(v.app.id)) return;
+        if (jobs_->pending(v.app.id)) return;
         v.error.clear();
         v.note.clear();
         v.busy = true;
         v.kind = kind;
         v.phase = JobPhase::Queued;
         v.progress = -1;
-        jobs_.add(kind, v.app);
+        jobs_->add(kind, v.app);
         invalidate();
     }
 
@@ -669,7 +720,7 @@ private:
         if (i < 0 || i >= int(apps_.size())) return;
         AppView& v = apps_[size_t(i)];
         if (v.busy) {
-            if (jobs_.cancel(v.app.id)) {
+            if (jobs_->cancel(v.app.id)) {
                 v.note.clear();
                 invalidate();
             }
@@ -679,9 +730,20 @@ private:
         else openApp(v);
     }
 
-    void uninstallApp(AppView& v) {
-        std::wstring q = L"" + widen(v.app.name) + L" deinstallieren?\n\nEs öffnet sich das Setup-Fenster des Programms und führt durch die Schritte.";
-        if (MessageBoxW(hwnd_, q.c_str(), kAppName, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES) startJob(v, JobKind::Uninstall);
+    // Während eines Menüs oder einer Rückfrage kann eine neue Programmliste eintreffen und apps_ ersetzen –
+    // deshalb danach immer über die ID neu suchen statt eine Referenz festzuhalten.
+    AppView* findApp(const std::string& id) {
+        for (AppView& v : apps_)
+            if (v.app.id == id) return &v;
+        return nullptr;
+    }
+
+    void uninstallApp(const std::string& id) {
+        AppView* v = findApp(id);
+        if (!v) return;
+        std::wstring q = widen(v->app.name) + L" deinstallieren?\n\nEs öffnet sich das Setup-Fenster des Programms und führt durch die Schritte.";
+        if (MessageBoxW(hwnd_, q.c_str(), kAppName, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
+        if ((v = findApp(id)) != nullptr) startJob(*v, JobKind::Uninstall);
     }
 
     void updateAll() {
@@ -719,10 +781,17 @@ private:
     void onSelfUpdate(SelfUpdateResult* r) {
         std::unique_ptr<SelfUpdateResult> res(r);
         std::wstring err = res->error;
-        if (res->ok && applyUpdate(res->data, err)) {
-            jobs_.stop();
-            DestroyWindow(hwnd_);
-            return;
+        if (res->ok) {
+            if (jobs_->busy()) {
+                err = L"bitte erst die laufenden Aufträge abwarten";
+            } else {
+                jobs_->stop(1500);   // vor dem Neustart: Arbeits-Thread beenden
+                if (applyUpdate(res->data, err, opt_.relaunchArgs)) {
+                    DestroyWindow(hwnd_);
+                    return;
+                }
+                jobs_->start(hwnd_);   // Update fehlgeschlagen: weiterarbeiten
+            }
         }
         selfUpdating_ = false;
         logLine(L"Launcher-Update fehlgeschlagen: %ls", err.c_str());
@@ -731,6 +800,7 @@ private:
 
     void showAppMenu(int i, const RectF& anchor) {
         if (i < 0 || i >= int(apps_.size())) return;
+        const std::string id = apps_[size_t(i)].app.id;
         AppView& v = apps_[size_t(i)];
         HMENU m = CreatePopupMenu();
         bool busy = v.busy;
@@ -752,13 +822,15 @@ private:
         ClientToScreen(hwnd_, &pt);
         int cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, hwnd_, nullptr);
         DestroyMenu(m);
+        AppView* cur = findApp(id);   // die Liste kann sich während des Menüs geändert haben
+        if (!cur || cmd == 0) return;
         switch (cmd) {
-            case kMenuOpen: openApp(v); break;
-            case kMenuFolder: openFolder(v.inst.dir); break;
-            case kMenuReadme: openUrl(widen(v.app.page)); break;
+            case kMenuOpen: openApp(*cur); break;
+            case kMenuFolder: openFolder(cur->inst.dir); break;
+            case kMenuReadme: openUrl(widen(cur->app.page)); break;
             case kMenuInstall:
-            case kMenuReinstall: startJob(v, JobKind::Install); break;
-            case kMenuUninstall: uninstallApp(v); break;
+            case kMenuReinstall: startJob(*cur, JobKind::Install); break;
+            case kMenuUninstall: uninstallApp(id); break;
             default: break;
         }
     }
@@ -770,7 +842,7 @@ private:
         AppendMenuW(m, MF_STRING, kMenuLog, L"Protokoll anzeigen");
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(m, MF_STRING, kMenuAbout, L"Über efficient lamp");
-        if (isInstalledCopy()) AppendMenuW(m, MF_STRING, kMenuRemoveLauncher, L"Launcher deinstallieren …");
+        if (opt_.installedCopy) AppendMenuW(m, MF_STRING, kMenuRemoveLauncher, L"Launcher deinstallieren …");
         POINT pt = {LONG(anchor.X + anchor.Width), LONG(anchor.Y + anchor.Height + s(4))};
         ClientToScreen(hwnd_, &pt);
         int cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN | TPM_TOPALIGN, pt.x, pt.y, hwnd_, nullptr);
@@ -785,7 +857,7 @@ private:
             }
             case kMenuAbout: showAbout(); break;
             case kMenuRemoveLauncher:
-                if (jobs_.busy()) {
+                if (jobs_->busy()) {
                     MessageBoxW(hwnd_, L"Bitte erst warten, bis die laufenden Aufträge fertig sind.", kAppName, MB_OK | MB_ICONINFORMATION);
                 } else if (uninstallSelf(hwnd_)) {
                     DestroyWindow(hwnd_);
@@ -921,14 +993,15 @@ private:
     void drawTile(Graphics& g, const AppView& v, const RectF& r) {
         auto it = tiles_.find(v.app.id);
         if (it != tiles_.end() && it->second) {
-            g.DrawImage(it->second.get(), r);
+            blit(g, scaledImage("tile:" + v.app.id, it->second.get(), int(std::lround(r.Width))), r.X, r.Y);
             return;
         }
         // Unbekanntes Programm: farbige Kachel mit Anfangsbuchstaben
         uint32_t col = 0xF59E0B;
         if (v.app.color.size() == 7 && v.app.color[0] == '#') col = uint32_t(strtoul(v.app.color.c_str() + 1, nullptr, 16));
         fillRound(g, r, r.Width * 0.22f, rgb(col));
-        std::wstring letter = widen(v.app.name.substr(0, 1));
+        std::wstring wname = widen(v.app.name), letter;
+        if (!wname.empty()) letter = wname.substr(0, (wname.size() > 1 && IS_HIGH_SURROGATE(wname[0])) ? 2 : 1);
         Font f(famSemi_.get(), r.Height * 0.5f, semiIsBold_ ? FontStyleBold : FontStyleRegular, UnitPixel);
         text(g, letter, f, rgb(0xFFFFFF), r, StringAlignmentCenter);
     }
@@ -993,7 +1066,8 @@ private:
         }
         float bw = buttonWidth(g, label, 118);
         RectF prim(more.X - s(8) - bw, more.Y, bw, s(34));
-        button(g, prim, label, HitKind::Primary, i, accent, enabled && catalogState_ != CatalogState::Loading ? true : enabled);
+        if (accent && catalogState_ == CatalogState::Loading) enabled = false;   // erst die aktuelle Liste abwarten
+        button(g, prim, label, HitKind::Primary, i, accent, enabled);
         iconButton(g, more, HitKind::More, i, 0);
 
         // Texte
@@ -1022,10 +1096,14 @@ private:
 
         // Fußzeile der Karte: Fortschritt, Fehler, Meldung oder Versionsinfo
         RectF meta(x0, c.Y + c.Height - s(28), tw, s(18));
-        if (v.busy) {
+        if (v.busy && (v.phase == JobPhase::Download || v.phase == JobPhase::Extract)) {
             float barW = std::min(s(170), tw * 0.42f);
             progressBar(g, RectF(x0, meta.Y + (meta.Height - s(6)) / 2, barW, s(6)), v.phase == JobPhase::Download ? v.progress : -1);
             text(g, phaseText(v), *fSmall_, theme_.text2, RectF(x0 + barW + s(12), meta.Y, tw - barW - s(12), meta.Height));
+        } else if (v.busy) {   // wartet oder Setup-Fenster offen: ruhige Anzeige ohne Animation
+            SolidBrush dot(v.phase == JobPhase::Setup ? theme_.accent : theme_.text3);
+            g.FillEllipse(&dot, x0, meta.Y + meta.Height / 2 - s(3.5f), s(7), s(7));
+            text(g, phaseText(v), *fSmall_, theme_.text2, RectF(x0 + s(14), meta.Y, tw - s(14), meta.Height));
         } else if (!v.error.empty()) {
             text(g, v.error, *fSmall_, theme_.danger, meta);
         } else if (!v.note.empty() && GetTickCount64() < v.noteUntil) {
@@ -1059,7 +1137,7 @@ private:
 
         // Kopfzeile: Logo, Name, Status, Knöpfe
         float headerH = s(92);
-        if (logo_) g.DrawImage(logo_.get(), RectF(M, s(24), s(44), s(44)));
+        if (logo_) blit(g, scaledImage("logo", logo_.get(), px(44)), M, s(24));
         float wx = M + s(44) + s(14);
         std::wstring w1 = L"efficient", w2 = L"lamp";
         float w1W = textWidth(g, w1, *fWord_);
@@ -1071,7 +1149,8 @@ private:
         int updates = updateCount();
         if (catalogState_ == CatalogState::Loading) status = apps_.empty() ? L"Programmliste wird geladen …" : L"Suche nach Updates …";
         else if (catalogState_ == CatalogState::Failed && apps_.empty()) status = L"Programmliste nicht geladen";
-        else if (catalogState_ == CatalogState::Failed) status = L"Offline – zeige den Stand vom " + cacheTime_;
+        else if (catalogState_ == CatalogState::Failed)
+            status = catalogOffline_ ? L"Offline – zeige den Stand vom " + cacheTime_ : catalogError_;
         else if (updates > 0) {
             status = updates == 1 ? L"1 Update verfügbar" : std::to_wstring(updates) + L" Updates verfügbar";
             statusCol = accentText(theme_);
@@ -1152,13 +1231,9 @@ private:
             for (size_t i = 0; i < apps_.size(); ++i) {
                 RectF c(M, cy, W - 2 * M, cardH);
                 cardRects_.push_back(c);   // für jedes Programm, auch wenn es gerade nicht sichtbar ist
-                if (c.Y + c.Height >= view.Y && c.Y <= view.Y + view.Height) drawCard(g, int(i), c, view);
+                drawCard(g, int(i), c, view);   // unsichtbare Teile schneidet der Clip ab; Knöpfe bleiben per Tab erreichbar
                 cy += cardH + gap;
             }
-            // Treffer außerhalb des sichtbaren Bereichs unwirksam machen
-            for (Hit& h : hits_)
-                if ((h.kind == HitKind::Primary || h.kind == HitKind::More) && !(h.rc.Y >= view.Y - 1 && h.rc.Y + h.rc.Height <= view.Y + view.Height + 1))
-                    h.enabled = false;
             if (maxScroll > 0) {   // Scrollanzeige
                 float trackH = view.Height - s(8);
                 float thumbH = std::max(s(30), trackH * viewH_ / contentH_);
@@ -1173,7 +1248,7 @@ private:
         Pen line(theme_.border, 1);
         g.DrawLine(&line, M, fy, W - M, fy);
         std::wstring left = std::wstring(L"Launcher ") + kVersion;
-        if (!isInstalledCopy() && !opt_.renderPng.size()) left += L" · portabel";
+        if (!opt_.installedCopy && opt_.renderPng.empty()) left += L" · portabel";
         if (!catalog_.release.empty()) left += L" · Programmliste " + widen(catalog_.release);
         text(g, left, *fSmall_, theme_.text3, RectF(M, fy, W / 2, footerH));
         std::wstring link = L"Quellcode & Anleitungen auf GitHub";
@@ -1230,8 +1305,12 @@ private:
     // ---------------------------------------------------------- Eingabe
 
     int hitAt(int x, int y) const {
-        for (size_t i = hits_.size(); i-- > 0;)
-            if (hits_[i].rc.Contains(float(x), float(y))) return int(i);
+        for (size_t i = hits_.size(); i-- > 0;) {
+            const Hit& h = hits_[i];
+            bool inCard = h.kind == HitKind::Primary || h.kind == HitKind::More;
+            if (inCard && (y < viewTop_ || y >= viewBottom_)) continue;   // weggescrollte Teile sind nicht klickbar
+            if (h.rc.Contains(float(x), float(y))) return int(i);
+        }
         return -1;
     }
 
@@ -1256,12 +1335,9 @@ private:
         keyboardFocus_ = true;
         // sichtbar machen
         if (h.kind == HitKind::Primary || h.kind == HitKind::More) {
-            float top = h.rc.Y, bottom = h.rc.Y + h.rc.Height;
-            RECT rc;
-            GetClientRect(hwnd_, &rc);
-            float viewTop = rc.bottom - s(44) - viewH_, viewBottom = rc.bottom - s(44);
-            if (top < viewTop + s(40)) scrollY_ -= (viewTop + s(40) - top);
-            if (bottom > viewBottom - s(40)) scrollY_ += bottom - (viewBottom - s(40));
+            float top = h.rc.Y, bottom = h.rc.Y + h.rc.Height;   // Knopf mit etwas Luft ins Bild holen
+            if (top < viewTop_ + s(40)) scrollY_ -= (viewTop_ + s(40) - top);
+            if (bottom > viewBottom_ - s(40)) scrollY_ += bottom - (viewBottom_ - s(40));
         }
         invalidate();
     }
@@ -1289,7 +1365,17 @@ private:
         switch (msg) {
             case WM_PAINT: onPaint(); return 0;
             case WM_ERASEBKGND: return 1;
-            case WM_SIZE: invalidate(); return 0;
+            case WM_SIZE:
+                if (wp == SIZE_MINIMIZED) KillTimer(hwnd_, kTimerPoll);   // minimiert: gar nichts tun
+                else {
+                    if (minimized_) {
+                        SetTimer(hwnd_, kTimerPoll, 3000, nullptr);
+                        refreshStates();
+                    }
+                    invalidate();
+                }
+                minimized_ = wp == SIZE_MINIMIZED;
+                return 0;
             case WM_GETMINMAXINFO: {
                 auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
                 mmi->ptMinTrackSize.x = px(600);
@@ -1297,7 +1383,9 @@ private:
                 return 0;
             }
             case WM_DPICHANGED: {
+                float before = scale_;
                 setScale(HIWORD(wp));
+                scrollY_ *= scale_ / before;
                 const RECT* r = reinterpret_cast<const RECT*>(lp);
                 SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
                 invalidate();
@@ -1371,6 +1459,7 @@ private:
             }
             case WM_MOUSEWHEEL:
                 scrollY_ -= float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * s(60);
+                hover_ = hoverCard_ = -1;   // stimmt nach dem Verschieben nicht mehr – nächste Mausbewegung setzt es neu
                 invalidate();
                 return 0;
             case WM_KEYDOWN:
@@ -1403,15 +1492,14 @@ private:
             case WM_APP_REFRESH: refreshStates(); return 0;
             case WM_APP_SELFUPDATE: onSelfUpdate(reinterpret_cast<SelfUpdateResult*>(lp)); return 0;
             case WM_CLOSE:
-                if (jobs_.setupRunning()) {
+                if (jobs_->setupRunning()) {
                     if (MessageBoxW(hwnd_, L"Ein Setup-Fenster ist noch offen. Es läuft auch ohne den Launcher weiter.\n\nLauncher trotzdem schließen?", kAppName,
                                     MB_YESNO | MB_ICONQUESTION) != IDYES)
                         return 0;
-                } else if (jobs_.busy()) {
+                } else if (jobs_->busy()) {
                     if (MessageBoxW(hwnd_, L"Ein Download läuft noch. Abbrechen und schließen?", kAppName, MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
                 }
-                jobs_.stop();
-                DestroyWindow(hwnd_);
+                DestroyWindow(hwnd_);   // Aufträge beendet ~Ui (Downloads werden dabei abgebrochen)
                 return 0;
             case WM_DESTROY:
                 KillTimer(hwnd_, kTimerPoll);

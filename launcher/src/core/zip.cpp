@@ -2,6 +2,7 @@
 // kanonische Huffman-Codes, bitweise dekodiert – langsam genug egal, dafür kurz und gut prüfbar.
 #include "zip.h"
 
+#include <cctype>
 #include <cstring>
 
 namespace zip {
@@ -230,6 +231,20 @@ bool inflateRaw(const uint8_t* src, size_t len, std::string& out, size_t maxOut,
     return true;
 }
 
+namespace {
+
+// Windows-Gerätenamen (CON, NUL, COM1 …) sind auch mit Endung ("COM1.txt") keine normalen Dateien
+bool reservedDeviceName(const std::string& part) {
+    std::string base = part.substr(0, part.find('.'));
+    while (!base.empty() && base.back() == ' ') base.pop_back();
+    for (char& c : base) c = char(std::toupper((unsigned char)c));
+    if (base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || base == "CONIN$" || base == "CONOUT$") return true;
+    if (base.size() == 4 && (base.compare(0, 3, "COM") == 0 || base.compare(0, 3, "LPT") == 0) && std::isdigit((unsigned char)base[3])) return true;
+    return false;
+}
+
+}  // namespace
+
 bool safeName(const std::string& name) {
     if (name.empty() || name.size() > 400) return false;
     if (name[0] == '/' || name[0] == '\\') return false;
@@ -238,7 +253,9 @@ bool safeName(const std::string& name) {
     for (size_t i = 0; i <= name.size(); ++i) {
         if (i == name.size() || name[i] == '/' || name[i] == '\\') {
             std::string part = name.substr(start, i - start);
-            if (part == "..") return false;
+            if (part.empty() || part == "." || part == "..") return false;
+            if (part.back() == '.' || part.back() == ' ') return false;   // Windows schneidet das ab
+            if (reservedDeviceName(part)) return false;
             start = i + 1;
         } else if ((unsigned char)name[i] < 0x20 || std::strchr("<>:\"|?*", name[i])) {
             return false;

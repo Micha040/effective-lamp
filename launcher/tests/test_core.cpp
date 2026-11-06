@@ -109,6 +109,9 @@ static void testZip(const std::string& dir) {
         check(zip::safeName("DeskCats/Setup.ps1") && !zip::safeName("C:/Windows/x") && !zip::safeName("/etc/x") && !zip::safeName("a/../../b") &&
                   !zip::safeName("a\\..\\b"),
               "Namensprüfung");
+        check(!zip::safeName("COM1.tmp") && !zip::safeName("x/nul") && !zip::safeName("Con.txt") && !zip::safeName("a./b") && !zip::safeName("a /b") &&
+                  !zip::safeName("a//b") && zip::safeName("Konsole.txt") && zip::safeName("COM10.txt") && zip::safeName("x/null.txt"),
+              "Gerätenamen und Punkte/Leerzeichen am Ende abgelehnt");
     }
     check(zip::crc32("123456789", 9) == 0xCBF43926u, "CRC-32 Prüfwert");
     std::string err;
@@ -159,23 +162,39 @@ static void testCatalog(const std::string& real) {
         cat::Catalog cc;
         std::string e;
         bool ok = cat::parse(sampleCatalog(extra), cc, e);
-        check(!ok, what + " abgelehnt: " + e);
+        check(ok && cc.apps.size() == 1 && cc.skipped.size() == 1, what + " übersprungen: " + (cc.skipped.empty() ? e : cc.skipped[0]));
     };
     const std::string base0 = R"(,{"id": "x", "name": "X", "version": "1", "download": {"url": "https://e/x.zip", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, )";
     const std::string base = base0 + R"("detect": {"exe": "%LOCALAPPDATA%\\X\\x.exe"}, )";
     bad(base + R"("install": {"script": "..\\..\\evil.cmd"}})", "Skript außerhalb des Pakets");
     bad(base + R"("install": {"script": "Setup.cmd"}, "open": {"exe": "C:\\Windows\\System32\\cmd.exe"}})", "Programm außerhalb des Benutzerordners");
+    bad(base + R"("installDir": "%LOCALAPPDATA%\\X", "install": {"script": "Setup.cmd"}, "open": {"exe": "%LOCALAPPDATA%\\Microsoft\\WindowsApps\\winget.exe"}})",
+        "Programm außerhalb des eigenen Ordners");
     bad(base + R"("install": {"script": "Setup.cmd", "args": "& del *"}})", "Befehlsverkettung in args");
+    bad(base + R"("install": {"script": "Setup.cmd", "args": "-Name %USERNAME%"}})", "Umgebungsvariable in args");
+    bad(base + R"("install": {"script": "Setup.cmd", "args": "a\u0000b"}})", "Nullzeichen in args");
     bad(base0 + R"("install": {"script": "Setup.cmd"}, "detect": {"exe": "%LOCALAPPDATA%\\..\\x.exe"}})", "\"..\" im Pfad");
     bad(base0 + R"("install": {"script": "Setup.cmd"}})", "fehlende Erkennung");
+    bad(R"(,{"id": "y", "name": "Y", "version": "..", "download": {"url": "https://e/y.zip", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "detect": {"exe": "%APPDATA%\\y.exe"}, "install": {"script": "Setup.cmd"}})",
+        "Version \"..\"");
+    bad(R"(,{"id": "z", "name": "Z", "version": "1", "download": {"url": "https://e/z.zip", "size": -1, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "detect": {"exe": "%APPDATA%\\z.exe"}, "install": {"script": "Setup.cmd"}})",
+        "negative Größe");
     bad(R"(,{"id": "deskcats", "name": "D", "version": "1", "download": {"url": "u", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "detect": {"exe": "%APPDATA%\\d.exe"}, "install": {"script": "Setup.cmd"}})",
         "doppelte ID");
     bad(R"(,{"id": "Gross", "name": "D", "version": "1"})", "ungültige ID");
     {
         cat::Catalog cc;
         std::string e;
-        check(!cat::parse("{\"schema\": 2, \"apps\": []}", cc, e), "unbekanntes Katalog-Format abgelehnt: " + e);
+        bool ok = cat::parse("{\"schema\": 2, \"launcher\": {\"version\": \"2.0.0\", \"url\": \"https://e/l.exe\", \"size\": 5, "
+                             "\"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}, \"apps\": [{\"neu\": true}]}",
+                             cc, e);
+        check(ok && !cc.supported && cc.apps.empty() && cc.launcher.version == "2.0.0", "neueres Format: Programme ignoriert, Launcher-Update trotzdem gelesen");
+        check(!cat::parse("{\"schema\": 1.9, \"apps\": []}", cc, e), "Format 1.9 abgelehnt: " + e);
+        check(!cat::parse("[1, 2]", cc, e), "kein Objekt abgelehnt: " + e);
     }
+    check(cat::isValidVersion("1.0.0") && cat::isValidVersion("1.0.0-beta") && !cat::isValidVersion("..") && !cat::isValidVersion("1.") &&
+              !cat::isValidVersion("v1") && !cat::isValidVersion("1/2"),
+          "gültige und ungültige Versionen");
     if (!real.empty()) {
         std::string text = readFile(real);
         cat::Catalog rc;

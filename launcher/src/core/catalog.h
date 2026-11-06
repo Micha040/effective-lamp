@@ -39,11 +39,16 @@ struct Launcher {
 
 struct Catalog {
     int schema = 0;
+    bool supported = false;              // Format bekannt? Sonst nur "launcher" gelesen (für das Selbst-Update)
     std::string name, release, published, repo;
-    Launcher launcher;
+    Launcher launcher;                   // leer, wenn ungültig
     std::vector<App> apps;
+    std::vector<std::string> skipped;    // übersprungene, fehlerhafte Einträge (Begründungen)
 };
 
+constexpr int kSchema = 1;   // der Abschnitt "launcher" bleibt in allen Formaten gleich aufgebaut
+
+// false nur, wenn der Text gar kein lesbarer Katalog ist. Fehlerhafte Programme werden übersprungen.
 bool parse(const std::string& text, Catalog& out, std::string& err);
 
 // Versionen vergleichen ("1.10.0" > "1.9.2", "v1.0" == "1.0.0"); Ergebnis < 0, 0 oder > 0
@@ -55,5 +60,6 @@ std::string findVersionString(const std::string& text);
 // Hilfen für die Prüfung
 bool isSafeFileName(const std::string& s);   // nur ein Dateiname, kein Pfad
 bool isUserPath(const std::string& s);       // beginnt mit %LOCALAPPDATA%\ oder %APPDATA%\, ohne ".."
+bool isValidVersion(const std::string& s);   // "1.2.3", "1.0.0-beta" – nichts, was als Ordnername Ärger macht
 
 }  // namespace cat

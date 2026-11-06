@@ -9,6 +9,7 @@
 #include <shellapi.h>
 
 #include "common.h"
+#include "net.h"
 #include "selfinstall.h"
 #include "ui.h"
 
@@ -16,13 +17,18 @@ using namespace lamp;
 
 namespace {
 
+const wchar_t* kMutexName = L"Local\\EfficientLampLauncher";
+
+// Läuft schon ein Launcher? Dann schließen lassen und warten, bis sein Prozess wirklich beendet ist
+// (er hält die Mutex bis zum Schluss).
 void closeRunningInstance() {
+    HANDLE m = OpenMutexW(SYNCHRONIZE, FALSE, kMutexName);
+    if (!m) return;
     HWND w = FindWindowW(L"EfficientLampWindow", nullptr);
-    if (!w) return;
-    DWORD pid = 0;
-    GetWindowThreadProcessId(w, &pid);
-    PostMessageW(w, WM_CLOSE, 0, 0);
-    for (int i = 0; i < 50 && IsWindow(w); ++i) Sleep(100);   // höchstens 5 Sekunden
+    if (w) PostMessageW(w, WM_CLOSE, 0, 0);
+    DWORD r = WaitForSingleObject(m, 15000);
+    if (r == WAIT_OBJECT_0 || r == WAIT_ABANDONED) ReleaseMutex(m);
+    CloseHandle(m);
 }
 
 std::wstring quote(const std::wstring& s) { return L"\"" + s + L"\""; }
@@ -39,9 +45,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     for (int i = 1; argv && i < argc; ++i) {
         std::wstring a = argv[i];
         auto next = [&]() -> std::wstring { return i + 1 < argc ? std::wstring(argv[++i]) : std::wstring(); };
-        if (a == L"--catalog") {
+        if (a == L"--catalog") {   // Testbetrieb: auch lokale Dateien, eigener Zwischenspeicher bleibt unberührt
             opt.catalogUrl = next();
             passArgs += L" --catalog " + quote(opt.catalogUrl);
+            allowLocalSources(true);
         } else if (a == L"--portable") opt.portable = true;
         else if (a == L"--welcome") opt.welcome = true;
         else if (a == L"--updated") opt.updated = true;
@@ -68,16 +75,25 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         return 0;
     }
 
-    cleanupOldExe();
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\EfficientLampLauncher");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {   // läuft schon: nach vorne holen
-        HWND w = FindWindowW(L"EfficientLampWindow", nullptr);
-        if (w) {
-            if (IsIconic(w)) ShowWindow(w, SW_RESTORE);
-            SetForegroundWindow(w);
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (opt.updated) {   // nach einem Selbst-Update: warten, bis die alte Version beendet ist
+            DWORD r = WaitForSingleObject(mutex, 20000);
+            if (r != WAIT_OBJECT_0 && r != WAIT_ABANDONED) {
+                CloseHandle(mutex);
+                return 0;
+            }
+        } else {   // läuft schon: nach vorne holen
+            HWND w = FindWindowW(L"EfficientLampWindow", nullptr);
+            if (w) {
+                if (IsIconic(w)) ShowWindow(w, SW_RESTORE);
+                SetForegroundWindow(w);
+            }
+            CloseHandle(mutex);
+            return 0;
         }
-        return 0;
     }
+    cleanupOldExe();
     if (!opt.portable && !isInstalledCopy()) {
         ReleaseMutex(mutex);   // die installierte Kopie braucht den Namen gleich selbst
         CloseHandle(mutex);
@@ -86,8 +102,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         logLine(L"Selbstinstallation nicht möglich – laufe portabel");
         mutex = CreateMutexW(nullptr, TRUE, L"Local\\EfficientLampLauncher");
     }
-    if (opt.updated && isInstalledCopy()) refreshRegistration();   // neue Version in "Installierte Apps" eintragen
-    logLine(L"Launcher %ls gestartet (%ls)", kVersion, isInstalledCopy() ? L"installiert" : L"portabel");
+    opt.installedCopy = isInstalledCopy();
+    if (opt.updated && opt.installedCopy) refreshRegistration();   // neue Version in "Installierte Apps" eintragen
+    opt.relaunchArgs = passArgs + (opt.installedCopy ? L"" : (passArgs.empty() ? L"" : L" ") + std::wstring(L"--portable"));
+    logLine(L"Launcher %ls gestartet (%ls)", kVersion, opt.installedCopy ? L"installiert" : L"portabel");
     int rc = runLauncher(inst, opt);
     if (mutex) CloseHandle(mutex);
     CoUninitialize();

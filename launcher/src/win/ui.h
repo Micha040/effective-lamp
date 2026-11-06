@@ -14,6 +14,8 @@ struct Options {
     bool updated = false;      // gerade aktualisiert
     int theme = -1;            // -1 wie Windows, 0 hell, 1 dunkel
     bool demo = false;         // Beispielzustände (für Bildschirmfotos)
+    bool installedCopy = false;   // läuft die eingerichtete Kopie? (einmal beim Start ermittelt)
+    std::wstring relaunchArgs;    // Schalter für den Neustart nach einem Selbst-Update
     std::wstring renderPng;    // nur in eine PNG-Datei zeichnen und beenden (Tests, README)
     int renderWidth = 760, renderHeight = 600, renderScale = 100;
 };

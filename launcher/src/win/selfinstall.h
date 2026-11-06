@@ -17,8 +17,8 @@ bool installAndRelaunch(const std::wstring& extraArgs);
 void refreshRegistration();   // Startmenü-Verknüpfung + Deinstallations-Eintrag (auch nach einem Update)
 void cleanupOldExe();         // Rest eines Updates (EfficientLamp.old.exe) entfernen
 
-// Neue Version (bereits geprüft) einspielen und neu starten. Rückgabe false + err bei Fehler.
-bool applyUpdate(const std::string& exeData, std::wstring& err);
+// Neue Version (bereits geprüft) einspielen und mit "--updated <extraArgs>" neu starten. Rückgabe false + err bei Fehler.
+bool applyUpdate(const std::string& exeData, std::wstring& err, const std::wstring& extraArgs);
 
 // "Launcher deinstallieren": fragt nach, entfernt Launcher, Verknüpfung, Eintrag und Zwischenspeicher.
 // Die installierten Programme bleiben. Rückgabe true = entfernt (Prozess beenden).
