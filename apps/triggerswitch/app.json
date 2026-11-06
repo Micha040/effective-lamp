@@ -1,0 +1,44 @@
+{
+  "id": "triggerswitch",
+  "order": 3,
+  "name": "TriggerSwitch",
+  "version": "1.1.0",
+  "versionCheck": [
+    {
+      "file": "TriggerSwitch.cs",
+      "pattern": "Version\\s*=\\s*\"([^\"]+)\""
+    }
+  ],
+  "tagline": "Trigger der Basilisk V3 Pro per Hotkey umschalten",
+  "description": "Ein Hotkey schaltet den Trigger der Razer Basilisk V3 Pro zwischen Leertaste- und Rechtsklick-Turbo um.",
+  "requires": "nur für Razer Basilisk V3 Pro",
+  "color": "#E11D48",
+  "process": "TriggerSwitch.exe",
+  "installDir": "%LOCALAPPDATA%\\TriggerSwitch",
+  "detect": {
+    "exe": "%LOCALAPPDATA%\\TriggerSwitch\\TriggerSwitch.exe",
+    "versionFile": "%LOCALAPPDATA%\\TriggerSwitch\\TriggerSwitch.cs"
+  },
+  "install": {
+    "script": "Setup.cmd",
+    "args": "-Action Install"
+  },
+  "uninstall": {
+    "script": "Setup.cmd",
+    "args": "-Action Uninstall"
+  },
+  "open": {
+    "script": "Setup.cmd",
+    "label": "Einstellungen",
+    "wait": false
+  },
+  "package": {
+    "folder": "TriggerSwitch",
+    "files": {
+      "README.md": "README.md",
+      "Setup.cmd": "Setup.cmd",
+      "Setup.ps1": "Setup.ps1",
+      "TriggerSwitch.cs": "TriggerSwitch.cs"
+    }
+  }
+}
