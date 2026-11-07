@@ -1,7 +1,9 @@
 // FragDesk – Momente in CS2 ansehen und als MP4 aufnehmen.
 //
 // Ablauf ohne Eingriff ins Spiel: CS2 wird mit -netconport gestartet (offizielle Konsolen-Schnittstelle des
-// Spiels) und spielt die Demo ab; FragDesk springt per Konsolenbefehl zu den Abschnitten, schaltet auf den
+// Spiels) und spielt die Demo ab. Unter Windows öffnet CS2 diese Konsole nur im Workshop-Tools-Modus (-tools,
+// kostenloser DLC; ohne ihn schlägt socket() mit WSANOTINITIALISED fehl, siehe ValveSoftware/csgo-osx-linux#3603),
+// deshalb startet FragDesk CS2 mit -tools -noassetbrowser. FragDesk springt per Konsolenbefehl zu den Abschnitten, schaltet auf den
 // Spieler und nimmt das Fenster wie OBS von außen auf (Bild: Desktop Duplication, Ton: Prozess-Loopback,
 // Kodierung: Media Foundation H.264/AAC). Es wird keine Datei des Spiels verändert und nichts ins Spiel geladen.
 //

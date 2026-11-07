@@ -2,7 +2,7 @@
   "id": "fragdesk",
   "order": 5,
   "name": "FragDesk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "versionCheck": [
     {
       "file": "setup/Setup.ps1",
@@ -23,7 +23,7 @@
   ],
   "tagline": "CS2-Stats und Highlights aus deinen Demos",
   "description": "Wertet deine CS2-Demos lokal aus: über 150 Kennzahlen, Premier-Verlauf und deine besten Momente als Video.",
-  "requires": "für Videos: Steam und CS2",
+  "requires": "für Videos: CS2 mit Workshop Tools",
   "color": "#F97316",
   "process": "FragDesk.exe",
   "installDir": "%LOCALAPPDATA%\\Programs\\FragDesk",

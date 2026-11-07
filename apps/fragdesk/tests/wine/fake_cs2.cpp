@@ -1,11 +1,16 @@
 // FragDesk – Attrappe von CS2 für Ablauftests unter Wine (oder Windows ohne CS2).
 //
-//   cs2.exe <Startoptionen>   zeigt ein Fenster "Counter-Strike 2", öffnet die Konsole auf -netconport,
-//                             meldet nach kurzer Zeit "Demo geladen", protokolliert jeden Befehl, endet bei "quit"
+//   cs2.exe <Startoptionen>   zeigt ein Fenster "Counter-Strike 2", spielt nach kurzer Zeit die Demo aus +playdemo ab,
+//                             öffnet die Konsole auf -netconport, protokolliert jeden Befehl, endet bei "quit"
 //   steam.exe --idle          wartet nur (damit FragDesk "Steam läuft" sieht)
 //
+// Wie das echte CS2 unter Windows öffnet die Attrappe die Konsole nur mit -tools (Workshop-Tools-Modus); ohne
+// -noassetbrowser erscheint dann zusätzlich ein großes Fenster "Asset Browser". Mit -condebug landet die Ausgabe
+// auch in game\csgo\console.log. FAKECS2_IGNORE_PLAYDEMO=1: +playdemo beim Start wird übergangen (CS2 bleibt im
+// Hauptmenü, bis "playdemo" über die Konsole kommt). FAKECS2_NO_CONSOLE=1: nie eine Konsole (wie ohne Workshop Tools).
+//
 // Das Protokoll landet in der Datei aus der Umgebungsvariable FAKECS2_LOG (sonst fake_cs2.log im Arbeitsordner):
-//   ARGS <Befehlszeile> / ENV USRLOCALCSGO=<Wert> / CMD <Befehl> / QUIT
+//   ARGS <Befehlszeile> / ENV USRLOCALCSGO=<Wert> / CMD <Befehl> / QUIT / KEINE KONSOLE …
 #include <winsock2.h>
 #include <ws2tcpip.h>
 // winsock2 vor windows.h
@@ -13,10 +18,14 @@
 
 #include <cstdio>
 #include <cwchar>
+#include <mutex>
 #include <string>
 #include <thread>
 
-static std::wstring g_log;
+static std::wstring g_log, g_conlog;
+static SOCKET g_client = INVALID_SOCKET;
+static std::mutex g_mu;
+static bool g_demoStarted = false;
 
 static void logLine(const std::wstring& text) {
     FILE* f = _wfopen(g_log.c_str(), L"a, ccs=UTF-8");
@@ -29,6 +38,31 @@ static std::wstring env(const wchar_t* name) {
     wchar_t buf[2048];
     DWORD n = GetEnvironmentVariableW(name, buf, 2048);
     return n && n < 2048 ? std::wstring(buf, n) : std::wstring();
+}
+
+// Ausgabe der Konsole: console.log (bei -condebug) und an einen verbundenen netcon-Client
+static void out(const std::string& text) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (!g_conlog.empty())
+        if (FILE* f = _wfopen(g_conlog.c_str(), L"ab")) {
+            fwrite(text.data(), 1, text.size(), f);
+            fclose(f);
+        }
+    if (g_client != INVALID_SOCKET) send(g_client, text.data(), int(text.size()), 0);
+}
+
+static void playDemo() {
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        if (g_demoStarted) return;
+        g_demoStarted = true;
+    }
+    std::thread([] {
+        Sleep(800);
+        out("ChangeGameUIState: CSGO_GAME_UI_STATE_MAINMENU -> CSGO_GAME_UI_STATE_LOADINGSCREEN\n");
+        Sleep(1500);
+        out("ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\n");
+    }).detach();
 }
 
 static void console(int port) {
@@ -45,15 +79,18 @@ static void console(int port) {
         ExitProcess(3);
     }
     SOCKET c = accept(ls, nullptr, nullptr);
-    Sleep(1000);
-    const char* hello = "Loading demo...\nChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\n";
-    send(c, hello, int(strlen(hello)), 0);
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        g_client = c;
+    }
     std::string buf;
     char b[1024];
     for (;;) {
         int n = recv(c, b, sizeof b, 0);
         if (n <= 0) {
             logLine(L"GETRENNT");
+            std::lock_guard<std::mutex> lock(g_mu);
+            g_client = INVALID_SOCKET;
             return;   // Konsole zu, "CS2" läuft weiter (wie beim Ansehen)
         }
         buf.append(b, size_t(n));
@@ -65,8 +102,8 @@ static void console(int port) {
             std::wstring w(size_t(len), L'\0');
             MultiByteToWideChar(CP_UTF8, 0, line.c_str(), int(line.size()), &w[0], len);
             logLine(L"CMD " + w);
-            std::string echo = "] " + line + "\n";
-            send(c, echo.c_str(), int(echo.size()), 0);
+            out("] " + line + "\n");
+            if (line.rfind("playdemo ", 0) == 0) playDemo();
             if (line == "quit") {
                 logLine(L"QUIT");
                 ExitProcess(0);
@@ -86,7 +123,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         DeleteObject(br);
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, RGB(255, 200, 80));
-        DrawTextW(dc, L"Attrappe von CS2", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        wchar_t title[128];
+        GetWindowTextW(h, title, 128);
+        std::wstring text = std::wstring(L"Attrappe: ") + title;
+        DrawTextW(dc, text.c_str(), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         EndPaint(h, &ps);
         return 0;
     }
@@ -107,14 +147,25 @@ int wmain(int argc, wchar_t** argv) {
     logLine(std::wstring(L"ARGS ") + GetCommandLineW());
     logLine(L"ENV USRLOCALCSGO=" + env(L"USRLOCALCSGO"));
     int port = 0, width = 800, height = 450;
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (wcscmp(argv[i], L"-netconport") == 0) port = _wtoi(argv[i + 1]);
-        if (wcscmp(argv[i], L"-width") == 0) width = _wtoi(argv[i + 1]);
-        if (wcscmp(argv[i], L"-height") == 0) height = _wtoi(argv[i + 1]);
+    bool tools = false, noAssetBrowser = false, condebug = false, playdemo = false;
+    for (int i = 1; i < argc; ++i) {
+        std::wstring a = argv[i];
+        bool hasNext = i + 1 < argc;
+        if (a == L"-netconport" && hasNext) port = _wtoi(argv[i + 1]);
+        if (a == L"-width" && hasNext) width = _wtoi(argv[i + 1]);
+        if (a == L"-height" && hasNext) height = _wtoi(argv[i + 1]);
+        if (a == L"-tools") tools = true;
+        if (a == L"-noassetbrowser") noAssetBrowser = true;
+        if (a == L"-condebug") condebug = true;
+        if (a == L"+playdemo" && hasNext) playdemo = true;
     }
-    if (!port) {
-        logLine(L"FEHLER kein -netconport");
-        return 2;
+    if (condebug) {
+        wchar_t exe[MAX_PATH];
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring dir = exe;
+        for (int up = 0; up < 3; ++up) dir = dir.substr(0, dir.find_last_of(L'\\'));   // ...\game\bin\win64\cs2.exe -> ...\game
+        g_conlog = dir + L"\\csgo\\console.log";
+        DeleteFileW(g_conlog.c_str());
     }
     WNDCLASSW wc = {};
     wc.lpfnWndProc = wndProc;
@@ -127,7 +178,20 @@ int wmain(int argc, wchar_t** argv) {
     HWND h = CreateWindowW(L"FakeCS2", L"Counter-Strike 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
                            wc.hInstance, nullptr);
     if (!h) return 4;
-    std::thread(console, port).detach();
+    if (tools && !noAssetBrowser) {
+        logLine(L"ASSET BROWSER (ohne -noassetbrowser)");
+        CreateWindowW(L"FakeCS2", L"Asset Browser", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 20, 20, 1700, 1000, nullptr, nullptr, wc.hInstance, nullptr);
+    }
+    if (env(L"FAKECS2_NO_CONSOLE") == L"1") tools = false;
+    if (port && tools) std::thread(console, port).detach();
+    else if (port) logLine(L"KEINE KONSOLE (ohne -tools öffnet CS2 unter Windows keine netcon-Konsole)");
+    bool ignorePlaydemo = env(L"FAKECS2_IGNORE_PLAYDEMO") == L"1";
+    std::thread([playdemo, ignorePlaydemo, port, tools] {
+        Sleep(1200);
+        out("ChangeGameUIState: CSGO_GAME_UI_STATE_INVALID -> CSGO_GAME_UI_STATE_MAINMENU\n");
+        if (port && !tools) out("NetCon: socket failed (WSANOTINITIALISED)\n");
+        if (playdemo && !ignorePlaydemo) playDemo();
+    }).detach();
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);

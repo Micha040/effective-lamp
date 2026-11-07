@@ -26,6 +26,24 @@ float recordingCard(Canvas& c, App& app, float x, float y, float w) {
     return 64 + 16;
 }
 
+// Ohne die Workshop Tools lässt sich CS2 unter Windows nicht von außen steuern: einmalige Anleitung
+float toolsCard(Canvas& c, App& app, float x, float y, float w) {
+    if (app.recording() || app.steam.cs2Exe().empty() || app.tools() != Tools::Missing) return 0;
+    const std::wstring text =
+        L"Zum Ansehen und Aufnehmen startet FragDesk CS2 im Workshop-Tools-Modus – nur darin lässt sich CS2 unter Windows von außen steuern. "
+        L"Einmalig in Steam: Rechtsklick auf Counter-Strike 2 › Eigenschaften › DLC › bei „Counter-Strike 2 Workshop Tools“ Installieren "
+        L"anhaken. Sobald der Download fertig ist, geht es hier weiter.";
+    float tw = w - 68;
+    float th = c.textHeight(text, F::Small, tw) + 2;
+    RectF r(x, y, w, 12 + 22 + 4 + th + 14);
+    c.round(r, 12, alpha(c.th.warning, c.th.dark ? 26 : 40));
+    c.roundStroke(r, 12, alpha(c.th.warning, 150), 1);
+    c.icon(Icon::Warning, RectF(r.X + 18, r.Y + 14, 20, 20), c.th.warning, 1.7f);
+    c.text(L"CS2 Workshop Tools fehlen", F::BodySemi, c.th.text, RectF(r.X + 50, r.Y + 12, tw, 22));
+    c.text(text, F::Small, c.th.text2, RectF(r.X + 50, r.Y + 38, tw, th), Align::Left, false, true);
+    return r.Height + 16;
+}
+
 float suggestions(Canvas& c, App& app, float x, float y, float w) {
     float y0 = y;
     c.chipRow(x, y, {L"Meine Momente", L"Alle Spieler"}, app.allPlayers ? 1 : 0, "hl-who", [&app](int i) {
@@ -39,10 +57,8 @@ float suggestions(Canvas& c, App& app, float x, float y, float w) {
     }
     std::wstring recLabel = refs.empty() ? L"Ausgewählte aufnehmen" : L"Ausgewählte aufnehmen (" + std::to_wstring(refs.size()) + L")";
     float bw = c.buttonWidth(recLabel, Icon::Record);
-    std::wstring block = app.recording()             ? L"Es läuft bereits eine Aufnahme"
-                         : app.steam.cs2Exe().empty() ? L"CS2 wurde nicht gefunden – Ordner in den Einstellungen wählen"
-                         : refs.empty()               ? L"Erst Momente links ankreuzen"
-                                                      : L"";
+    std::wstring block = app.recordBlocker();
+    if (block.empty() && refs.empty()) block = L"Erst Momente links ankreuzen";
     c.button(RectF(x + w - bw, y - 3, bw, 36), recLabel, "hl-rec", [&app, refs] { app.record(refs); }, Btn::Primary, Icon::Record, block.empty(),
              block);
     if (!refs.empty()) {
@@ -199,6 +215,7 @@ float drawHighlights(Canvas& c, App& app, float w) {
     float x = pad, cw = w - pad * 2, y = 28;
     y += pageTitle(c, x, y, cw, L"Momente", L"Erkannte Highlights ansehen und als Video aufnehmen") + 12;
     y += recordingCard(c, app, x, y, cw);
+    y += toolsCard(c, app, x, y, cw);
     y += c.tabs(x, y, cw, {L"Vorschläge", L"Videos (" + std::to_wstring(app.clips.size()) + L")"}, app.highlightsTab, "htab", [&app](int i) {
         app.highlightsTab = i;
         app.invalidate();

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cwchar>
+#include <functional>
 
 #include "../core/vdf.h"
 #include "capture.h"
@@ -72,10 +73,13 @@ class Console {
 public:
     ~Console() { close(); }
 
-    bool connect(int port, std::atomic<bool>& cancel, HANDLE process, int timeoutMs) {
+    // tick: einmal pro Versuch (z. B. für die Statusanzeige); liefert er false, wird nicht weiter gewartet
+    bool connect(int port, std::atomic<bool>& cancel, HANDLE process, int timeoutMs, const std::function<bool()>& tick) {
         auto start = Clock::now();
+        int lastErr = 0;
         while (!cancel && secondsSince(start) * 1000 < timeoutMs) {
             if (process && WaitForSingleObject(process, 0) == WAIT_OBJECT_0) return false;
+            if (tick && !tick()) return false;
             SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (s != INVALID_SOCKET) {
                 sockaddr_in a = {};
@@ -86,17 +90,45 @@ public:
                     sock_ = s;
                     run_ = true;
                     reader_ = std::thread([this] { readLoop(); });
+                    logLine(L"Konsole von CS2 verbunden (Port %d, nach %.0f s)", port, secondsSince(start));
                     return true;
                 }
+                int e = WSAGetLastError();
+                if (e != lastErr) logLine(L"Konsole von CS2 noch nicht erreichbar (Port %d, Winsock-Fehler %d)", port, e);
+                lastErr = e;
                 closesocket(s);
             }
+            drain();   // console.log weiter mitlesen: zeigt im Protokoll, was CS2 macht
             Sleep(1000);
         }
         return false;
     }
 
+    bool saw(const char* text) const { return seen_.find(text) != std::string::npos; }
+
+    // Letzte Zeilen der Ausgabe ins Protokoll (bei Fehlern)
+    void logTail(size_t lines) {
+        drain();
+        std::vector<std::string> out;
+        size_t end = seen_.size();
+        while (end > 0 && out.size() < lines) {
+            size_t nl = end > 1 ? seen_.rfind('\n', end - 2) : std::string::npos;
+            size_t begin = nl == std::string::npos ? 0 : nl + 1;
+            std::string line = seen_.substr(begin, end - begin);
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            if (!line.empty()) out.push_back(line);
+            end = begin;
+        }
+        if (out.empty()) {
+            logLine(L"Von CS2 kam keine Ausgabe (weder Konsole noch console.log)");
+            return;
+        }
+        logLine(L"Letzte Ausgabe von CS2:");
+        for (auto it = out.rbegin(); it != out.rend(); ++it) logLine(L"  CS2 | %ls", widen(it->substr(0, 400)).c_str());
+    }
+
     // console.log mitlesen (nur was ab jetzt dazukommt)
-    void addLog(const std::wstring& path) { logs_.push_back({path, std::max<int64_t>(0, fileSize(path))}); }
+    void addLog(const std::wstring& path) { logs_.push_back({path, std::max<int64_t>(0, fileSize(path)), readHead(path)}); }
 
     bool send(const std::string& cmd) {
         if (sock_ == INVALID_SOCKET) return false;
@@ -115,6 +147,13 @@ public:
         for (auto& lg : logs_) {
             int64_t size = fileSize(lg.path);
             if (size < lg.pos) lg.pos = 0;   // Datei wurde neu angelegt
+            else if (size > lg.pos && lg.pos > 0 && !lg.head.empty()) {
+                // neu geschrieben und schon wieder größer als vorher? Dann stimmt der Anfang nicht mehr
+                std::string now = readHead(lg.path);
+                bool rewritten = now.compare(0, lg.head.size(), lg.head) != 0;
+                if (rewritten) lg.pos = 0;
+                if (rewritten || now.size() >= kHead) lg.head.clear();   // danach nicht mehr prüfen
+            }
             if (size <= lg.pos) continue;
             HANDLE h = CreateFileW(lg.path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0,
                                    nullptr);
@@ -170,9 +209,24 @@ private:
         }
     }
 
+    static constexpr size_t kHead = 256;
+    // Anfang einer Datei (zum Erkennen, ob sie inzwischen neu geschrieben wurde)
+    static std::string readHead(const std::wstring& path) {
+        std::string head;
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return head;
+        head.resize(kHead);
+        DWORD got = 0;
+        if (!ReadFile(h, &head[0], DWORD(kHead), &got, nullptr)) got = 0;
+        head.resize(got);
+        CloseHandle(h);
+        return head;
+    }
+
     struct Log {
         std::wstring path;
         int64_t pos;
+        std::string head;   // Anfang beim Start (leer: nicht mehr prüfen)
     };
     SOCKET sock_ = INVALID_SOCKET;
     std::thread reader_;
@@ -458,6 +512,10 @@ bool Recorder::start(const SteamInfo& steam, const RecordSettings& rs, std::vect
         err = L"CS2 wurde nicht gefunden – Ordner in den Einstellungen wählen";
         return false;
     }
+    if (workshopTools(steam) == Tools::Missing) {
+        err = L"Erst die CS2 Workshop Tools installieren (Steam › Counter-Strike 2 › Eigenschaften › DLC)";
+        return false;
+    }
     if (isProcessRunning(L"cs2.exe")) {
         err = recordVideo ? L"CS2 läuft schon – schließe es, damit FragDesk aufnehmen kann" : L"CS2 läuft schon – schließe es, damit FragDesk die Demo öffnen kann";
         return false;
@@ -520,9 +578,10 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             playPath = temp.path;
         }
 
-        // Startoptionen: Konsole über einen zufälligen Port, Demo direkt abspielen
+        // Startoptionen: Konsole über einen zufälligen Port, Demo direkt abspielen. -tools: Unter Windows öffnet CS2 die Konsole
+        // für -netconport nur im Workshop-Tools-Modus; -noassetbrowser lässt dabei den Asset Browser weg (sonst ein zweites Fenster)
         int port = 30000 + int(GetTickCount64() % 9000);
-        std::wstring args = L"\"" + cs2Exe + L"\" -novid -nojoy -condebug -netconport " + std::to_wstring(port);
+        std::wstring args = L"\"" + cs2Exe + L"\" -tools -noassetbrowser -novid -nojoy -condebug -netconport " + std::to_wstring(port);
         std::vector<wchar_t> env;
         if (recordVideo) {
             bool haveVideoCfg = !newestVideoConfig(steam.steamDir).empty() || fileExists(joinPath(cs2SandboxDir(), L"cfg\\cs2_video.txt"));
@@ -578,22 +637,64 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             CloseHandle(proc);
         };
 
-        if (!con.connect(port, cancel_, proc, 150000)) {
-            if (!cancel_)
-                failure = WaitForSingleObject(proc, 0) == WAIT_OBJECT_0 ? L"CS2 wurde beendet, bevor die Demo lief" : L"Keine Verbindung zur Konsole von CS2";
+        // Status: erst "wird gestartet", sobald das Fenster da ist "wartet auf die Konsole"
+        bool windowShown = false;
+        // Die Konsole öffnet CS2 ganz am Anfang. Steht es schon eine halbe Minute im Hauptmenü (laut console.log) und
+        // sie fehlt immer noch, kommt sie nicht mehr – dann nicht die vollen 2,5 Minuten warten
+        Clock::time_point menuAt{};
+        auto connectTick = [&]() -> bool {
+            if (!windowShown && !processWindows(pid).empty()) {
+                windowShown = true;
+                setStatus(L"CS2 ist offen – warte auf die Konsole …");
+            }
+            if (con.saw("UI_STATE_MAINMENU")) {
+                if (menuAt == Clock::time_point{}) menuAt = Clock::now();
+                else if (secondsSince(menuAt) > 30) {
+                    logLine(L"CS2 ist seit 30 s im Hauptmenü, die Konsole fehlt weiterhin");
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (!con.connect(port, cancel_, proc, 150000, connectTick)) {
+            if (!cancel_) {
+                bool exited = WaitForSingleObject(proc, 0) == WAIT_OBJECT_0;
+                failure = exited ? L"CS2 wurde beendet, bevor die Demo lief"
+                                 : L"CS2 öffnet keine Konsole – sind die CS2 Workshop Tools installiert? Details: fragdesk.log im Datenordner";
+                con.logTail(40);
+            }
             finish(recordVideo);
             break;
         }
         setStatus(L"Demo wird geladen …");
-        // "UI_STATE_INGAME" erscheint erst, wenn die Map geladen ist und die Demo läuft
-        bool loaded = con.waitFor({"UI_STATE_INGAME"}, 180000, cancel_, proc);
+        // "UI_STATE_INGAME" erscheint erst, wenn die Map geladen ist und die Demo läuft. Bleibt CS2 im Hauptmenü stehen
+        // (+playdemo beim Start nicht ausgeführt), die Demo einmal über die Konsole starten.
+        bool loaded = false, retried = false;
+        auto loadStart = Clock::now();
+        Clock::time_point idleMenu{};   // seit wann CS2 im Hauptmenü steht, ohne dass je geladen wurde
+        while (!cancel_ && secondsSince(loadStart) < 180) {
+            if (con.waitFor({"UI_STATE_INGAME"}, 1000, cancel_, proc)) {
+                loaded = true;
+                break;
+            }
+            if (WaitForSingleObject(proc, 0) == WAIT_OBJECT_0) break;
+            if (retried || !con.saw("UI_STATE_MAINMENU") || con.saw("UI_STATE_LOADINGSCREEN")) continue;
+            if (idleMenu == Clock::time_point{}) idleMenu = Clock::now();
+            else if (secondsSince(idleMenu) > 20) {
+                retried = true;
+                logLine(L"CS2 steht seit 20 s im Hauptmenü – Demo wird über die Konsole gestartet");
+                con.send("playdemo \"" + narrow(asciiPath(playPath)) + "\"");
+            }
+        }
         bool exited = WaitForSingleObject(proc, 0) == WAIT_OBJECT_0;
         if (cancel_) {
             finish(recordVideo);
             break;
         }
+        if (!loaded) logLine(L"Kein UI_STATE_INGAME von CS2 (%ls)", exited ? L"CS2 beendet" : L"Zeit abgelaufen");
         if (!loaded && (exited || recordVideo)) {   // beim Ansehen trotzdem weitermachen: CS2 ist ja zu sehen
             failure = exited ? L"CS2 wurde beendet, bevor die Demo lief" : L"CS2 hat nach 3 Minuten nicht gemeldet, dass die Demo läuft";
+            con.logTail(40);
             finish(recordVideo);
             break;
         }
@@ -786,6 +887,7 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
     if (recordVideo) timeEndPeriod(1);
     auto* e = new RecordEvent();
     if (!failure.empty()) {
+        logLine(L"Abbruch: %ls", failure.c_str());
         e->kind = RecordEvent::Failed;
         e->text = failure;
     } else if (cancel_) {
@@ -794,7 +896,7 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
     } else {
         e->kind = RecordEvent::Finished;
         e->text = recordVideo ? (total == 1 ? L"Video fertig" : std::to_wstring(total) + L" Videos fertig")
-                              : L"CS2 zeigt den Moment – vor dem nächsten Match CS2 bitte einmal neu starten";
+                              : L"CS2 zeigt den Moment – für Matches CS2 danach einmal normal neu starten";
     }
     {
         std::lock_guard<std::mutex> lock(mu_);

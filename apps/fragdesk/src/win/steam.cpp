@@ -30,6 +30,25 @@ std::wstring SteamInfo::cs2Exe() const { return cs2Dir.empty() ? std::wstring() 
 std::wstring SteamInfo::csgoDir() const { return cs2Dir.empty() ? std::wstring() : joinPath(cs2Dir, L"game\\csgo"); }
 std::wstring SteamInfo::replaysDir() const { return cs2Dir.empty() ? std::wstring() : joinPath(cs2Dir, L"game\\csgo\\replays"); }
 
+std::wstring SteamInfo::appManifest() const {
+    // cs2Dir = <Bibliothek>\steamapps\common\Counter-Strike Global Offensive
+    std::wstring steamapps = cs2Dir.empty() ? std::wstring() : parentDir(parentDir(cs2Dir));
+    return steamapps.empty() ? std::wstring() : joinPath(steamapps, L"appmanifest_730.acf");
+}
+
+Tools workshopTools(const SteamInfo& steam) {
+    std::wstring path = steam.appManifest();
+    std::string text;
+    fd::VdfNode root;
+    if (path.empty() || !readFile(path, text, 1u << 20) || !fd::parseVdf(text, root)) return Tools::Unknown;
+    const fd::VdfNode* app = root.find("AppState");
+    const fd::VdfNode* depots = app ? app->find("InstalledDepots") : nullptr;
+    if (!depots) return Tools::Unknown;
+    for (const auto& d : depots->children)
+        if (d.key == "2347779" || (d.block && d.get("dlcappid") == "2279721")) return Tools::Installed;
+    return Tools::Missing;
+}
+
 std::string SteamInfo::recentSteamId() const {
     for (const auto& a : accounts)
         if (a.mostRecent) return a.steamId;

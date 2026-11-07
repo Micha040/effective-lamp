@@ -44,8 +44,12 @@ FragDesk.exe --data Z:\tmp\fd --me 76561190000000001 --render seite.png --page s
 ```
 
 Für das Ansehen und Aufnehmen gibt es in `apps/fragdesk/tests/wine/` zwei kleine Hilfsprogramme (mit MinGW bauen):
-`fake_cs2.cpp` spielt CS2 nach (Fenster, Konsole über `-netconport`, protokolliert jeden Befehl in `FAKECS2_LOG`;
-als `steam.exe --idle` gestartet gilt Steam als laufend) – damit lässt sich der ganze Ablauf unter Wine prüfen.
+`fake_cs2.cpp` spielt CS2 nach (Fenster, `console.log` bei `-condebug`, Konsole über `-netconport` – wie das echte
+CS2 unter Windows nur mit `-tools` –, protokolliert jeden Befehl in `FAKECS2_LOG`; als `steam.exe --idle` gestartet
+gilt Steam als laufend; `FAKECS2_IGNORE_PLAYDEMO=1` und `FAKECS2_NO_CONSOLE=1` spielen Fehlerfälle nach) – damit
+lässt sich der ganze Ablauf unter Wine prüfen. Bauen: `x86_64-w64-mingw32-g++ -std=c++17 -O2 -municode -static
+fake_cs2.cpp -lws2_32 -lgdi32 -o cs2.exe`. Für „Workshop Tools installiert“ braucht die nachgebaute Steam-Bibliothek
+eine `steamapps\appmanifest_730.acf` mit Depot `2347779` unter `InstalledDepots`.
 `mp4_test.cpp` schreibt ein Testvideo über denselben MP4-Weg wie die Aufnahme (braucht echtes Windows; Wine hat
 keinen H.264-Encoder).
 

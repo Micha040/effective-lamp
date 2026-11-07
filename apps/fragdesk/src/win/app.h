@@ -98,6 +98,8 @@ public:
     // Grund, warum Momente dieses Matches gerade nicht angesehen/aufgenommen werden können (leer = es geht)
     std::wstring momentBlocker(const fd::Match& m);
     bool demoAvailable(const fd::Match& m);   // Demo-Datei noch da? (kurz zwischengespeichert)
+    Tools tools();                            // CS2 Workshop Tools installiert? (kurz zwischengespeichert)
+    std::wstring recordBlocker();             // Grund gegen Ansehen/Aufnehmen unabhängig vom Match (leer = es geht)
 
     // Fenster
     HWND hwnd = nullptr;
@@ -123,6 +125,8 @@ private:
     bool careerDirty_ = true;
     std::string careerKey_;
     std::map<std::string, std::pair<bool, ULONGLONG>> demoCache_;
+    Tools tools_ = Tools::Unknown;
+    ULONGLONG toolsAt_ = 0;
 };
 
 // Seiten: zeichnen in den Inhaltsbereich (Breite w), liefern die Höhe

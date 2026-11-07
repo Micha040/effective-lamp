@@ -134,7 +134,8 @@ MP4 auf. Was ausgewertet und was aufgenommen wird, entscheidest du.
 
 - findet neue Demos selbst (CS2-Downloads, FACEIT-Downloads), wertet aber erst aus, wenn du es sagst
 - Kennzahlen nach T- und CT-Seite, Filter nach Modus, Zeitraum und Map, Verlauf als Graphen
-- Videos: CS2 spielt die Demo ab, FragDesk nimmt das Fenster von außen auf (wie OBS) – kein `-insecure`, kein Plugin
+- Videos: CS2 spielt die Demo ab, FragDesk nimmt das Fenster von außen auf (wie OBS) – kein Plugin, keine
+  geänderten Spieldateien; braucht die kostenlosen CS2 Workshop Tools (DLC in Steam)
 
 <p align="center"><img src="docs/media/fragdesk-dashboard.png" width="680" alt="FragDesk: Übersicht mit Premier-Verlauf"></p>
 
@@ -172,7 +173,7 @@ Jedes Programm gibt es auch als ZIP – entpacken und **`Setup.cmd`** doppelklic
 | SnowDesk | [SnowDesk.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/SnowDesk.zip) | – |
 | TriggerSwitch | [TriggerSwitch.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/TriggerSwitch.zip) | Razer Basilisk V3 Pro |
 | WaveMuteSync | [WaveMuteSync.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/WaveMuteSync.zip) | Elgato Wave:3 mit Wave Link 3, Discord-App |
-| FragDesk | [FragDesk.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/FragDesk.zip) | für Videos: Steam und CS2 |
+| FragDesk | [FragDesk.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/FragDesk.zip) | für Videos: CS2 mit Workshop Tools |
 
 Alle Dateien eines Releases samt Prüfsummen (`SHA256SUMS.txt`) stehen auf der
 [Release-Seite](https://github.com/Micha040/effective-lamp/releases/latest).
@@ -187,7 +188,7 @@ Alle Programme sind so gebaut, dass sie neben Spielen mit Anti-Cheat (z. B. CS2 
 - andere Programme werden nur am Prozessnamen erkannt (Toolhelp-Schnappschuss) – nie geöffnet, nie verändert
 - DeskCats und SnowDesk pausieren bei Spielen im Vollbild und auf Wunsch bei Programmen aus einer Spieleliste
 - FragDesk liest nur Demo-Dateien; CS2 startet es ausschließlich zum Ansehen/Aufnehmen einer Demo, nur wenn CS2 nicht
-  läuft und nur mit offiziellen Startoptionen (kein `-insecure`, kein Plugin, keine geänderten Spieldateien)
+  läuft und nur mit offiziellen Startoptionen von Valve (Workshop-Tools-Modus, kein Plugin, keine geänderten Spieldateien)
 - alles läuft mit normalen Benutzerrechten. Nur DeskCats und SnowDesk fragen beim Setup einmal nach Administratorrechten –
   ausschließlich für den Eintrag im Rechtsklick-Menü des Desktops (ohne geht es auch, dann unter „Weitere Optionen anzeigen“)
 

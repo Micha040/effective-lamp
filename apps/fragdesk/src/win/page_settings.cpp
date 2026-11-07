@@ -121,15 +121,35 @@ float drawSettings(Canvas& c, App& app, float w) {
 
     // ---- CS2
     {
-        float h = 16 + 26 + 36 + 10 + 64 + 14;
-        cardBehind(c, x, y, cw, h);
-        Section sec(c, x, y, cw, L"Counter-Strike 2",
-                    L"Nur zum Ansehen und Aufnehmen von Momenten. FragDesk startet CS2 dafür mit -netconport und steuert die Demo über die Konsole.");
+        const std::wstring sub =
+            L"Nur zum Ansehen und Aufnehmen von Momenten. FragDesk startet CS2 dafür im Workshop-Tools-Modus (-tools -netconport) und steuert "
+            L"die Demo über dessen Konsole – unter Windows öffnet CS2 diese Konsole nur in dem Modus.";
         bool found = !app.steam.cs2Dir.empty();
+        Tools t = found ? app.tools() : Tools::Unknown;
+        std::wstring toolsDesc =
+            t == Tools::Installed ? L"Kostenloser DLC von CS2, ist installiert."
+            : t == Tools::Missing ? L"Kostenloser DLC von CS2, fehlt noch. Einmalig in Steam: Rechtsklick auf Counter-Strike 2 › Eigenschaften › DLC "
+                                    L"› bei „Counter-Strike 2 Workshop Tools“ Installieren anhaken."
+                                  : L"Kostenloser DLC von CS2 (Steam › Counter-Strike 2 › Eigenschaften › DLC). Ob er installiert ist, ließ sich "
+                                    L"nicht feststellen – FragDesk versucht es trotzdem.";
+        const float controlW = 200;
+        float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
+        float descH = c.textHeight(toolsDesc, F::Small, cw - 40 - controlW - 16) + 2;
+        float toolsH = std::max(64.0f, 32 + descH + 12);
+        float h = 16 + 26 + subH + 10 + 64 + toolsH + 14;
+        cardBehind(c, x, y, cw, h);
+        Section sec(c, x, y, cw, L"Counter-Strike 2", sub);
         RectF r = sec.row(found ? L"Gefunden" : L"Nicht gefunden", found ? app.steam.cs2Dir : L"Wähle den Ordner „Counter-Strike Global Offensive“", 64,
-                          200);
+                          controlW);
         c.button(RectF(r.X + r.Width - 180, r.Y + 14, 180, 36), L"Ordner wählen", "cs2dir", [&app] { app.changeCs2Dir(); }, Btn::Secondary,
                  Icon::Folder);
+        r = sec.row(L"Workshop Tools", toolsDesc, toolsH, controlW);
+        if (found) {
+            std::wstring label = t == Tools::Installed ? L"Installiert" : t == Tools::Missing ? L"Fehlen" : L"Unbekannt";
+            Color col = t == Tools::Installed ? c.th.success : t == Tools::Missing ? c.th.danger : c.th.text3;
+            float pw = c.pillWidth(label, F::SmallSemi);
+            c.pill(RectF(r.X + r.Width - pw, r.Y + 20, pw, 24), label, alpha(col, c.th.dark ? 40 : 34), col, F::SmallSemi);
+        }
         y += h + 16;
     }
 
@@ -210,9 +230,9 @@ float drawSettings(Canvas& c, App& app, float w) {
         std::wstring about =
             L"FragDesk " + std::wstring(kVersion) + L" ist Teil von efficient lamp. Die Demos liest fdanalyze auf Grundlage von cs-demo-analyzer "
             L"(AkiVer, MIT-Lizenz) und demoinfocs-golang (markus-wa, MIT-Lizenz). Auswertungen liegen in " + dataDir() + L".\n\n"
-            L"Anti-Cheat: FragDesk liest nur Dateien. Zum Ansehen und Aufnehmen startet es CS2 mit der offiziellen Konsolen-Schnittstelle "
-            L"(-netconport) und nimmt das Fenster von außen auf, wie OBS. Es verändert keine Spieldateien und lädt nichts ins Spiel. "
-            L"Starte Aufnahmen trotzdem nicht während eines Matches.";
+            L"Anti-Cheat: FragDesk liest nur Dateien. Zum Ansehen und Aufnehmen startet es CS2 im offiziellen Workshop-Tools-Modus mit der "
+            L"Konsolen-Schnittstelle (-tools -netconport) und nimmt das Fenster von außen auf, wie OBS. Es verändert keine Spieldateien und "
+            L"lädt nichts ins Spiel. Für Matches CS2 danach normal neu starten, und Aufnahmen nie während eines Matches starten.";
         float th = c.textHeight(about, F::Small, cw - 40) + 4;
         float h = 16 + 26 + 10 + th + 66;
         cardBehind(c, x, y, cw, h);

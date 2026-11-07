@@ -287,10 +287,30 @@ bool App::demoAvailable(const fd::Match& m) {
     return e.first;
 }
 
-std::wstring App::momentBlocker(const fd::Match& m) {
+Tools App::tools() {
+    // appmanifest_730.acf ist klein; trotzdem nur alle paar Sekunden lesen (wird beim Zeichnen abgefragt)
+    ULONGLONG now = GetTickCount64();
+    if (toolsAt_ == 0 || now - toolsAt_ > 4000) {
+        Tools t = workshopTools(steam);
+        if (t != tools_ || toolsAt_ == 0) logLine(L"CS2 Workshop Tools: %ls", t == Tools::Installed ? L"installiert" : t == Tools::Missing ? L"fehlen" : L"unbekannt");
+        tools_ = t;
+        toolsAt_ = now;
+    }
+    return tools_;
+}
+
+std::wstring App::recordBlocker() {
     if (recording()) return L"Es läuft bereits eine Aufnahme";
-    if (!demoAvailable(m)) return L"Die Demo-Datei ist nicht mehr da";
     if (steam.cs2Exe().empty()) return L"CS2 wurde nicht gefunden – Ordner in den Einstellungen wählen";
+    if (tools() == Tools::Missing)
+        return L"Erst die kostenlosen CS2 Workshop Tools installieren: in Steam Rechtsklick auf Counter-Strike 2 › Eigenschaften › DLC";
+    return L"";
+}
+
+std::wstring App::momentBlocker(const fd::Match& m) {
+    std::wstring b = recordBlocker();
+    if (!b.empty()) return b;
+    if (!demoAvailable(m)) return L"Die Demo-Datei ist nicht mehr da";
     return L"";
 }
 std::wstring App::recordStatus() const { return recorder ? recorder->status() : std::wstring(); }

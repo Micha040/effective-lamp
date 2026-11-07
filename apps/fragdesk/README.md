@@ -22,8 +22,9 @@ Installiert wird nach `%LOCALAPPDATA%\Programs\FragDesk`. **Kein Autostart:** Fr
 offen ist. Noch einmal `Setup.cmd` starten (z. B. mit einer neueren Version) aktualisiert die Installation, deine
 Auswertungen und Einstellungen bleiben erhalten.
 
-Voraussetzungen: Windows 10 oder 11 (64 Bit). Für Videos zusätzlich Steam und CS2; den Spielton nimmt FragDesk ab
-Windows 10 Version 2004 auf.
+Voraussetzungen: Windows 10 oder 11 (64 Bit). Für Videos zusätzlich Steam, CS2 und die kostenlosen
+**CS2 Workshop Tools** (siehe [Videos aufnehmen](#videos-aufnehmen)); den Spielton nimmt FragDesk ab Windows 10
+Version 2004 auf.
 
 ## Woher kommen die Demos?
 
@@ -69,6 +70,12 @@ entscheidende Phase).
 
 ## Videos aufnehmen
 
+**Einmalig vorher:** In Steam Rechtsklick auf **Counter-Strike 2 › Eigenschaften › DLC** und bei
+**„Counter-Strike 2 Workshop Tools“** „Installieren“ anhaken (kostenlos, von Valve). Warum: FragDesk steuert CS2 über
+dessen Konsolen-Schnittstelle (`-netconport`), und die öffnet CS2 unter Windows nur im Workshop-Tools-Modus – ein
+seit Jahren offener Fehler im Spiel ([ValveSoftware/csgo-osx-linux#3603](https://github.com/ValveSoftware/csgo-osx-linux/issues/3603)).
+Fehlen die Tools, zeigt FragDesk unter **Momente** und in den Einstellungen einen Hinweis.
+
 Bei einem Moment auf **Aufnehmen** (oder mehrere ankreuzen und „Ausgewählte aufnehmen“):
 
 1. FragDesk startet CS2 mit der Demo, springt zum Moment und schaltet auf den Spieler – so, als würdest du selbst die
@@ -90,21 +97,21 @@ Wird CS2 während der Aufnahme geschlossen, minimiert oder verschoben, bricht Fr
 aufzunehmen.
 
 **In CS2 ansehen** macht dasselbe ohne Aufnahme und mit deinen normalen Einstellungen; CS2 bleibt danach offen.
-Bevor du damit online spielst, starte CS2 einmal neu – dieses CS2 läuft noch mit der Konsolen-Schnittstelle, über
-die FragDesk es gesteuert hat.
+Bevor du damit online spielst, starte CS2 einmal normal neu – dieses CS2 läuft noch im Workshop-Tools-Modus mit der
+Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 
-> **Hinweis zur ersten Version:** Das Ansehen und Aufnehmen steuert ein echtes CS2 und konnte bisher nur mit einer
-> nachgebauten CS2-Attrappe geprüft werden. Läuft etwas nicht rund, steht im Protokoll
-> `%LOCALAPPDATA%\FragDesk\fragdesk.log`, welche Befehle FragDesk an CS2 geschickt hat.
+> **Hinweis:** Das Ansehen und Aufnehmen steuert ein echtes CS2 und ist bisher nur mit einer nachgebauten
+> CS2-Attrappe geprüft. Läuft etwas nicht rund, steht im Protokoll `%LOCALAPPDATA%\FragDesk\fragdesk.log`
+> (Einstellungen › „Datenordner öffnen“), was FragDesk an CS2 geschickt hat und was CS2 zuletzt ausgegeben hat.
 
 ## Anti-Cheat und Sicherheit
 
 - FragDesk **liest nur Demo-Dateien**. Es greift nie in ein laufendes Spiel ein: keine Injektion, keine Hooks,
   keine simulierten Eingaben, kein Lesen fremden Speichers.
 - CS2 startet es **nur zum Ansehen oder Aufnehmen** – und nur, wenn CS2 gerade nicht läuft. Dabei nutzt es
-  ausschließlich offizielle Startoptionen (`+playdemo` und die Konsole über `-netconport`), **kein `-insecure`,
-  kein Plugin, keine geänderten Spieldateien**. CS2 spielt dabei nur die Demo auf deinem PC ab und verbindet sich
-  mit keinem Server.
+  ausschließlich offizielle Startoptionen von Valve (`-tools` für den Workshop-Tools-Modus, `+playdemo` und die
+  Konsole über `-netconport`), **kein Plugin, keine geänderten Spieldateien**. CS2 spielt dabei nur die Demo auf
+  deinem PC ab und verbindet sich mit keinem Server. Für Matches startest du CS2 danach wie gewohnt neu.
 - Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet.
 
 ## Ressourcen
