@@ -264,7 +264,8 @@ public:
         theme_ = makeTheme(dark_);
         logo_.reset(loadPngResource(inst, IDR_LOGO));
         const std::pair<const char*, int> tiles[] = {
-            {"deskcats", IDR_TILE_DESKCATS}, {"snowdesk", IDR_TILE_SNOWDESK}, {"triggerswitch", IDR_TILE_TRIGGERSWITCH}, {"wavemutesync", IDR_TILE_WAVEMUTESYNC}};
+            {"deskcats", IDR_TILE_DESKCATS},           {"snowdesk", IDR_TILE_SNOWDESK},         {"triggerswitch", IDR_TILE_TRIGGERSWITCH},
+            {"wavemutesync", IDR_TILE_WAVEMUTESYNC}, {"fragdesk", IDR_TILE_FRAGDESK}};
         for (const auto& t : tiles) tiles_[t.first].reset(loadPngResource(inst, t.second));
         if (opt.welcome) setBanner(BannerKind::Welcome, L"efficient lamp ist eingerichtet – du findest es ab jetzt im Startmenü.");
         if (opt.updated) setBanner(BannerKind::Updated, std::wstring(L"Der Launcher ist jetzt auf Version ") + kVersion + L".");

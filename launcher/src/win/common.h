@@ -8,8 +8,8 @@
 namespace lamp {
 
 constexpr const wchar_t* kAppName = L"efficient lamp";
-constexpr const wchar_t* kVersion = L"1.0.0";
-constexpr const char* kVersionA = "1.0.0";
+constexpr const wchar_t* kVersion = L"1.0.1";
+constexpr const char* kVersionA = "1.0.1";
 constexpr const wchar_t* kRepoUrl = L"https://github.com/Micha040/effective-lamp";
 constexpr const wchar_t* kCatalogUrl = L"https://github.com/Micha040/effective-lamp/releases/latest/download/catalog.json";
 constexpr const wchar_t* kExeName = L"EfficientLamp.exe";
