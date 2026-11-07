@@ -512,6 +512,39 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(Client(port, ip='192.0.2.1').req('POST', '/api/v1/local/invite', body={}, headers={'X-FragDesk-Local': key}).status == 404,
           'local: nicht über Caddy (X-Forwarded-For)')
 
+    # „PC neu verbinden“: neuer Schlüssel für ein bestehendes Konto (neuer PC, nach „Trennen“) – der alte gilt nicht mehr,
+    # Name und Daten bleiben, kein neues Konto
+    r = PA.req('POST', '/api/v1/admin/invite', body={'user': jb['user']['id'], 'days': 7})
+    rl = r.json() or {}
+    check(r.status == 200 and rl.get('user') == jb['user']['id'] and rl.get('userName') == 'Freund' and rl.get('admin') is False
+          and rl.get('expires', 0) <= time.time() + 86400 + 5, f'admin: PC neu verbinden, höchstens 1 Tag ({rl})')
+    lst = PA.get('/api/v1/admin/invites').json()
+    check(any(i['id'] == rl['id'] and i['user'] == jb['user']['id'] and i['userName'] == 'Freund' for i in lst), 'invites: mit Konto')
+    check(PA.req('POST', '/api/v1/admin/invite', body={'user': 'ffffffff'}).status == 404, 'PC neu verbinden: Konto muss es geben')
+    check(B.req('POST', '/api/v1/admin/invite', body={'user': jb['user']['id']}).status == 403, 'PC neu verbinden: nur Admins (oder eigenes Handy)')
+    b_state = B.get('/api/v1/sync/state').json()
+    r = anon.req('POST', '/api/v1/account/register', body={'invite': rl['link'], 'name': 'Anderer Name', 'steamId': '7656', 'client': 'FragDesk 1.4.0'})
+    jr = r.json() or {}
+    check(r.status == 200 and jr['user']['id'] == jb['user']['id'] and jr['user']['name'] == 'Freund' and jr['user']['admin'] is False,
+          f'PC neu verbunden: dasselbe Konto, Name bleibt ({jr.get("user")})')
+    B2 = Client(port, token=jr.get('token'))
+    check(B.get('/api/v1/account').status == 401, 'alter Schlüssel gilt nicht mehr')
+    check(B2.get('/api/v1/sync/state').json() == b_state, 'neuer Schlüssel: Daten unverändert')
+    check(len(A.get('/api/v1/admin/users').json()) == 2, 'kein neues Konto')
+    check(anon.req('POST', '/api/v1/account/register', body={'invite': rl['code'], 'name': 'x'}).status == 403, 'Link gilt nur einmal')
+    B = B2
+    # vom eigenen Handy (auch ohne Admin)
+    r = PA.req('POST', '/api/v1/me/relink')
+    own = r.json() or {}
+    check(r.status == 200 and own.get('user') == ja['user']['id'] and '#invite=' in own.get('link', ''), 'Handy: PC neu verbinden fürs eigene Konto')
+    check(anon.req('POST', '/api/v1/me/relink').status == 401 and PA.req('POST', '/api/v1/me/relink', fd=False).status == 403,
+          'me/relink nur gekoppelt und mit X-FragDesk')
+    check(PA.req('DELETE', f"/api/v1/admin/invites/{own['id']}").status == 200, 'eigenen Link zurückziehen')
+    rc, out, _ = srv.cli('invite', '--user', jb['user']['id'])
+    check(rc == 0 and 'PC neu verbinden' in out and '#invite=' in out and '1 Tag' in out, f'invite --user ({out!r})')
+    rc, _, err = srv.cli('invite', '--user', 'kein-konto')
+    check(rc == 2, 'invite --user: ID geprüft')
+
     # Konto-Token abmelden
     check(B.req('POST', '/api/v1/account/logout').status == 200 and B.get('/api/v1/account').status == 401, 'FragDesk abmelden')
 

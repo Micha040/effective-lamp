@@ -2,7 +2,7 @@
 // Freunde einladen. Spezifikation: FragDesk-Server v1, Abschnitt „FragDesk (Windows)“.
 //
 // Abgleich in einem eigenen Thread mit niedriger Priorität (auch für die Festplatte): /sync/state holen, zuerst löschen,
-// was es in FragDesk nicht mehr gibt (macht Platz), dann fehlende Matches (.json, .heat) und Videos in Stücken à 4 MB
+// was in FragDesk gelöscht wurde (macht Platz), dann fehlende Matches (.json, .heat) und Videos in Stücken à 4 MB
 // (fortsetzbar), Vorschaubild und „done“. Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder Löschung und alle
 // 15 Minuten. Pause, solange CS2 läuft (nur der Prozessname per Toolhelp) oder FragDesk aufnimmt; bei Fehlern neuer
 // Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen Schnappschuss mit; Ergebnisse kommen als
@@ -43,6 +43,10 @@ public:
     // manual: sofort, auch während einer Wartezeit nach Fehlern
     void request(int delayMs = 3000, bool manual = false);
     void setRecording(bool on);   // FragDesk nimmt auf: Pause
+    // In FragDesk gelöscht: beim nächsten Abgleich auch auf dem Server löschen (merkt es sich bis dahin in settings.json).
+    // Nur das wird auf dem Server gelöscht – was in FragDesk bloß fehlt (neuer PC), bleibt dort.
+    void matchDeleted(const std::string& checksum);
+    void clipDeleted(const std::wstring& path);
     void stop();                  // beim Beenden
 
     // Befehle aus den Einstellungen
@@ -68,6 +72,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> d_;
+    void forget(const std::string& key);
 };
 
 // Einladungslink „https://host/#invite=<Code>“ zerlegen: Server-Adresse (geprüft, mit "/" am Ende) und Code

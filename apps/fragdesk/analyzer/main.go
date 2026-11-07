@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	version     = "1.3.0"
+	version     = "1.4.0"
 	csdaVersion = "1.13.0"
 )
 

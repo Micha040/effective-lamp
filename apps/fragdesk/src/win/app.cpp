@@ -481,7 +481,7 @@ void App::deleteMatch(const std::string& checksum) {
     }
     invalidateCareer();
     lib.scanAsync();
-    sync->request();   // auch auf dem eigenen Server löschen
+    sync->matchDeleted(checksum);   // auch auf dem eigenen Server löschen
     invalidate();
 }
 

@@ -181,6 +181,10 @@ Kosten. Zu sehen ist dasselbe wie in FragDesk, fürs Handy umgebaut: **Übersich
 **Statistiken** samt Verlauf und deine **Momente und Videos**. Heatmaps und die 2D-Ansicht kommen noch. Ansehen und
 Aufnehmen in CS2 bleibt am PC.
 
+Zwei Wege: **Direkt vom PC** (so wie hier beschrieben – der PC muss an sein) oder über einen **[eigenen
+Server](#eigener-server)** (ein paar Euro im Monat; der PC muss nicht an sein, auch mit Freunden teilbar). Umschalten
+in FragDesk unter Einstellungen › Handy-App › Verbindung.
+
 **Einrichten (einmalig):**
 
 1. In FragDesk unter **Einstellungen › Handy-App** „Handy-App erlauben“ einschalten. Beim ersten Mal fragt Windows, ob
@@ -257,6 +261,15 @@ FragDesk neue Matches und Videos hoch (beim Start, nach jeder Auswertung und Auf
 Stücken, ein Abbruch schadet nicht) und zeigt dort Server, Konto, Speicher und Stand. **„Handy verbinden“** zeigt wie
 gewohnt einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“ bleiben Videos auf Wunsch am PC;
 **„Trennen“** meldet FragDesk vom Server ab.
+
+**Löschen:** Löschst du in FragDesk ein Match oder Video, verschwindet es beim nächsten Abgleich auch vom Server. Fehlt
+etwas nur in FragDesk – neuer PC, Video im Explorer gelöscht, um am PC Platz zu sparen –, bleibt es auf dem Server.
+
+**Neuer PC oder „Trennen“ gedrückt:** In der Handy-App unter **Einstellungen › PC neu verbinden** einen Link holen und
+in FragDesk wie eine Einladung einfügen – das verbindet FragDesk wieder mit *deinem* Konto, alle Daten bleiben (der
+bisher verbundene PC wird abgemeldet; der Link gilt einen Tag und einmal). Für Freunde macht das der Admin unter
+**Server verwalten** › Konto › „PC neu verbinden“, auf dem Server geht es mit `fragdesk-server invite --user <ID>`
+(IDs zeigt `fragdesk-server users`).
 
 **Freunde einladen:** als Admin in FragDesk mit **„Freund einladen“** (der Link landet in der Zwischenablage), in der
 Handy-App unter **Einstellungen › Server verwalten** (Link erstellen und direkt teilen) oder auf dem Server mit

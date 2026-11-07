@@ -43,7 +43,7 @@ function draw(ctx, me, users, invites) {
       });
       return h('div', {class: 'row'},
         h('span', {class: 'lead'}, icon(inv.admin ? 'shield' : 'link')),
-        h('div', {class: 'main'}, h('b', null, inv.admin ? 'Einladung als Admin' : 'Einladung'),
+        h('div', {class: 'main'}, h('b', null, inv.user ? `PC neu verbinden: ${inv.userName || 'Konto'}` : inv.admin ? 'Einladung als Admin' : 'Einladung'),
           h('small', null, `${inv.byName ? 'von ' + inv.byName + ' · ' : ''}gilt bis ${fmtDay(inv.expires)}`)),
         revoke);
     }))));
@@ -97,7 +97,32 @@ function inviteCard(ctx) {
   return card(null, ...body);
 }
 
-function linkBox(inv) {
+// „PC neu verbinden“: Link für ein bestehendes Konto (neuer PC, nach „Trennen“, FragDesk neu installiert). Der Link gilt
+// einen Tag und einmal; der bisher verbundene PC dieses Kontos wird abgemeldet, die Daten bleiben.
+export function relinkSheet(u, self) {
+  const make = h('button', {class: 'btn primary block', type: 'button'}, icon('link'), 'Link erstellen');
+  const box = h('div');
+  make.addEventListener('click', async () => {
+    make.disabled = true;
+    try {
+      const inv = self ? await api.post('/api/v1/me/relink') : await api.post('/api/v1/admin/invite', {user: u.id});
+      box.replaceChildren(linkBox(inv, self));
+      make.remove();
+    } catch (e) {
+      toast(e.message, true);
+      make.disabled = false;
+    }
+  });
+  sheet({
+    title: self ? 'PC neu verbinden' : `PC von ${u.name} neu verbinden`,
+    text: (self ? 'Für einen neuen PC, nach „Trennen“ oder wenn FragDesk neu installiert ist: ' : `Für einen neuen PC von ${u.name} oder nach „Trennen“: `) +
+      'Link am PC kopieren und in FragDesk unter Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“ einfügen. ' +
+      'Die Daten auf dem Server bleiben, ein bisher verbundener PC dieses Kontos wird abgemeldet. Der Link gilt einen Tag und nur einmal.',
+    body: h('div', null, make, box),
+  });
+}
+
+function linkBox(inv, self) {
   const input = h('input', {class: 'linkbox', readonly: true, value: inv.link, 'aria-label': 'Einladungslink'});
   input.addEventListener('focus', () => input.select());
   const copy = h('button', {class: 'btn', type: 'button'}, icon('link'), 'Kopieren');
@@ -107,7 +132,12 @@ function linkBox(inv) {
     const share = h('button', {class: 'btn primary', type: 'button'}, icon('share'), 'Teilen');
     share.addEventListener('click', async () => {
       try {
-        await navigator.share({
+        await navigator.share(inv.user ? {
+          title: 'FragDesk: PC neu verbinden',
+          text: self ? 'Link für FragDesk am PC: Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“ (vorher den Link kopieren).'
+            : 'Damit verbindest du FragDesk wieder mit deinem Konto auf meinem Server. In FragDesk am PC: Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“ (vorher den Link kopieren).',
+          url: inv.link,
+        } : {
           title: 'Einladung zu FragDesk',
           text: 'Deine Einladung für meinen FragDesk-Server. In FragDesk am PC: Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“ (vorher den Link kopieren).',
           url: inv.link,
@@ -120,7 +150,7 @@ function linkBox(inv) {
   }
   return h('div', {class: 'invite-new'},
     h('div', {class: 'sub', style: {fontSize: '13px', margin: '14px 0 6px'}},
-      (inv.admin ? 'Admin-Einladung' : 'Einladung') + ' – gilt bis ' + fmtDay(inv.expires)),
+      (inv.user ? 'PC neu verbinden' : inv.admin ? 'Admin-Einladung' : 'Einladung') + ' – gilt bis ' + fmtDay(inv.expires)),
     input, h('div', {class: 'btnrow'}, btns));
 }
 
@@ -138,8 +168,11 @@ function userSheet(ctx, u, self) {
     } catch (e) { toast(e.message, true); }
   });
   limits.style.cssText = 'margin: 4px 0 14px; padding: 0; flex-wrap: wrap; overflow: visible';   // alle sechs auf einen Blick
+  const relink = h('button', {class: 'btn block', type: 'button', style: {marginBottom: '10px'}}, icon('link'), 'PC neu verbinden');
+  relink.addEventListener('click', () => relinkSheet(u, self));
   const body = [h('div', {class: 'section', style: {margin: '16px 0 8px'}}, 'Speicherlimit'), limits,
-    pick < 0 && u.limit ? h('div', {class: 'muted', style: {fontSize: '12.5px', margin: '-6px 0 12px'}}, 'Zurzeit: ' + fmtBytes(u.limit)) : null];
+    pick < 0 && u.limit ? h('div', {class: 'muted', style: {fontSize: '12.5px', margin: '-6px 0 12px'}}, 'Zurzeit: ' + fmtBytes(u.limit)) : null,
+    relink];
   if (!self) {
     const remove = h('button', {class: 'btn danger block', type: 'button'}, icon('close'), 'Konto entfernen');
     remove.addEventListener('click', async () => {

@@ -2,6 +2,7 @@
 import {h, icon, card, chips, notice, isIOS, standalone, usageBar, fmtDay} from '../ui.js';
 import * as api from '../api.js';
 import {store, applyTheme} from '../app.js';
+import {relinkSheet} from './admin.js';
 
 const count = (n, one, many) => `${n ?? '–'} ${n === 1 ? one : many}`;
 
@@ -58,13 +59,17 @@ async function renderServer(ctx, info) {
           ? h('div', {class: 'sub', style: {fontSize: '13px', marginTop: '10px'}}, 'Dein Speicher ist voll – neue Videos lädt FragDesk erst wieder hoch, wenn Platz ist. Lösche alte Videos in FragDesk oder frag den Admin nach mehr Platz.')
           : null),
     ];
-    if (u.admin) {
-      out.push(h('section', {class: 'card flush'}, h('div', {class: 'list'},
-        h('a', {class: 'row', href: '#/admin'},
-          h('span', {class: 'lead'}, icon('users')),
-          h('div', {class: 'main'}, h('b', null, 'Server verwalten'), h('small', null, 'Freunde einladen, Konten und Speicher')),
-          icon('chev', 'chev')))));
-    }
+    const relink = h('button', {class: 'row', type: 'button'},
+      h('span', {class: 'lead'}, icon('link')),
+      h('div', {class: 'main'}, h('b', null, 'PC neu verbinden'), h('small', null, 'Neuer PC oder nach „Trennen“: Link für FragDesk')),
+      icon('chev', 'chev'));
+    relink.addEventListener('click', () => relinkSheet(u, true));
+    out.push(h('section', {class: 'card flush'}, h('div', {class: 'list'},
+      u.admin ? h('a', {class: 'row', href: '#/admin'},
+        h('span', {class: 'lead'}, icon('users')),
+        h('div', {class: 'main'}, h('b', null, 'Server verwalten'), h('small', null, 'Freunde einladen, Konten und Speicher')),
+        icon('chev', 'chev')) : null,
+      me && me.user ? relink : null)));
     out.push(h('div', {class: 'section'}, 'Verbindung'));
     out.push(h('section', {class: 'card flush'}, h('div', {class: 'list'},
       kv('Verbunden mit', 'deinem FragDesk-Server'),

@@ -67,6 +67,7 @@ struct Snapshot {
     std::string name, steamId, profile;   // Profil jetzt und zuletzt gemeldet
     std::vector<std::string> matches;     // Prüfsummen, neueste zuerst
     std::vector<SyncClip> clips;          // neueste zuerst
+    std::vector<std::string> gone;        // in FragDesk gelöscht ("m:…", "c:…"), auf dem Server noch zu löschen
 };
 
 // ---- Ergebnisse für den UI-Thread (WM_APP_SYNC, lParam) --------------------------------------------------------------
@@ -75,6 +76,7 @@ struct SyncEvent {
     uint64_t epoch = 0;   // für welches Konto (ältere werden verworfen)
     SyncStatus status;
     std::string url, token, user, userId, code, link, profile;
+    std::vector<std::string> gone;   // Synced: auf dem Server erledigte Löschungen
     bool admin = false, auth = false;
     int64_t time = 0;     // Synced: Zeitpunkt; Pairing, Invite: gültig bis
     std::wstring text;
@@ -247,6 +249,7 @@ public:
     std::wstring text;                                  // Grund bei Net, Full, Auth, Item
     SyncStatus::State pausedBy = SyncStatus::PausedCs2;
     int uploads = 0, deletes = 0;
+    std::vector<std::string> goneDone;                  // erledigte Löschungen (auch: gab es dort schon nicht mehr)
 
 private:
     struct LocalMatch {
@@ -426,38 +429,38 @@ Fail Pass::profile() {
     return Fail::None;
 }
 
-// Was es in FragDesk nicht mehr gibt, auch vom Server löschen. Ein FragDesk ganz ohne Matches und Videos (neuer PC,
-// anderer Datenordner) löscht nichts – sonst wäre mit einem Klick alles weg.
+// Was in FragDesk gelöscht wurde, auch auf dem Server löschen – nur das: Fehlt etwas in FragDesk bloß (neuer PC, anderer
+// Datenordner, Video im Explorer gelöscht), bleibt es auf dem Server.
 Fail Pass::removeGone(const Remote& rem) {
-    if (s_.matches.empty() && s_.clips.empty()) {
-        if (!rem.matches.empty() || !rem.clips.empty())
-            logLine(L"Server: in FragDesk gibt es keine Matches und Videos – auf dem Server wird deshalb nichts gelöscht");
-        return Fail::None;
-    }
-    std::set<std::string> matches(s_.matches.begin(), s_.matches.end()), clips;
-    for (const auto& c : s_.clips) clips.insert(c.id);
-    for (int kind = 0; kind < 2; ++kind) {
-        std::vector<std::string> gone;
-        if (kind == 0) {
-            for (const auto& kv : rem.matches)
-                if (!matches.count(kv.first) && safeChecksum(kv.first)) gone.push_back(kv.first);
-        } else {
-            for (const auto& kv : rem.clips)
-                if (!clips.count(kv.first) && safeClipId(kv.first)) gone.push_back(kv.first);
+    for (const auto& g : s_.gone) {
+        bool match = g.compare(0, 2, "m:") == 0;
+        std::string id = g.substr(2);
+        if ((match && !safeChecksum(id)) || (!match && (g.compare(0, 2, "c:") != 0 || !safeClipId(id)))) {
+            goneDone.push_back(g);   // unbrauchbarer Eintrag: vergessen
+            continue;
         }
-        for (const auto& id : gone) {
-            st.current = L"Löscht, was es in FragDesk nicht mehr gibt …";
-            progress();
-            HttpResponse r = call(L"DELETE", (kind == 0 ? "api/v1/sync/match/" : "api/v1/sync/clip/") + id);
-            Fail f = check(r);
-            if (f == Fail::Item) {
-                if (r.status != 404) logLine(L"Server: %hs nicht gelöscht – %ls", id.c_str(), text.c_str());   // 404: schon weg
-                continue;
-            }
-            if (f != Fail::None) return f;
-            ++deletes;
-            changed_ = true;
+        bool there = match ? rem.matches.count(id) > 0 : rem.clips.count(id) > 0;
+        // inzwischen wieder da (dieselbe Demo neu ausgewertet, neues Video unter demselben Namen): nichts löschen, der
+        // Abgleich unten bringt den Server auf den Stand von FragDesk
+        bool back = match ? std::find(s_.matches.begin(), s_.matches.end(), id) != s_.matches.end()
+                          : std::any_of(s_.clips.begin(), s_.clips.end(), [&](const SyncClip& c) { return c.id == id; });
+        if (!there || back) {
+            goneDone.push_back(g);
+            continue;
         }
+        st.current = L"Löscht, was du in FragDesk gelöscht hast …";
+        progress();
+        HttpResponse r = call(L"DELETE", (match ? "api/v1/sync/match/" : "api/v1/sync/clip/") + id);
+        Fail f = check(r);
+        if (f == Fail::Item) {
+            if (r.status != 404) logLine(L"Server: %hs nicht gelöscht – %ls", id.c_str(), text.c_str());   // 404: schon weg
+            goneDone.push_back(g);
+            continue;
+        }
+        if (f != Fail::None) return f;
+        goneDone.push_back(g);
+        ++deletes;
+        changed_ = true;
     }
     return Fail::None;
 }
@@ -693,6 +696,7 @@ void runOnce(Shared& sh, const Snapshot& s) {
             e->kind = SyncEvent::Synced;
             e->epoch = s.epoch;
             e->time = fdapi::nowEpoch();
+            e->gone = std::move(pass.goneDone);
             post(sh, e);
             break;
         }
@@ -959,6 +963,7 @@ void ServerSync::request(int delayMs, bool manual) {
     snap->name = d.app.meName.empty() ? std::string("Spieler") : narrow(d.app.meName);
     snap->steamId = d.app.me;
     snap->profile = srv.profile;
+    snap->gone = srv.gone;
     for (const auto& m : d.app.lib.matches)
         if (safeChecksum(m->checksum)) snap->matches.push_back(m->checksum);
     for (const Clip& c : d.app.clips) {
@@ -990,6 +995,22 @@ void ServerSync::request(int delayMs, bool manual) {
     }
     d.sh->cv.notify_all();
     d.ensureThread();
+}
+
+void ServerSync::matchDeleted(const std::string& checksum) { forget("m:" + checksum); }
+
+void ServerSync::clipDeleted(const std::wstring& path) { forget("c:" + fdapi::clipId(narrow(path))); }
+
+void ServerSync::forget(const std::string& key) {
+    Impl& d = *d_;
+    ServerSettings& srv = d.app.settings.mobile.srv;
+    if (srv.token.empty()) return;   // nicht mit einem Server verbunden: nichts zu tun
+    if (std::find(srv.gone.begin(), srv.gone.end(), key) == srv.gone.end()) {
+        if (srv.gone.size() >= kMaxGone) srv.gone.erase(srv.gone.begin());
+        srv.gone.push_back(key);
+        d.app.saveSettings();
+    }
+    request();
 }
 
 void ServerSync::setRecording(bool on) {
@@ -1048,7 +1069,8 @@ void ServerSync::disconnect() {
     ServerSettings& srv = d.app.settings.mobile.srv;
     if (srv.token.empty() && srv.url.empty()) return;
     if (MessageBoxW(d.app.hwnd,
-                    L"Vom Server trennen?\n\nDeine Daten auf dem Server bleiben erhalten. Um wieder zu verbinden, brauchst du eine neue Einladung.",
+                    L"Vom Server trennen?\n\nDeine Daten auf dem Server bleiben erhalten. Zurück zu diesem Konto geht es später mit einem Link "
+                    L"„PC neu verbinden“ – aus der Handy-App (Einstellungen) oder vom Admin des Servers.",
                     L"FragDesk", MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
         return;
     std::wstring label = serverLabel();
@@ -1136,6 +1158,11 @@ LRESULT ServerSync::onMessage(WPARAM, LPARAM lp) {
         case SyncEvent::Synced:
             if (current) {
                 srv.lastSync = e->time;
+                if (!e->gone.empty()) {
+                    std::set<std::string> done(e->gone.begin(), e->gone.end());
+                    srv.gone.erase(std::remove_if(srv.gone.begin(), srv.gone.end(), [&](const std::string& g) { return done.count(g) > 0; }),
+                                   srv.gone.end());
+                }
                 app.saveSettings();
             }
             break;

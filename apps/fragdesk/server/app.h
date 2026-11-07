@@ -3,7 +3,8 @@
 // das Geräte-Token gehört.
 //
 // Anmeldung: Konto-Token (FragDesk) als „Authorization: Bearer …“ nur für /api/v1/account/*, /api/v1/sync/* und
-// /api/v1/admin/*; Geräte-Token (Handy) als Cookie „fdk“ für die Handy-App, /api/v1/me und /api/v1/admin/*.
+// /api/v1/admin/*; Geräte-Token (Handy) als Cookie „fdk“ für die Handy-App, /api/v1/me, /api/v1/me/relink und
+// /api/v1/admin/*.
 // Schreibende Anfragen brauchen immer „X-FragDesk: 1“.
 #pragma once
 
@@ -67,6 +68,8 @@ private:
     void phone(const fdapi::Request& req, fdapi::Response& res);
 
     void createInvite(const fdapi::Request& req, fdapi::Response& res, const std::string& by);
+    void sendInvite(fdapi::Response& res, const std::string& by, bool admin, int days, const std::string& forUser);
+    void relink(const fdapi::Request& req, fdapi::Response& res);
     void listUsers(fdapi::Response& res);
     std::string serverJson();   // {"version","url"}
     fdapi::Host host(const UserPtr& u);

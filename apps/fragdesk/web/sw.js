@@ -1,6 +1,6 @@
 // FragDesk Handy-App – Service Worker (nur mit HTTPS aktiv): startet auch ohne Verbindung mit den zuletzt geladenen
 // Daten. Immer zuerst das Netz, der Speicher ist nur der Rückfall. Videos werden nie gespeichert.
-const CACHE = 'fragdesk-1.3.0';
+const CACHE = 'fragdesk-1.4.0';
 const SHELL = ['./', 'index.html', 'app.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'js/app.js', 'js/api.js', 'js/ui.js',
   'js/chart.js', 'js/filters.js', 'js/pages/pair.js', 'js/pages/overview.js', 'js/pages/matches.js', 'js/pages/match.js', 'js/pages/stats.js',
   'js/pages/moments.js', 'js/pages/settings.js', 'js/pages/player.js', 'js/pages/admin.js', 'js/pages/invite.js', 'css/match.css', 'css/stats.css'];

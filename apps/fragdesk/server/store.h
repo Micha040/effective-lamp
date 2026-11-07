@@ -95,6 +95,7 @@ struct UserInfo {
 
 struct Invite {
     std::string id, hash, by;   // hash: SHA-256 des Codes, by: Konto, das eingeladen hat ("" = Befehlszeile)
+    std::string user;           // „PC neu verbinden“: dieses Konto bekommt einen neuen Schlüssel ("" = neues Konto)
     bool admin = false;
     int64_t created = 0, expires = 0;
 };
@@ -149,7 +150,9 @@ public:
     std::string profileName(const UserPtr& u) const;
 
     // ---- Konten ---------------------------------------------------------------------------------------------------
-    // Einladung einlösen: neues Konto + Konto-Token. Fehler: 403 (Code falsch/abgelaufen/benutzt), 500
+    // Einladung einlösen: neues Konto + Konto-Token – bzw. bei „PC neu verbinden“ ein neues Konto-Token für das
+    // bestehende Konto (die bisherigen Konto-Tokens gelten dann nicht mehr). Fehler: 403 (Code falsch/abgelaufen/benutzt,
+    // Konto weg), 500
     Fail registerUser(const std::string& code, const std::string& name, const std::string& steamId, const std::string& client,
                       UserPtr& user, std::string& token);
     Fail setProfile(const UserPtr& u, const std::string& name, const std::string& steamId);
@@ -158,7 +161,8 @@ public:
     Fail removeUser(const std::string& id);   // 404, 409 (letzter Admin)
 
     // ---- Einladungen ----------------------------------------------------------------------------------------------
-    Fail createInvite(bool admin, int days, const std::string& by, Invite& out, std::string& code);
+    // forUser: „PC neu verbinden“ für dieses Konto (admin gilt dann nicht); 404, wenn es das Konto nicht gibt
+    Fail createInvite(bool admin, int days, const std::string& by, Invite& out, std::string& code, const std::string& forUser = std::string());
     std::vector<Invite> invites();   // offene, neueste zuerst (abgelaufene fliegen raus)
     bool removeInvite(const std::string& id);
     std::string inviteLink(const std::string& code) const;

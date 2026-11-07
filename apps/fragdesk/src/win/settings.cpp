@@ -88,6 +88,8 @@ bool Settings::load() {
             s.lastSync = int64_t(sv.getNumber("lastSync"));
             s.used = int64_t(sv.getNumber("used", -1));
             s.limit = int64_t(sv.getNumber("limit", 0));
+            for (const auto& g : sv["gone"].arr)
+                if (g.isString() && g.str.size() > 2 && g.str.size() <= 80 && s.gone.size() < kMaxGone) s.gone.push_back(g.str);
         }
         mobile.devices.clear();
         for (const auto& d : mo["devices"].arr) {
@@ -128,9 +130,11 @@ bool Settings::save() const {
     o += "    \"server\": {\"url\": " + jsonQuote(sv.url) + ", \"token\": " + jsonQuote(sv.token) + ", \"user\": " + jsonQuote(sv.user) +
          ", \"userId\": " + jsonQuote(sv.userId) + ", \"admin\": " + (sv.admin ? "true" : "false") + ", \"videos\": " + (sv.videos ? "true" : "false") +
          ", \"profile\": " + jsonQuote(sv.profile);
-    std::snprintf(b, sizeof b, ", \"lastSync\": %lld, \"used\": %lld, \"limit\": %lld},\n    \"devices\": [", static_cast<long long>(sv.lastSync),
+    std::snprintf(b, sizeof b, ", \"lastSync\": %lld, \"used\": %lld, \"limit\": %lld, \"gone\": [", static_cast<long long>(sv.lastSync),
                   static_cast<long long>(sv.used), static_cast<long long>(sv.limit));
     o += b;
+    for (size_t i = 0; i < sv.gone.size(); ++i) o += (i ? ", " : "") + jsonQuote(sv.gone[i]);
+    o += "]},\n    \"devices\": [";
     for (size_t i = 0; i < mobile.devices.size(); ++i) {
         const MobileDevice& d = mobile.devices[i];
         std::snprintf(b, sizeof b, ", \"created\": %lld, \"lastSeen\": %lld}", static_cast<long long>(d.created), static_cast<long long>(d.lastSeen));

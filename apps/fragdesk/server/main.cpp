@@ -3,6 +3,7 @@
 //
 //   fragdesk-server serve  [--data /var/lib/fragdesk] [--listen 127.0.0.1:7420] [--url https://<domain>/] [--min-free 512]
 //   fragdesk-server invite [--admin] [--days 7] [--data …]   Einladungslink ausgeben (spricht mit dem laufenden Server)
+//   fragdesk-server invite --user <ID> [--data …]           Link „PC neu verbinden“ für ein bestehendes Konto
 //   fragdesk-server users  [--json] [--data …]               Konten auflisten
 //   fragdesk-server version
 #include <arpa/inet.h>
@@ -41,7 +42,7 @@ namespace {
 const char* kVersion = FD_SERVER_VERSION;
 
 struct Options {
-    std::string cmd, data = "/var/lib/fragdesk", listen, url;
+    std::string cmd, data = "/var/lib/fragdesk", listen, url, user;
     bool admin = false, json = false;
     int days = 7;
     int64_t minFreeMb = 512;
@@ -52,6 +53,7 @@ void usage(FILE* out) {
             "fragdesk-server %s – eigener Server für FragDesk (Stats und Clips für die Handy-App)\n\n"
             "  fragdesk-server serve  [--data DIR] [--listen 127.0.0.1:7420] [--url https://DOMAIN/] [--min-free MB]\n"
             "  fragdesk-server invite [--admin] [--days 7] [--data DIR]   Einladungslink für FragDesk ausgeben\n"
+            "  fragdesk-server invite --user ID [--data DIR]          Link „PC neu verbinden“ für ein Konto (1 Tag)\n"
             "  fragdesk-server users  [--json] [--data DIR]               Konten auflisten\n"
             "  fragdesk-server version\n\n"
             "Standard für --data: /var/lib/fragdesk. invite und users sprechen mit dem laufenden Server über 127.0.0.1\n"
@@ -208,7 +210,12 @@ bool localRequest(const Options& o, const std::string& method, const std::string
 }
 
 int cliInvite(const Options& o) {
-    std::string body = std::string("{\"admin\":") + (o.admin ? "true" : "false") + ",\"days\":" + std::to_string(o.days) + "}", out;
+    if (!o.user.empty() && o.user.find_first_not_of("0123456789abcdef") != std::string::npos) {
+        std::cerr << "Fehler: --user erwartet die Konto-ID (siehe fragdesk-server users)\n";
+        return 2;
+    }
+    std::string body = std::string("{\"admin\":") + (o.admin ? "true" : "false") + ",\"days\":" + std::to_string(o.days) +
+                       (o.user.empty() ? "" : ",\"user\":\"" + o.user + "\"") + "}", out;
     int status = 0;
     if (!localRequest(o, "POST", "/api/v1/local/invite", body, status, out)) return 1;
     json::Value v;
@@ -218,7 +225,10 @@ int cliInvite(const Options& o) {
         return 1;
     }
     int days = int(v.getNumber("days", o.days));
-    std::cout << (v.getBool("admin") ? "Einladung für einen Admin" : "Einladung") << " – gilt " << days << (days == 1 ? " Tag" : " Tage")
+    std::string what = !o.user.empty() ? "PC neu verbinden für „" + v.getString("userName") + "“ (der bisherige PC wird abgemeldet)"
+                       : v.getBool("admin")  ? "Einladung für einen Admin"
+                                             : "Einladung";
+    std::cout << what << " – gilt " << days << (days == 1 ? " Tag" : " Tage")
               << " und nur einmal. In FragDesk: Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“.\n"
               << v.getString("link") << std::endl;
     return 0;
@@ -277,6 +287,7 @@ int main(int argc, char** argv) {
         else if (a == "--listen") o.listen = next();
         else if (a == "--url") o.url = next();
         else if (a == "--admin") o.admin = true;
+        else if (a == "--user") o.user = next();
         else if (a == "--json") o.json = true;
         else if (a == "--days") o.days = std::atoi(next().c_str());
         else if (a == "--min-free") o.minFreeMb = std::atoll(next().c_str());

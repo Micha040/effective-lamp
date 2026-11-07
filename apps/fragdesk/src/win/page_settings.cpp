@@ -111,8 +111,8 @@ std::wstring syncText(Canvas& c, const SyncStatus& st, const ServerSettings& srv
     switch (st.state) {
         case SyncStatus::AuthFailed:
             col = c.th.danger;
-            return L"Der Server lässt dieses FragDesk nicht mehr rein (abgemeldet oder Konto gelöscht). Lass dir eine neue Einladung "
-                   L"schicken, kopiere sie und klicke „Neu verbinden“.";
+            return L"Der Server lässt dieses FragDesk nicht mehr rein (anderer PC verbunden, abgemeldet oder Konto gelöscht). Hol dir in "
+                   L"der Handy-App unter Einstellungen einen Link „PC neu verbinden“ (oder vom Admin), kopiere ihn und klicke „Neu verbinden“.";
         case SyncStatus::PausedCs2: col = c.th.warning; return L"Pausiert – CS2 läuft. Danach geht es von selbst weiter." + done;
         case SyncStatus::PausedRecording: col = c.th.warning; return L"Pausiert – FragDesk nimmt gerade auf." + done;
         case SyncStatus::Full: col = c.th.danger; return st.error + L" Lösche Videos oder bitte den Admin um mehr Platz.";
@@ -144,7 +144,8 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
     float h = 0;
     if (srv.token.empty()) {   // noch nicht verbunden
         const std::wstring join =
-            L"Du brauchst eine Einladung vom Admin deines FragDesk-Servers: Link kopieren (https://…/#invite=…), dann hier einfügen.";
+            L"Du brauchst eine Einladung vom Admin deines FragDesk-Servers – oder für dein bisheriges Konto einen Link „PC neu verbinden“ "
+            L"aus der Handy-App (Einstellungen): Link kopieren (https://…/#invite=…), dann hier einfügen.";
         float rh = rowHeight(c, cw, join, 220, 72);
         if (sec) {
             RectF r = sec->row(L"Mit Server verbinden", join, rh, 220);
@@ -160,7 +161,7 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
         if (sec) {
             RectF r = sec->row(L"Eigenen Server einrichten", how, rh2, 170);
             c.button(RectF(r.X + r.Width - 160, r.Y + (rh2 - 36) / 2, 160, 36), L"Anleitung", "s-howto",
-                     [] { openInShell(std::wstring(kRepoUrl) + L"/tree/main/apps/fragdesk#handy-app"); }, Btn::Secondary, Icon::External);
+                     [] { openInShell(std::wstring(kRepoUrl) + L"/tree/main/apps/fragdesk#eigener-server"); }, Btn::Secondary, Icon::External);
         }
         return h + rh2;
     }

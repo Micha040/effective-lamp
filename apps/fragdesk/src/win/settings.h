@@ -22,6 +22,8 @@ struct MobileDevice {
 };
 
 // Eigener Server (Einstellungen › Handy-App › „Eigener Server“)
+constexpr size_t kMaxGone = 5000;   // höchstens so viele offene Löschungen merken
+
 struct ServerSettings {
     std::string url;            // z. B. https://203-0-113-5.sslip.io/ (leer = nicht verbunden)
     std::string token;          // Konto-Token für FragDesk
@@ -31,6 +33,9 @@ struct ServerSettings {
     std::string profile;        // zuletzt gemeldetes Profil ("Name\nSteamID")
     int64_t lastSync = 0;       // letzter vollständiger Abgleich (Sekunden seit 1970)
     int64_t used = -1, limit = 0;   // Speicher laut Server beim letzten Abgleich (−1 = unbekannt, limit 0 = unbegrenzt)
+    // In FragDesk gelöscht, auf dem Server noch zu löschen: "m:<Prüfsumme>" bzw. "c:<Video-ID>". Nur was FragDesk selbst
+    // löscht, kommt hierher – fehlt etwas nur (neuer PC, anderer Datenordner), bleibt es auf dem Server.
+    std::vector<std::string> gone;
 };
 
 struct MobileSettings {

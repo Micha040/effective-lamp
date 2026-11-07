@@ -247,6 +247,7 @@ void App::handle(const Request& req, Response& res) {
         if (startsWith(p, "/api/v1/local/")) return local(req, res);
         if (p == "/api/v1/pair") return pair(req, res);
         if (p == "/api/v1/me") return me(req, res);
+        if (p == "/api/v1/me/relink") return relink(req, res);
         if (p == "/api/v1/logout") return phoneLogout(req, res);
         return phone(req, res);   // info, overview, matches, match, stats, moments, session
     }
@@ -517,17 +518,34 @@ void App::sync(const Request& req, Response& res) {
 }
 
 // ---- Admin ------------------------------------------------------------------------------------------------------------
+// Einladung (neues Konto) oder mit "user" ein Link „PC neu verbinden“ für dieses Konto (gilt höchstens 1 Tag)
 void App::createInvite(const Request& req, Response& res, const std::string& by) {
     if (req.method != "POST") return res.error(405, "Nur POST");
     json::Value v;
     if (!parseBody(req, res, v)) return;
-    int days = int(std::max(1.0, std::min(30.0, v.getNumber("days", 7))));
+    std::string forUser = v.getString("user");
+    if (!forUser.empty() && !validUserId(forUser)) return res.error(404, "Dieses Konto gibt es nicht.");
+    int days = int(std::max(1.0, std::min(forUser.empty() ? 30.0 : 1.0, v.getNumber("days", 7))));
+    sendInvite(res, by, v.getBool("admin"), days, forUser);
+}
+
+void App::sendInvite(Response& res, const std::string& by, bool admin, int days, const std::string& forUser) {
     Invite inv;
     std::string code;
-    Fail f = store_.createInvite(v.getBool("admin"), days, by, inv, code);
+    Fail f = store_.createInvite(admin, days, by, inv, code, forUser);
     if (!f.ok()) return fail(res, f);
+    UserPtr target = forUser.empty() ? nullptr : store_.byId(forUser);
     JsonW j;
-    j.obj().kv("id", inv.id).kv("code", code).kv("link", store_.inviteLink(code)).ki("expires", inv.expires).kb("admin", inv.admin).ki("days", days).end();
+    j.obj()
+        .kv("id", inv.id)
+        .kv("code", code)
+        .kv("link", store_.inviteLink(code))
+        .ki("expires", inv.expires)
+        .kb("admin", inv.admin)
+        .ki("days", days)
+        .kv("user", inv.user)
+        .kv("userName", target ? store_.profileName(target) : std::string())
+        .end();
     res.body = j.take();
 }
 
@@ -556,6 +574,8 @@ void App::admin(const Request& req, Response& res, const UserPtr& who, const std
                 .ki("expires", i.expires)
                 .kv("by", i.by)
                 .kv("byName", by ? store_.profileName(by) : i.by.empty() ? "Befehlszeile" : "")
+                .kv("user", i.user)
+                .kv("userName", i.user.empty() ? std::string() : [&] { UserPtr t = store_.byId(i.user); return t ? store_.profileName(t) : std::string(); }())
                 .end();
         }
         j.end();
@@ -649,6 +669,14 @@ void App::me(const Request& req, Response& res) {
     j.key("server").raw(serverJson());
     j.end();
     res.body = j.take();
+}
+
+// „PC neu verbinden“ vom eigenen Handy: Link für das eigene Konto (neuer PC, nach „Trennen“), gilt 1 Tag
+void App::relink(const Request& req, Response& res) {
+    if (req.method != "POST") return res.error(405, "Nur POST");
+    UserPtr u = store_.byDeviceToken(deviceToken(req));
+    if (!u) return res.error(401, kNoDevice);
+    sendInvite(res, u->id, false, 1, u->id);
 }
 
 void App::phoneLogout(const Request& req, Response& res) {

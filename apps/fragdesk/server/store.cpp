@@ -150,6 +150,7 @@ bool Store::loadServer(std::string& err) {
         inv.id = e.getString("id");
         inv.hash = e.getString("hash");
         inv.by = e.getString("by");
+        inv.user = e.getString("user");
         inv.admin = e.getBool("admin");
         inv.created = int64_t(e.getNumber("created"));
         inv.expires = int64_t(e.getNumber("expires"));
@@ -272,7 +273,7 @@ bool Store::saveServer() {
     j.end();
     j.key("invites").arr();
     for (const Invite& i : invites_)
-        j.obj().kv("id", i.id).kv("hash", i.hash).kb("admin", i.admin).kv("by", i.by).ki("created", i.created).ki("expires", i.expires).end();
+        j.obj().kv("id", i.id).kv("hash", i.hash).kb("admin", i.admin).kv("by", i.by).kv("user", i.user).ki("created", i.created).ki("expires", i.expires).end();
     j.end().end();
     bool ok = writeAtomic(joinPath(dir_, "server.json"), j.take() + "\n");
     if (ok) serverDirty_ = false;
@@ -459,6 +460,36 @@ Fail Store::registerUser(const std::string& code, const std::string& name, const
         saveServer();
         return Fail::make(403, "Die Einladung ist abgelaufen. Lass dir einen neuen Link schicken.");
     }
+    if (!inv->user.empty()) {   // „PC neu verbinden“: bestehendes Konto, neuer Schlüssel; der bisherige PC ist abgemeldet
+        auto it = users_.find(inv->user);
+        if (it == users_.end()) {
+            invites_.erase(inv);
+            saveServer();
+            return Fail::make(403, "Das Konto zu diesem Link gibt es auf dem Server nicht mehr.");
+        }
+        UserPtr u = it->second;
+        token = randomHex(32);
+        if (token.empty()) return Fail::make(500, "Kein Zufallsgenerator verfügbar.");
+        std::vector<TokenRec> old = u->tokens;
+        TokenRec t;
+        t.hash = sha256Hex(token);
+        t.client = cleanText(client, 60);
+        t.created = t.lastSeen = now;
+        u->tokens.assign(1, t);
+        if (u->steamId.empty()) u->steamId = cleanSteamId(steamId);   // Name und SteamID bleiben sonst, wie sie sind
+        u->lastSeen = now;
+        if (!saveAccount(u)) {
+            u->tokens = old;
+            return Fail::make(500, "Das Konto lässt sich auf dem Server nicht speichern.");
+        }
+        for (const TokenRec& o : old) accountTokens_.erase(o.hash);
+        accountTokens_[t.hash] = u->id;
+        invites_.erase(inv);   // ein Code gilt einmal
+        saveServer();
+        user = u;
+        std::cerr << "Konto " << u->id << ": PC neu verbunden\n";
+        return Fail();
+    }
     token = randomHex(32);
     std::string id;
     for (int i = 0; i < 20 && (id.empty() || users_.count(id)); ++i) id = randomHex(4);
@@ -551,9 +582,10 @@ Fail Store::removeUser(const std::string& id) {
 }
 
 // ---- Einladungen --------------------------------------------------------------------------------------------------
-Fail Store::createInvite(bool admin, int days, const std::string& by, Invite& out, std::string& code) {
+Fail Store::createInvite(bool admin, int days, const std::string& by, Invite& out, std::string& code, const std::string& forUser) {
     days = std::max(1, std::min(30, days));
     std::lock_guard<std::mutex> lk(mu_);
+    if (!forUser.empty() && !users_.count(forUser)) return Fail::make(404, "Dieses Konto gibt es nicht.");
     int64_t now = nowEpoch();
     invites_.erase(std::remove_if(invites_.begin(), invites_.end(), [&](const Invite& i) { return i.expires < now; }), invites_.end());
     if (int(invites_.size()) >= kMaxInvites) return Fail::make(429, "Zu viele offene Einladungen. Zieh erst ein paar alte zurück.");
@@ -564,7 +596,8 @@ Fail Store::createInvite(bool admin, int days, const std::string& by, Invite& ou
     if (code.empty() || inv.id.empty()) return Fail::make(500, "Kein Zufallsgenerator verfügbar.");
     inv.hash = sha256Hex(code);
     inv.by = by;
-    inv.admin = admin;
+    inv.user = forUser;
+    inv.admin = forUser.empty() && admin;
     inv.created = now;
     inv.expires = now + int64_t(days) * 86400;
     invites_.push_back(inv);
