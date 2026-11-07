@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # FragDesk-Server installieren oder aktualisieren – Debian/Ubuntu (x86_64), als root, mit einem Befehl:
 #
-#   curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | sudo bash
-#   curl -fsSL …/install.sh | sudo bash -s -- --domain stats.example.org      (eigene Domain)
-#   curl -fsSL …/install.sh | sudo bash -s -- --dry-run                        (nur zeigen, was passieren würde)
+#   curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | bash
+#   curl -fsSL …/install.sh | bash -s -- --domain stats.example.org      (eigene Domain)
+#   curl -fsSL …/install.sh | bash -s -- --dry-run                        (nur zeigen, was passieren würde)
+#   (als root; als normaler Benutzer jeweils „| sudo bash“)
 #
 # Was passiert: Caddy (HTTPS mit automatischem Zertifikat) aus apt, Benutzer „fragdesk“, Daten in /var/lib/fragdesk
 # (0700), fragdesk-server aus dem neuesten GitHub-Release (Prüfsumme aus SHA256SUMS.txt), systemd-Dienst mit
@@ -36,6 +37,9 @@ IMPORT_LINE="import $SITE_PATH"
 
 DRY=0 UNINSTALL=0 DOMAIN="" TZONE="" VERSION="" LOCAL_BIN=""
 CHANGED=0 TMP="" INVITE="" HTTPS_OK=0
+# „sudo “ nur in Hinweisen, wenn das Skript mit sudo lief – als root direkt (z. B. netcup, oft ohne sudo) ohne
+SUDO=""
+if [ -n "${SUDO_USER:-}" ] || [ "$(id -u)" != 0 ]; then SUDO="sudo "; fi
 
 say() { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -76,8 +80,8 @@ usage() {
   cat <<'EOF'
 FragDesk-Server installieren oder aktualisieren (Debian/Ubuntu, x86_64, als root):
 
-  curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | sudo bash
-  … | sudo bash -s -- [Optionen]
+  curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | bash
+  … | bash -s -- [Optionen]          (als normaler Benutzer: … | sudo bash)
 
   --domain <name>    eigene Domain (DNS-A-Eintrag auf diesen Server); ohne: <ip-mit-bindestrichen>.sslip.io
   --timezone <Zone>  Zeitzone für Uhrzeiten in der Handy-App (Standard: die des Servers, bei UTC Europe/Berlin)
@@ -485,7 +489,7 @@ first_invite() {
   local users out
   users=$("$BIN" users --json --data "$DATA") || die "Konten lassen sich nicht abfragen."
   if [[ "$users" == *'"admin":true'* ]]; then
-    say "Es gibt schon einen Admin – keine neue Einladung. Weitere: sudo fragdesk-server invite (oder in FragDesk „Freund einladen“)."
+    say "Es gibt schon einen Admin – keine neue Einladung. Weitere: ${SUDO}fragdesk-server invite (oder in FragDesk „Freund einladen“)."
     return 0
   fi
   out=$("$BIN" invite --admin --data "$DATA") || die "Die Einladung lässt sich nicht erstellen."
@@ -510,7 +514,7 @@ summary() {
     say ""
     say "1. Link auf deinen PC bringen und kopieren."
     say "2. In FragDesk: Einstellungen › Handy-App › Eigener Server › „Einladung einfügen“."
-    say "3. Freunde einladen: in FragDesk „Freund einladen“ oder hier: sudo fragdesk-server invite"
+    say "3. Freunde einladen: in FragDesk „Freund einladen“ oder hier: ${SUDO}fragdesk-server invite"
   fi
   say "Aktualisieren: denselben Befehl noch einmal ausführen (Daten bleiben)."
   say "============================================================================"
@@ -533,8 +537,8 @@ uninstall() {
   run systemctl daemon-reload
   say ""
   say "fragdesk-server ist entfernt. Die Daten liegen weiter in $DATA_PATH."
-  say "Ganz weg damit (unwiderruflich): sudo rm -rf $DATA_PATH && sudo userdel fragdesk"
-  say "Caddy bleibt installiert (sudo apt remove caddy, falls nicht mehr gebraucht)."
+  say "Ganz weg damit (unwiderruflich): ${SUDO}rm -rf $DATA_PATH && ${SUDO}userdel fragdesk"
+  say "Caddy bleibt installiert (${SUDO}apt remove caddy, falls nicht mehr gebraucht)."
 }
 
 cleanup() { if [ -n "$TMP" ]; then rm -rf "$TMP"; fi; }

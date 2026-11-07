@@ -221,16 +221,18 @@ Ein kleiner gemieteter Linux-Server speichert deine Stats und Clips – und auf 
 im Hintergrund hoch, die Handy-App liest vom Server: dieselbe App mit denselben Ansichten wie oben, aber dein PC muss
 nicht an sein und Tailscale brauchst du nicht. Hochgeladen wird **nie, während CS2 läuft oder aufgenommen wird**.
 
-**Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64) und SSH-Zugang als root. Klein reicht völlig, z. B.
-ein netcup-VPS mit 2 vCPU, 2 GB RAM und 64 GB SSD („VPS 250 G11s“) für rund 3–4 € im Monat – Preise ändern sich,
-beim Anbieter nachsehen. Platz: ein Match belegt 100–400 KB (Auswertung und Heatmap), ein Clip 2–10 MB; 60 GB reichen
-für Tausende Matches und mehrere Tausend Clips.
+**Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64), einer eigenen IPv4-Adresse und SSH-Zugang als root.
+Klein reicht völlig, z. B. der kleinste netcup-VPS („VPS nano“) für rund 3–4 € im Monat samt IPv4 – Preise ändern
+sich, beim Anbieter nachsehen. Platz: ein Match belegt 100–400 KB (Auswertung und Heatmap), ein Clip 2–10 MB; 60 GB
+reichen für Tausende Matches und mehrere Tausend Clips.
 
-**Installieren – ein Befehl** (per SSH auf dem Server):
+**Installieren – ein Befehl** (am PC im Terminal `ssh root@<IP-des-Servers>`, dann auf dem Server):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | bash
 ```
+
+Als normaler Benutzer statt root: `… | sudo bash`. Fehlt `curl`: erst `apt update && apt install -y curl`.
 
 Das Skript installiert [Caddy](https://caddyserver.com) aus den Paketquellen (HTTPS mit kostenlosem Zertifikat von
 Let's Encrypt, erneuert sich selbst), legt den Benutzer `fragdesk` an, holt `fragdesk-server` aus dem neuesten
@@ -246,7 +248,7 @@ Deine Einladung als Admin – gilt 7 Tage und nur einmal:
 
 Ohne eigene Domain heißt dein Server `<IP-mit-Bindestrichen>.sslip.io` ([sslip.io](https://sslip.io) zeigt den Namen
 kostenlos auf deine IP – das reicht für das Zertifikat). Mit eigener Domain (DNS-A-Eintrag auf die IP des Servers):
-`… | sudo bash -s -- --domain stats.example.org`. Erst schauen, was passieren würde: `--dry-run`. Hat dein Anbieter
+`… | bash -s -- --domain stats.example.org`. Erst schauen, was passieren würde: `--dry-run`. Hat dein Anbieter
 eine eigene Firewall im Kundenmenü, müssen dort die Ports 80 und 443 offen sein.
 
 **Verbinden:** Den Einladungslink auf den PC bringen (z. B. per Messenger an dich selbst) und kopieren. In FragDesk
@@ -258,21 +260,21 @@ gewohnt einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hoch
 
 **Freunde einladen:** als Admin in FragDesk mit **„Freund einladen“** (der Link landet in der Zwischenablage), in der
 Handy-App unter **Einstellungen › Server verwalten** (Link erstellen und direkt teilen) oder auf dem Server mit
-`sudo fragdesk-server invite` (`--admin` für einen weiteren Admin, `--days` für die Gültigkeit). Jeder Link gilt
+`fragdesk-server invite` (`--admin` für einen weiteren Admin, `--days` für die Gültigkeit). Jeder Link gilt
 einmal und 7 Tage. Öffnet ihn jemand auf dem Handy, erklärt die Seite, dass er in FragDesk am PC gehört.
 
 **Konten und Speicher:** Jeder hat sein eigenes Konto und sieht nur seine eigenen Stats und Clips. Eingeladene Konten
 bekommen 15 GB, Admins unbegrenzt. Unter **Server verwalten** in der Handy-App siehst du alle Konten mit belegtem
 Speicher, änderst das Limit (5, 10, 15, 25, 50 GB oder unbegrenzt) und entfernst Konten samt Daten; die Stats der
 anderen sieht auch der Admin nicht. Ist ein Speicher voll, lädt FragDesk nichts Neues mehr hoch und sagt das – alles,
-was schon oben ist, bleibt zu sehen. Auf dem Server listet `sudo fragdesk-server users` alle Konten.
+was schon oben ist, bleibt zu sehen. Auf dem Server listet `fragdesk-server users` alle Konten.
 
 **Aktualisieren:** Denselben Befehl noch einmal ausführen. Er holt das neueste Release; Daten, Domain und Zeitzone
 bleiben (eine neue Admin-Einladung gibt es nur, solange noch niemand Admin ist).
 
-**Deinstallieren:** `curl -fsSL …/install.sh | sudo bash -s -- --uninstall` entfernt Dienst, Programm und den
-Caddy-Eintrag. Die Daten bleiben in `/var/lib/fragdesk` – ganz weg damit: `sudo rm -rf /var/lib/fragdesk && sudo
-userdel fragdesk`. Caddy bleibt installiert.
+**Deinstallieren:** `curl -fsSL …/install.sh | bash -s -- --uninstall` entfernt Dienst, Programm und den
+Caddy-Eintrag. Die Daten bleiben in `/var/lib/fragdesk` – ganz weg damit: `rm -rf /var/lib/fragdesk && userdel
+fragdesk`. Caddy bleibt installiert.
 
 **Sicherheit:**
 
