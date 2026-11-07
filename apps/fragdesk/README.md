@@ -251,8 +251,9 @@ Deine Einladung als Admin – gilt 7 Tage und nur einmal:
 ```
 
 Ohne eigene Domain heißt dein Server `<IP-mit-Bindestrichen>.sslip.io` ([sslip.io](https://sslip.io) zeigt den Namen
-kostenlos auf deine IP – das reicht für das Zertifikat). Mit eigener Domain (DNS-A-Eintrag auf die IP des Servers):
-`… | bash -s -- --domain stats.example.org`. Erst schauen, was passieren würde: `--dry-run`. Hat dein Anbieter
+kostenlos auf deine IP – das reicht für das Zertifikat). sslip.io nutzen sehr viele; ist Let's Encrypt dort gerade am
+Limit, holt Caddy das Zertifikat von selbst bei ZeroSSL (dauert dann ein paar Minuten). Mit eigener Domain (DNS-A-Eintrag
+auf die IP des Servers, kostenlos z. B. bei [DuckDNS](https://www.duckdns.org)): `… | bash -s -- --domain stats.example.org`. Erst schauen, was passieren würde: `--dry-run`. Hat dein Anbieter
 eine eigene Firewall im Kundenmenü, müssen dort die Ports 80 und 443 offen sein.
 
 **Verbinden:** Den Einladungslink auf den PC bringen (z. B. per Messenger an dich selbst) und kopieren. In FragDesk

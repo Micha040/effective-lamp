@@ -467,17 +467,24 @@ start_service() {
 
 check_https() {
   [ "$DRY" = 0 ] || return 0
-  say "Prüfe https://$DOMAIN/ (beim ersten Mal holt Caddy das Zertifikat, das dauert ein paar Sekunden) …"
-  for _ in $(seq 1 30); do
+  say "Prüfe https://$DOMAIN/ (beim ersten Mal holt Caddy das Zertifikat – meist Sekunden, selten ein paar Minuten) …"
+  # Let's Encrypt, sonst ZeroSSL (beides macht Caddy selbst); höchstens etwa 4 Minuten warten
+  for _ in $(seq 1 60); do
     if curl -fsS --max-time 5 "https://$DOMAIN/api/v1/health" >/dev/null 2>&1; then
       HTTPS_OK=1
       say "HTTPS geht."
       return 0
     fi
-    sleep 2
+    sleep 3
   done
-  warn "https://$DOMAIN/ antwortet noch nicht. Sind die Ports 80 und 443 beim Anbieter offen (Firewall im Kundenmenü)?" \
-    "Zeigt die Domain auf diesen Server? Caddy versucht es weiter – Protokoll: journalctl -u caddy"
+  if journalctl -u caddy --since "-15min" --no-pager 2>/dev/null | grep -qiE 'rateLimited|too many certificates'; then
+    warn "Let's Encrypt gibt für $DOMAIN gerade keine Zertifikate aus (Limit erreicht – bei sslip.io kommt das vor). Caddy" \
+      "versucht es von selbst weiter, auch bei ZeroSSL; in ein paar Minuten ist es meist da. Dauerhaft unabhängig davon:" \
+      "eigene Domain, z. B. kostenlos bei duckdns.org, dann diesen Befehl mit „bash -s -- --domain <name>.duckdns.org“."
+  else
+    warn "https://$DOMAIN/ antwortet noch nicht. Sind die Ports 80 und 443 beim Anbieter offen (Firewall im Kundenmenü)?" \
+      "Zeigt die Domain auf diesen Server? Caddy versucht es weiter – Protokoll: journalctl -u caddy"
+  fi
 }
 
 first_invite() {
