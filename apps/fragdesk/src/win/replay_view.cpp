@@ -223,7 +223,10 @@ void ReplayView::setRound(const fd::Match& m, int n) {
     double tr = data ? data->tickrate : (m.tickrate > 0 ? m.tickrate : 64);
     startTick = r->start;
     freezeTick = std::max(r->freezeEnd, r->start);
-    endTick = r->endOfficial > r->end ? r->endOfficial : r->end + int(4 * tr);
+    // Ende: kurz vor dem Neustart – ab dem offiziellen Rundenende stehen alle schon am Spawn der nächsten Runde
+    endTick = r->endOfficial > r->end ? r->endOfficial - 1 : r->end + int(4 * tr);
+    const fd::RoundInfo* next = r + 1 < m.rounds.data() + m.rounds.size() ? r + 1 : nullptr;
+    if (next && next->start > r->end) endTick = std::min(endTick, next->start - 1);
     if (endTick <= startTick) endTick = startTick + int(tr);
     tick = std::max(double(startTick), freezeTick - 3 * tr);
     last_ = 0;

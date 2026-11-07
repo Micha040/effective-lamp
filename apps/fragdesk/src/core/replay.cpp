@@ -253,11 +253,11 @@ void playersAt(const Replay& r, double tick, std::vector<PlayerAt>& out) {
                     if (dyaw > 180) dyaw -= 360;
                     if (dyaw < -180) dyaw += 360;
                     p.yaw = std::fmod(p.yaw + float(f) * dyaw + 360.0f, 360.0f);
-                }
-                if (f > 0.5) {
-                    p.hp = t.hp;
-                    p.weapon = t.weapon;
-                    p.flags = t.flags;
+                    if (f > 0.5) {   // nur im selben Leben übernehmen (nach einem Neustart gilt weiter a)
+                        p.hp = t.hp;
+                        p.weapon = t.weapon;
+                        p.flags = t.flags;
+                    }
                 }
                 break;
             }
