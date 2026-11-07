@@ -7,11 +7,12 @@
 #include "../core/format.h"
 #include "../core/json.h"
 #include "common.h"
+#include "mobile_host.h"
 #include "recorder.h"
 
 namespace fdw {
 
-App::App() {}
+App::App() : mobile(std::make_unique<MobileHost>(*this)) {}
 App::~App() = default;
 
 void App::invalidate() {

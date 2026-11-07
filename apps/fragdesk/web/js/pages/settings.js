@@ -7,8 +7,10 @@ export async function render(ctx) {
   ctx.title('Einstellungen');
   const info = await ctx.refreshInfo().catch(() => ctx.info) || ctx.info || {};
   if (!ctx.current()) return;
-  const kv = (k, v) => h('div', {class: 'row', style: {minHeight: '46px'}}, h('div', {class: 'main'}, h('b', {style: {fontWeight: '500'}}, k)),
-    h('div', {class: 'side'}, h('b', {style: {fontWeight: '600', color: 'var(--text2)'}}, v)));
+  const kv = (k, v) => h('div', {class: 'row', style: {minHeight: '46px'}},
+    h('div', {class: 'main', style: {flex: 'none'}}, h('b', {style: {fontWeight: '500'}}, k)),
+    h('div', {class: 'side', style: {flex: '1', minWidth: '0'}},
+      h('b', {style: {fontWeight: '600', color: 'var(--text2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}, v)));
   const themes = ['auto', 'dark', 'light'];
   const out = [
     h('h1', {class: 'page-title'}, 'Einstellungen'),

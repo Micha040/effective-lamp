@@ -1,5 +1,6 @@
 // FragDesk – Einstellungen (%LOCALAPPDATA%\FragDesk\settings.json)
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,19 @@ struct RecordSettings {
     bool sound = true;          // Spielton aufnehmen
 };
 
+// Handy-App (Einstellungen › Handy-App)
+struct MobileDevice {
+    std::string token, name;
+    int64_t created = 0, lastSeen = 0;
+};
+
+struct MobileSettings {
+    bool enabled = false;                 // aus, bis man es einschaltet
+    int port = 7420;
+    std::string address;                  // eigene Adresse fürs Handy (z. B. https://pc.tailnet.ts.net), leer = automatisch
+    std::vector<MobileDevice> devices;    // gekoppelte Handys
+};
+
 struct Settings {
     std::string steamId;                  // eigenes Konto (leer = automatisch)
     std::wstring cs2Dir;                  // leer = automatisch über Steam
@@ -26,6 +40,7 @@ struct Settings {
     std::string theme;                    // "", "dark", "light"
     std::vector<std::string> ignored;     // Demos, die nicht mehr angeboten werden ("Pfad|Größe")
     RecordSettings record;
+    MobileSettings mobile;
 
     bool load();
     bool save() const;

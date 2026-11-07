@@ -18,6 +18,7 @@
 namespace fdw {
 
 class Recorder;
+class MobileHost;
 
 enum class Page { Dashboard, Matches, Match, Stats, Highlights, Settings, Replay, Count };
 
@@ -49,6 +50,7 @@ public:
     SteamInfo steam;
     Library lib;
     std::unique_ptr<Recorder> recorder;
+    std::unique_ptr<MobileHost> mobile;   // Handy-App (Einstellungen › Handy-App)
 
     // eigener Spieler
     std::string me;

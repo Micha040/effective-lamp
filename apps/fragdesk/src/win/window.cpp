@@ -11,6 +11,7 @@
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
+#include "mobile_host.h"
 #include "recorder.h"
 #include "../../res/resource.h"
 
@@ -197,6 +198,7 @@ bool Window::create() {
     ShowWindow(hwnd_, SW_SHOWNORMAL);
     UpdateWindow(hwnd_);
     app_.lib.loadAsync();
+    app_.mobile->apply();   // Handy-App, falls eingeschaltet
     return true;
 }
 
@@ -719,6 +721,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     if (!app_.recording()) KillTimer(hwnd_, kRecordTimer);
                     if (!IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
                     break;
+                case kMobileTimer:   // Restzeit des Kopplungscodes
+                    if (app_.mobile->pairingCode().empty()) KillTimer(hwnd_, kMobileTimer);
+                    if (app_.page == Page::Settings && !IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
+                    break;
             }
             return 0;
         case WM_APP_LIBRARY:
@@ -773,6 +779,8 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_FOLDER:
             SetTimer(hwnd_, kScanTimer, 1500, nullptr);
             return 0;
+        case WM_APP_MOBILE:
+            return app_.mobile->onMessage(wp, lp);
         case WM_APP_HEAT: {
             auto* e = reinterpret_cast<HeatEvent*>(lp);
             if (!app_.statsHeat.apply(e)) app_.matchHeat.apply(e);
@@ -829,6 +837,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             break;
         case WM_DESTROY:
+            app_.mobile->stop();
             app_.cancelRecording();
             releaseInstanceLock();
             PostQuitMessage(0);

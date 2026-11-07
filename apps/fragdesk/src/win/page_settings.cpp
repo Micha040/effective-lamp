@@ -1,9 +1,12 @@
 // FragDesk – Seite „Einstellungen“
 #include <algorithm>
 
+#include <ctime>
+
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
+#include "mobile_host.h"
 
 namespace fdw {
 
@@ -41,6 +44,128 @@ struct Section {
 };
 
 void cardBehind(Canvas& c, float x, float y, float w, float h) { c.card(RectF(x, y, w, h)); }
+
+// QR-Code: dunkle Module auf weißem Grund (auch im dunklen Design, sonst erkennt die Kamera ihn schlecht)
+void drawQr(Canvas& c, const RectF& r, const std::string& text) {
+    auto rows = qrModules(text);
+    c.round(r, 10, Color(255, 255, 255, 255));
+    if (rows.empty()) return;
+    float n = float(rows.size()) + 8, cell = r.Width / n;   // 4 Module Ruhezone ringsum
+    for (size_t y = 0; y < rows.size(); ++y)
+        for (size_t x = 0; x < rows[y].size();) {
+            if (!rows[y][x]) {
+                ++x;
+                continue;
+            }
+            size_t e = x;
+            while (e < rows[y].size() && rows[y][e]) ++e;   // zusammenhängende Module als ein Rechteck: keine Lücken
+            c.fill(RectF(r.X + (4 + x) * cell, r.Y + (4 + y) * cell, (e - x) * cell + 0.3f, cell + 0.3f), Color(255, 17, 24, 39));
+            x = e;
+        }
+}
+
+float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
+    MobileHost& mh = *app.mobile;
+    MobileSettings& ms = app.settings.mobile;
+    const std::wstring sub =
+        L"Deine Stats und Clips auf dem Handy: FragDesk liefert dafür eine kleine Web-App aus, die du auf den Home-Bildschirm legst – "
+        L"nur an Handys, die du hier koppelst. Solange es aus ist, nimmt FragDesk keine Verbindungen an.";
+    std::wstring status;
+    if (!ms.enabled) status = L"Aus";
+    else if (!mh.error().empty()) status = L"Startet nicht: " + mh.error();
+    else if (mh.running())
+        status = L"An (Port " + std::to_wstring(mh.port()) + L"). Beim ersten Mal fragt Windows, ob FragDesk Verbindungen annehmen darf – "
+                 L"„Zugriff zulassen“.";
+    else status = L"Startet …";
+    std::vector<MobileAddress> addrs = ms.enabled ? mh.addresses() : std::vector<MobileAddress>();
+    std::vector<MobileDevice> devs = mh.devices();
+    std::string code = mh.pairingCode();
+    bool on = ms.enabled && mh.running();
+    bool ts = false;
+    for (const auto& a : addrs)
+        if (a.label == L"Tailscale") ts = true;
+
+    const float panelH = 236;
+    float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
+    float h = 16 + 26 + subH + 10 + 72;
+    if (on) h += 64 + 72 + 64 + (code.empty() ? 0 : panelH) + (devs.empty() ? 0 : 40 + devs.size() * 56.0f);
+    h += 14;
+    cardBehind(c, x, y, cw, h);
+    Section sec(c, x, y, cw, L"Handy-App", sub);
+
+    RectF r = sec.row(L"Handy-App erlauben", status, 72, 60);
+    c.toggle(RectF(r.X + r.Width - 46, r.Y + 24, 44, 24), ms.enabled, "t-mobile", [&app] {
+        app.settings.mobile.enabled = !app.settings.mobile.enabled;
+        if (!app.settings.mobile.enabled) app.mobile->stopPairing();
+        app.saveSettings();
+        app.mobile->apply();
+        app.invalidate();
+    });
+    if (!on) return sec.finish();
+
+    // Adresse
+    std::wstring where = addrs.empty() ? L"Kein Netzwerk gefunden" : addrs[0].url + L"  (" + addrs[0].label + L")";
+    if (addrs.size() > 1) where += L"\nauch: " + addrs[1].url + L"  (" + addrs[1].label + L")";
+    sec.row(L"Adresse fürs Handy", where, 64, 10);
+
+    // Unterwegs
+    r = sec.row(L"Unterwegs", ts ? L"Tailscale ist verbunden: Dein Handy erreicht FragDesk auch unterwegs, wenn dort Tailscale an ist."
+                                 : L"Für unterwegs: Tailscale (kostenlos) auf PC und Handy installieren und mit demselben Konto anmelden. Ohne "
+                                   L"Tailscale geht die Handy-App nur im Heimnetz.",
+                72, ts ? 10 : 190);
+    if (!ts)
+        c.button(RectF(r.X + r.Width - 180, r.Y + 18, 180, 36), L"Tailscale laden", "ts-get", [] { openInShell(L"https://tailscale.com/download"); },
+                 Btn::Secondary, Icon::External);
+
+    // Koppeln
+    r = sec.row(L"Handy verbinden", code.empty() ? L"Zeigt einen QR-Code: mit der iPhone-Kamera scannen, fertig." : L"", 64, 200);
+    if (code.empty())
+        c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), L"Handy verbinden", "m-pair", [&app] {
+            app.mobile->startPairing();
+            app.invalidate();
+        }, Btn::Primary, Icon::Plus);
+    else
+        c.button(RectF(r.X + r.Width - 140, r.Y + 14, 140, 36), L"Fertig", "m-pairend", [&app] {
+            app.mobile->stopPairing();
+            app.invalidate();
+        }, Btn::Secondary);
+    if (!code.empty()) {
+        float py = sec.y + 4, qs = 212;
+        std::string url = addrs.empty() ? std::string() : narrow(addrs[0].url) + "?pair=" + code;
+        if (!url.empty()) drawQr(c, RectF(x + 20, py, qs, qs), url);
+        float tx = x + 20 + qs + 28, tw = cw - 40 - qs - 28;
+        c.text(L"Code", F::Small, c.th.text2, RectF(tx, py, tw, 18));
+        c.text(widen(code.substr(0, 3) + " " + code.substr(3)), F::NumHuge, c.th.accentText, RectF(tx, py + 16, tw, 54));
+        int64_t left = std::max<int64_t>(0, mh.pairingUntil() - int64_t(time(nullptr)));
+        wchar_t rest[64];
+        swprintf(rest, 64, L"Noch %lld:%02lld Minuten gültig", static_cast<long long>(left / 60), static_cast<long long>(left % 60));
+        c.text(rest, F::Small, c.th.text3, RectF(tx, py + 72, tw, 18));
+        const std::wstring steps =
+            L"1. QR-Code mit der iPhone-Kamera scannen – Safari öffnet FragDesk und verbindet sich.\n"
+            L"2. In Safari auf „Teilen“ › „Zum Home-Bildschirm“ tippen.\n"
+            L"3. FragDesk über das neue Symbol öffnen. Fragt es nach dem Code, gib ihn dort ein.\n"
+            L"Ohne Kamera: die Adresse oben in Safari öffnen und den Code eingeben.";
+        c.text(steps, F::Small, c.th.text2, RectF(tx, py + 100, tw, panelH - 104), Align::Left, false, true);
+        sec.y += panelH;
+    }
+
+    // Gekoppelte Geräte
+    if (!devs.empty()) {
+        c.line(x + 20, sec.y, x + cw - 20, sec.y, alpha(c.th.border, 150), 1);
+        c.text(L"Gekoppelte Handys", F::SmallSemi, c.th.text2, RectF(x + 20, sec.y + 12, cw - 40, 20));
+        sec.y += 40;
+        for (const auto& d : devs) {
+            std::wstring desc = L"Gekoppelt am " + dateText(d.created) + L" · zuletzt " + relativeDay(d.lastSeen);
+            RectF rr = sec.row(widen(d.name), desc, 56, 140);
+            std::string token = d.token;
+            c.button(RectF(rr.X + rr.Width - 130, rr.Y + 11, 130, 34), L"Entfernen", "m-del:" + token.substr(0, 12), [&app, token] {
+                app.mobile->removeDevice(token);
+                app.invalidate();
+            }, Btn::Ghost, Icon::Trash);
+        }
+    }
+    return sec.finish();
+}
 
 }  // namespace
 
@@ -207,6 +332,9 @@ float drawSettings(Canvas& c, App& app, float w) {
         });
         y += h + 16;
     }
+
+    // ---- Handy-App
+    y += mobileCard(c, app, x, y, cw) + 16;
 
     // ---- Darstellung
     {

@@ -29,7 +29,8 @@ allen voran cs-demo-analyzer von AkiVer und demoinfocs-golang von markus-wa (bei
 Ihre Lizenztexte stehen unten vollständig, dazu die Lizenz von Go selbst.
 
 FragDesk.exe enthält für die 2D-Ansicht die Radarbilder aus Counter-Strike 2 (© Valve Corporation),
-übernommen aus CS Demo Manager von AkiVer (MIT-Lizenz) – Einzelheiten ganz unten.
+übernommen aus CS Demo Manager von AkiVer (MIT-Lizenz) – Einzelheiten ganz unten. Für den QR-Code beim
+Koppeln der Handy-App steckt außerdem der QR Code generator von Project Nayuki (MIT-Lizenz) darin.
 """
 
 
@@ -85,6 +86,10 @@ def main():
     if not radars.is_file():
         sys.exit(f'FEHLER: {radars} fehlt')
     blocks.append(f'\n=== Radarbilder in FragDesk.exe\n\n{radars.read_text(encoding="utf-8").strip()}\n')
+    qr = HERE / 'src' / 'third_party' / 'qrcodegen-LICENSE.txt'   # QR-Code zum Koppeln der Handy-App
+    if not qr.is_file():
+        sys.exit(f'FEHLER: {qr} fehlt')
+    blocks.append(f'\n=== QR-Code-Erzeugung in FragDesk.exe\n\n{qr.read_text(encoding="utf-8").strip()}\n')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(blocks).replace('\r\n', '\n'), encoding='utf-8')
     print(f'{out}: {len(mods)} Module')

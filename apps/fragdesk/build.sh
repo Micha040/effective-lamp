@@ -14,15 +14,16 @@ if [ "$WHAT" = all ] || [ "$WHAT" = app ]; then
   WINDRES=x86_64-w64-mingw32-windres
   export FD_FLAGS="-std=c++17 -O2 -Wall -Wextra -DUNICODE -D_UNICODE -DNOMINMAX -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -municode"
   export FD_CXX=$CXX FD_OUT=$OUT
+  python3 tools/make_web.py >/dev/null   # Handy-App (web/) als Ressourcen
   $WINDRES -c 65001 -I res res/fragdesk.rc -O coff -o $OUT/obj/fragdesk_res.o
   # parallel übersetzen; xargs meldet einen Fehler, sobald eine Datei nicht durchgeht
-  ls src/core/*.cpp src/win/*.cpp | xargs -P "$(nproc 2>/dev/null || echo 2)" -I{} sh -c \
+  ls src/core/*.cpp src/api/*.cpp src/third_party/*.cpp src/win/*.cpp | xargs -P "$(nproc 2>/dev/null || echo 2)" -I{} sh -c \
     'o="$FD_OUT/obj/$(basename "{}" .cpp).o"; $FD_CXX $FD_FLAGS -c "{}" -o "$o" || exit 255'
   OBJS="$OUT/obj/fragdesk_res.o"
-  for f in src/core/*.cpp src/win/*.cpp; do OBJS="$OBJS $OUT/obj/$(basename "$f" .cpp).o"; done
+  for f in src/core/*.cpp src/api/*.cpp src/third_party/*.cpp src/win/*.cpp; do OBJS="$OBJS $OUT/obj/$(basename "$f" .cpp).o"; done
   $CXX -municode -mwindows -static -static-libgcc -static-libstdc++ -s -o $OUT/FragDesk.exe $OBJS \
     -lgdiplus -ldwmapi -lshcore -lole32 -loleaut32 -luuid -lshlwapi -lshell32 -lcomctl32 -lcomdlg32 \
-    -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lws2_32 -lgdi32 -luser32 -ladvapi32 -lwinmm
+    -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lwindowscodecs -liphlpapi -lbcrypt -lws2_32 -lgdi32 -luser32 -ladvapi32 -lwinmm
   ls -la $OUT/FragDesk.exe
 fi
 

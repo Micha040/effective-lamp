@@ -50,6 +50,7 @@ const navItems = [
 // Filter wie in FragDesk (Übersicht, Statistiken und Momente teilen sie)
 const state = {
   info: null,
+  infoAt: 0,
   filters: Object.assign({mode: 0, period: 2, map: ''}, store.get('filters', {})),
 };
 
@@ -112,6 +113,11 @@ async function render(fresh) {
     refreshInfo: async () => { state.info = await api.get('/api/v1/info'); return state.info; },
   };
   try {
+    if (Date.now() - state.infoAt > 60000 || fresh) {   // Maps, Anzahl Matches … ab und zu auffrischen
+      state.info = await api.get('/api/v1/info').catch(() => state.info);
+      state.infoAt = Date.now();
+      ctx.info = state.info;
+    }
     const mod = await pages[route.page]();
     if (seq !== renderSeq) return;
     await mod.render(ctx);
@@ -161,6 +167,7 @@ async function start() {
   }
   try {
     state.info = await api.get('/api/v1/info');
+    state.infoAt = Date.now();
   } catch (e) {
     root.replaceChildren(h('div', {class: 'pair'}, errorBox(e, start)));
     return;

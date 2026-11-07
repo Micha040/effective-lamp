@@ -7,7 +7,8 @@
 FACEIT) und zeigt daraus über 150 Kennzahlen, deinen Premier-Verlauf als Graph, jedes Match bis zur einzelnen Runde,
 jede Runde als **2D-Ansicht von oben**, **Heatmaps**, dein **Crosshair-Placement** und deine **Reaktionszeit** – und
 die Momente, die sich lohnen: Multikills, gewonnene Clutches, Noscopes, Wallbangs, Kills durch Smoke und mehr. Welche
-Demo ausgewertet und welcher Moment als Video aufgenommen wird, entscheidest du.
+Demo ausgewertet und welcher Moment als Video aufgenommen wird, entscheidest du. Mit der **[Handy-App](#handy-app)** hast
+du Stats und Clips auch auf dem iPhone oder Android-Handy.
 
 <p align="center"><img src="../../docs/media/fragdesk-dashboard.png" width="760" alt="FragDesk: Übersicht mit Premier-Verlauf, Form und Kennzahlen"></p>
 
@@ -173,6 +174,44 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 > **Hinweis:** Läuft etwas nicht rund, steht im Protokoll `%LOCALAPPDATA%\FragDesk\fragdesk.log`
 > (Einstellungen › „Datenordner öffnen“), was FragDesk an CS2 geschickt hat und was CS2 zuletzt ausgegeben hat.
 
+## Handy-App
+
+Deine Stats und Clips auf dem Handy – als Web-App, die FragDesk selbst ausliefert: kein App Store, kein Server, keine
+Kosten. Zu sehen ist dasselbe wie in FragDesk, fürs Handy umgebaut: **Übersicht**, **Matches** mit allen Bereichen,
+**Statistiken** samt Verlauf und deine **Momente und Videos**. Heatmaps und die 2D-Ansicht kommen noch. Ansehen und
+Aufnehmen in CS2 bleibt am PC.
+
+**Einrichten (einmalig):**
+
+1. In FragDesk unter **Einstellungen › Handy-App** „Handy-App erlauben“ einschalten. Beim ersten Mal fragt Windows, ob
+   FragDesk Verbindungen annehmen darf – „Zugriff zulassen“.
+2. **Handy verbinden** und den QR-Code mit der iPhone-Kamera scannen. Safari öffnet FragDesk und verbindet sich.
+3. In Safari **Teilen › Zum Home-Bildschirm**. Ab dann startet FragDesk wie eine App im Vollbild. Fragt es dort nach dem
+   Code, gib ihn noch einmal ein (er gilt 10 Minuten).
+
+**Zu Hause und unterwegs:** Im Heimnetz geht es sofort. Für unterwegs [Tailscale](https://tailscale.com/download)
+(für private Nutzung kostenlos) auf PC und Handy installieren und mit demselben Konto anmelden. FragDesk erkennt das und
+nimmt die Tailscale-Adresse für den QR-Code – die gilt zu Hause und unterwegs. Dein PC muss dafür an sein und FragDesk
+offen (minimiert reicht).
+
+**Videos aufs Handy:** Im Video auf „Aufs Handy speichern“. Es landet in der Dateien-App unter „Downloads“; dort
+Teilen › „Video sichern“, dann ist es in Fotos. Mit einer HTTPS-Adresse (siehe unten) geht es direkt über „Teilen ›
+Video sichern“, und die App startet auch ohne Verbindung mit den zuletzt geladenen Daten.
+
+**Sicherheit:** Aus, bis du es einschaltest. Nur gekoppelte Handys kommen an Daten und Videos: Gekoppelt wird mit einem
+6-stelligen Code, der nur 10 Minuten gilt und nach 5 Fehlversuchen verfällt; danach meldet sich das Handy mit einem
+langen Zufallsschlüssel an. Gekoppelte Handys siehst und entfernst du unter Einstellungen › Handy-App. FragDesk spricht
+dabei nur mit deinem Handy im Heimnetz bzw. über Tailscale, nichts geht ins Internet – und mit CS2 oder dem
+Anti-Cheat hat das nichts zu tun.
+
+**Rücksicht aufs Spiel:** Solange CS2 läuft, schickt FragDesk keine Videos (die Stats schon – das sind nur ein paar
+KB), damit dein Ping nicht leidet. Im Leerlauf kostet die Handy-App nichts; Vorschaubilder der Videos entstehen einmal
+und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
+
+**HTTPS über Tailscale (für Profis):** `tailscale serve --bg 7420` auf dem PC liefert eine Adresse wie
+`https://dein-pc.dein-tailnet.ts.net`. FragDesk schließen, die Adresse in `%LOCALAPPDATA%\FragDesk\settings.json` unter
+`"mobile": {"address": "…"}` eintragen und FragDesk wieder starten – dann steht sie im QR-Code.
+
 ## Anti-Cheat und Sicherheit
 
 - FragDesk **liest nur Demo-Dateien**. Es greift nie in ein laufendes Spiel ein: keine Injektion, keine Hooks,
@@ -181,11 +220,13 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
   ausschließlich offizielle Startoptionen von Valve (`-tools` für den Workshop-Tools-Modus, `+playdemo` und die
   Konsole über `-netconport`), **kein Plugin, keine geänderten Spieldateien**. CS2 spielt dabei nur die Demo auf
   deinem PC ab und verbindet sich mit keinem Server. Für Matches startest du CS2 danach wie gewohnt neu.
-- Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet.
+- Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet. Die [Handy-App](#handy-app)
+  (aus, bis du sie einschaltest) verbindet nur Handys, die du selbst gekoppelt hast – im Heimnetz oder über Tailscale.
 
 ## Ressourcen
 
-- Im Leerlauf tut FragDesk nichts außer auf neue Dateien in den Demo-Ordnern zu warten (Windows meldet sich dann).
+- Im Leerlauf tut FragDesk nichts außer auf neue Dateien in den Demo-Ordnern zu warten (Windows meldet sich dann) und –
+  falls die Handy-App an ist – auf Anfragen vom Handy.
 - Ausgewertet wird in einem eigenen Prozess (`fdanalyze.exe`) mit niedriger Priorität: ein paar Sekunden lang
   ca. 150–250 MB Arbeitsspeicher, danach ist er wieder weg. Er liest die Demo dafür zweimal gleichzeitig (Statistiken
   und Heatmap/Zielen) – auf einem Mehrkern-Prozessor kaum langsamer als einmal.

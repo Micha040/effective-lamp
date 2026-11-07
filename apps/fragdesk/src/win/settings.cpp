@@ -59,6 +59,22 @@ bool Settings::load() {
         record.voices = r.getBool("voices", false);
         record.sound = r.getBool("sound", true);
     }
+    const json::Value& mo = v["mobile"];
+    if (mo.isObject()) {
+        mobile.enabled = mo.getBool("enabled", false);
+        int port = int(mo.getNumber("port", 7420));
+        mobile.port = port >= 1024 && port <= 65535 ? port : 7420;
+        mobile.address = mo.getString("address");
+        mobile.devices.clear();
+        for (const auto& d : mo["devices"].arr) {
+            MobileDevice md;
+            md.token = d.getString("token");
+            md.name = d.getString("name");
+            md.created = int64_t(d.getNumber("created"));
+            md.lastSeen = int64_t(d.getNumber("lastSeen"));
+            if (md.token.size() >= 32) mobile.devices.push_back(md);
+        }
+    }
     return true;
 }
 
@@ -77,10 +93,18 @@ bool Settings::save() const {
     for (size_t i = 0; i < ignored.size(); ++i) o += (i ? ",\n    " : "\n    ") + jsonQuote(ignored[i]);
     o += ignored.empty() ? "],\n" : "\n  ],\n";
     char b[256];
-    std::snprintf(b, sizeof b, "  \"record\": {\"height\": %d, \"fps\": %d, \"quality\": %d, \"onlyKillfeed\": %s, \"voices\": %s, \"sound\": %s}\n",
+    std::snprintf(b, sizeof b, "  \"record\": {\"height\": %d, \"fps\": %d, \"quality\": %d, \"onlyKillfeed\": %s, \"voices\": %s, \"sound\": %s},\n",
                   record.height, record.fps, record.quality, record.onlyKillfeed ? "true" : "false", record.voices ? "true" : "false",
                   record.sound ? "true" : "false");
     o += b;
+    std::snprintf(b, sizeof b, "  \"mobile\": {\"enabled\": %s, \"port\": %d, \"address\": ", mobile.enabled ? "true" : "false", mobile.port);
+    o += b + jsonQuote(mobile.address) + ", \"devices\": [";
+    for (size_t i = 0; i < mobile.devices.size(); ++i) {
+        const MobileDevice& d = mobile.devices[i];
+        std::snprintf(b, sizeof b, ", \"created\": %lld, \"lastSeen\": %lld}", static_cast<long long>(d.created), static_cast<long long>(d.lastSeen));
+        o += (i ? ",\n    " : "\n    ") + std::string("{\"token\": ") + jsonQuote(d.token) + ", \"name\": " + jsonQuote(d.name) + b;
+    }
+    o += mobile.devices.empty() ? "]}\n" : "\n  ]}\n";
     o += "}\n";
     createDirs(dataDir());
     return writeFileAtomic(settingsPath(), o);
