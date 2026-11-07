@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: MinGW-w64 installieren
         timeout-minutes: 15
@@ -40,7 +40,7 @@ jobs:
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
 
       - name: Go einrichten (für fdanalyze von FragDesk)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.27.x'
           cache: false
@@ -67,7 +67,7 @@ jobs:
           python3 tools/package.py --tag "dev-${GITHUB_SHA::7}"
           sh launcher/tests/run.sh "$PWD/dist/catalog.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: efficient-lamp-${{ github.sha }}
           path: dist/
