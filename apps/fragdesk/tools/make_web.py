@@ -21,6 +21,7 @@ WEB = ROOT / 'apps/fragdesk/web'
 OUT = ROOT / 'apps/fragdesk/res/web.rc'
 INC = ROOT / 'apps/fragdesk/src/win/web_assets.inc'
 SVG = ROOT / 'brand/tiles/fragdesk.svg'
+RADARS = ROOT / 'apps/fragdesk/res/radars'   # nur für --cpp (fragdesk-server); FragDesk.exe hat sie schon (res/radars.rc)
 
 
 def web_files():
@@ -51,6 +52,7 @@ def rc():
 
 def cpp(target):
     files = web_files()
+    radars = sorted(RADARS.glob('*.png'))
     out = ['// Erzeugt von tools/make_web.py --cpp – Handy-App (apps/fragdesk/web) für fragdesk-server. Nicht von Hand ändern.',
            '#include "web_assets.h"', '', 'namespace fdsrv {', '', 'namespace {', '']
     table = []
@@ -63,14 +65,24 @@ def cpp(target):
             out.append('    ' + ','.join(str(b) for b in data[k:k + 24]) + ',')
         out.append('    0};')
         table.append(f'    {{"{rel}", f{i}, {len(data)}}},')
+    rtable = []
+    for i, p in enumerate(radars):
+        data = p.read_bytes()
+        out.append(f'// Radarbild {p.name} (© Valve Corporation, über CS Demo Manager – siehe res/radars/NOTICE.txt)')
+        out.append(f'const unsigned char r{i}[] = {{')
+        for k in range(0, len(data), 24):
+            out.append('    ' + ','.join(str(b) for b in data[k:k + 24]) + ',')
+        out.append('    0};')
+        rtable.append(f'    {{"{p.name}", r{i}, {len(data)}}},')
     out += ['', '}  // namespace', '', 'const WebFile kWebFiles[] = {'] + table + ['};',
-            f'const size_t kWebFileCount = {len(files)};', '', '}  // namespace fdsrv', '']
+            f'const size_t kWebFileCount = {len(files)};', '', 'const WebFile kRadarFiles[] = {'] + rtable + ['};',
+            f'const size_t kRadarFileCount = {len(radars)};', '', '}  // namespace fdsrv', '']
     path = pathlib.Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = '\n'.join(out)
     if not path.exists() or path.read_text(encoding='utf-8') != text:   # unverändert: nicht neu übersetzen
         path.write_text(text, encoding='utf-8')
-    print('geschrieben:', path, f'({len(files)} Dateien)')
+    print('geschrieben:', path, f'({len(files)} Dateien, {len(radars)} Radarbilder)')
 
 
 if __name__ == '__main__':

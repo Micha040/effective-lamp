@@ -210,6 +210,16 @@ void RateLimit::prune() {
     }
 }
 
+bool radarImage(const std::string& name, bool lower, std::string& png) {
+    std::string file = name + (lower ? "_lower.png" : ".png");
+    for (size_t i = 0; i < kRadarFileCount; ++i)
+        if (file == kRadarFiles[i].path) {
+            png.assign(reinterpret_cast<const char*>(kRadarFiles[i].data), kRadarFiles[i].size);
+            return true;
+        }
+    return false;
+}
+
 bool webAsset(const std::string& path, std::string& body) {
     for (size_t i = 0; i < kWebFileCount; ++i)
         if (path == kWebFiles[i].path) {
@@ -290,6 +300,7 @@ fdapi::Host App::host(const UserPtr& u) {
     h.version = version_;
     h.kind = "server";
     h.asset = webAsset;
+    h.radar = radarImage;
     if (!u) {
         h.withSource = [](const std::function<void(fdapi::Source&)>&) { return false; };
         return h;

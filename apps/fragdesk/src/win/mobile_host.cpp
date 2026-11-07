@@ -20,6 +20,7 @@
 
 #include "../api/http.h"
 #include "../api/mobile.h"
+#include "../core/radar.h"
 #include "../third_party/qrcodegen.hpp"
 #include "app.h"
 #include "common.h"
@@ -84,6 +85,13 @@ public:
             if (d.state == DemoFile::State::New || d.state == DemoFile::State::Failed) ++n;
         return n;
     }
+    std::string matchFile(const std::string& checksum, const std::string& ext) override {
+        if ((ext != "heat" && ext != "replay") || checksum.empty() || checksum.size() > 64 ||
+            checksum.find_first_of("/\\:.") != std::string::npos)
+            return std::string();
+        std::wstring path = joinPath(matchesDir(), widen(checksum) + L"." + widen(ext));
+        return fileExists(path) ? narrow(path) : std::string();
+    }
 
 private:
     App& app;
@@ -109,6 +117,21 @@ bool loadAsset(const std::string& path, std::string& body) {
     const void* p = g ? LockResource(g) : nullptr;
     if (!p) return false;
     body.assign(static_cast<const char*>(p), SizeofResource(nullptr, r));
+    return true;
+}
+
+// Radarbild aus den Ressourcen (res/radars.rc, wie die 2D-Ansicht)
+bool loadRadar(const std::string& name, bool lower, std::string& png) {
+    int index = -1;
+    const fd::RadarMap* m = fd::radarMap(name, &index);
+    if (!m || index < 0 || (lower && !m->lower)) return false;
+    int id = fd::kRadarResBase + 2 * index + (lower ? 1 : 0);
+    HRSRC r = FindResourceW(nullptr, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10));   // RT_RCDATA
+    if (!r) return false;
+    HGLOBAL g = LoadResource(nullptr, r);
+    const void* p = g ? LockResource(g) : nullptr;
+    if (!p) return false;
+    png.assign(static_cast<const char*>(p), SizeofResource(nullptr, r));
     return true;
 }
 
@@ -306,6 +329,7 @@ MobileHost::MobileHost(App& app) : d_(std::make_unique<Impl>(app)) {
     };
     host.asset = loadAsset;
     host.openFile = openFile;
+    host.radar = loadRadar;
     host.thumbnail = [](const fdapi::ClipInfo& clip, std::string& jpeg) { return videoThumbnail(widen(clip.path), clip.id, jpeg); };
     host.mediaBlocked = [raw]() -> std::string {
         ULONGLONG now = GetTickCount64();

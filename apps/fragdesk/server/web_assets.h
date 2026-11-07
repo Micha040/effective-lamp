@@ -15,4 +15,8 @@ struct WebFile {
 extern const WebFile kWebFiles[];
 extern const size_t kWebFileCount;
 
+// Radarbilder (res/radars/<karte>.png, <karte>_lower.png – wie in FragDesk.exe), path = Dateiname
+extern const WebFile kRadarFiles[];
+extern const size_t kRadarFileCount;
+
 }  // namespace fdsrv

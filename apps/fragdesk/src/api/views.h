@@ -58,4 +58,10 @@ std::string sideLine(const char* id, const fd::Career& car);
 // Kennzahl als Objekt: {"id","label","value","t","ct","hint","better","v"}
 void writeStat(JsonW& j, const fd::Stat& s, const fd::Counters& all, const fd::Counters* t, const fd::Counters* ct);
 
+// Radarbild einer Karte für Heatmap und 2D-Ansicht als JSON-Wert (nach j.key(…)):
+//   {"name", "image", "lowerImage" (nur mit unterer Ebene), "posX", "posY", "span", "lowerZ"} – null ohne Radarbild.
+// Umrechnung wie fd::radarUV: u = (x − posX) / span, v = (posY − y) / span (0..1 im Bild); untere Ebene, wenn
+// lowerImage da ist und z < lowerZ. Die Bild-Adressen tragen ?v=<Version> (lange im Browser-Speicher).
+void writeRadar(JsonW& j, const std::string& map, const std::string& version);
+
 }  // namespace fdapi

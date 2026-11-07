@@ -115,6 +115,12 @@ public:
     }
     std::vector<ClipInfo> clips() override { return clipList; }
     int newDemos() override { return 2; }
+    std::string matchFile(const std::string& checksum, const std::string& ext) override {
+        if ((ext != "heat" && ext != "replay") || checksum.empty() || checksum.find_first_of("/\\.") != std::string::npos) return std::string();
+        std::string p = dir + "/matches/" + checksum + "." + ext;
+        std::ifstream f(p, std::ios::binary);
+        return f ? p : std::string();
+    }
 };
 
 std::atomic<bool> stopFlag{false};
@@ -123,7 +129,7 @@ void onSignal(int) { stopFlag = true; }
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string data = ".", web = "web", me, code;
+    std::string data = ".", web = "web", radars = "res/radars", me, code;
     int port = 7420;
     bool blocked = false;
     for (int i = 1; i < argc; ++i) {
@@ -131,6 +137,7 @@ int main(int argc, char** argv) {
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--data") data = next();
         else if (a == "--web") web = next();
+        else if (a == "--radars") radars = next();
         else if (a == "--port") port = std::stoi(next());
         else if (a == "--me") me = next();
         else if (a == "--code") code = next();
@@ -174,6 +181,9 @@ int main(int argc, char** argv) {
         std::string p = ci.path;
         size_t dot = p.rfind('.');
         return dot != std::string::npos && readAll(p.substr(0, dot) + ".jpg", jpeg);
+    };
+    host.radar = [&](const std::string& name, bool lower, std::string& png) {
+        return readAll(radars + "/" + name + (lower ? "_lower.png" : ".png"), png);
     };
     host.mediaBlocked = [blocked]() { return blocked ? std::string("CS2 läuft gerade – Videos gibt es wieder, sobald das Spiel zu ist.") : std::string(); };
 

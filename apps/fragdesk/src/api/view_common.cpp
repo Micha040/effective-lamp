@@ -8,6 +8,8 @@
 
 #include "views.h"
 
+#include "../core/radar.h"
+
 namespace fdapi {
 
 namespace {
@@ -197,6 +199,18 @@ void viewInfo(ViewCtx& c, Response& res) {
     j.key("features").obj().kb("heatmaps", false).kb("replay", false).end();
     j.end();
     res.body = j.take();
+}
+
+void writeRadar(JsonW& j, const std::string& map, const std::string& version) {
+    const fd::RadarMap* r = fd::radarMap(map);
+    if (!r) {
+        j.null();
+        return;
+    }
+    std::string base = std::string("/media/radar/") + r->name, v = "?v=" + version;
+    j.obj().kv("name", r->name).kv("image", base + ".png" + v);
+    if (r->lower) j.kv("lowerImage", base + "_lower.png" + v).kn("lowerZ", r->lowerZ);
+    j.kn("posX", r->posX).kn("posY", r->posY).kn("span", r->span).end();
 }
 
 }  // namespace fdapi

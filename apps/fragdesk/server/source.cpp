@@ -51,6 +51,11 @@ public:
     std::vector<const fd::Match*> matches() override { return sorted; }
     int generation() override { return gen; }
     std::vector<fdapi::ClipInfo> clips() override { return store.clipInfos(user); }
+    std::string matchFile(const std::string& checksum, const std::string& ext) override {
+        if (!byChecksum.count(checksum) || (ext != "heat" && ext != "replay")) return std::string();   // auch Schutz vor fremden Pfaden
+        std::string path = store.matchPath(user->id, checksum, ("." + ext).c_str());
+        return fileSize(path) > 0 ? path : std::string();
+    }
 
     bool detail(const std::string& checksum, fd::Match& out) override {
         if (!byChecksum.count(checksum)) return false;   // auch Schutz vor fremden Pfaden

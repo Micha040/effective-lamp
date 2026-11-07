@@ -15,6 +15,7 @@
 #include <cstdio>
 
 #include "../core/json.h"
+#include "../core/radar.h"
 #include "jsonw.h"
 #include "views.h"
 
@@ -298,8 +299,34 @@ std::string encodeFileName(const std::string& s) {   // RFC 5987
     return out;
 }
 
+// /media/radar/<karte>.png, /media/radar/<karte>_lower.png – Radarbilder für Heatmap und 2D-Ansicht. Ändern sich
+// nur mit einer neuen Version (die Adressen tragen ?v=<Version>), dürfen also lange im Speicher des Browsers bleiben.
+void serveRadar(Host& host, const Request& req, Response& res) {
+    std::string name = req.path.substr(13);
+    bool lower = false;
+    if (name.size() > 4 && name.compare(name.size() - 4, 4, ".png") == 0) name.resize(name.size() - 4);
+    else return res.error(404, "Gibt es nicht");
+    if (name.size() > 6 && name.compare(name.size() - 6, 6, "_lower") == 0) {
+        name.resize(name.size() - 6);
+        lower = true;
+    }
+    const fd::RadarMap* m = name.size() <= 40 ? fd::radarMap(name) : nullptr;
+    std::string png;
+    if (!m || name != m->name || (lower && !m->lower) || !host.radar || !host.radar(m->name, lower, png)) return res.error(404, "Kein Radarbild");
+    std::string etag = "\"" + hex64(fnv1a(png, false)) + "\"";
+    res.set("ETag", etag);
+    res.set("Cache-Control", "private, max-age=2592000");
+    if (req.header("if-none-match") == etag) {
+        res.status = 304;
+        return;
+    }
+    res.type = "image/png";
+    res.body = std::move(png);
+}
+
 void serveMedia(Host& host, const Request& req, Response& res) {
     const std::string& p = req.path;
+    if (p.compare(0, 13, "/media/radar/") == 0) return serveRadar(host, req, res);
     bool clip = p.compare(0, 12, "/media/clip/") == 0, thumb = p.compare(0, 13, "/media/thumb/") == 0;
     if (!clip && !thumb) {
         res.error(404, "Gibt es nicht");
@@ -345,6 +372,25 @@ void serveMedia(Host& host, const Request& req, Response& res) {
         res.set("Content-Disposition", "attachment; filename=\"FragDesk.mp4\"; filename*=UTF-8''" + encodeFileName(name));
     }
 }
+
+}  // namespace
+
+bool readAll(Host& host, const std::string& path, std::string& out, int64_t maxBytes) {
+    out.clear();
+    int64_t size = 0;
+    FileReader rd = path.empty() || !host.openFile ? nullptr : host.openFile(path, size);
+    if (!rd || size < 0 || size > maxBytes) return false;
+    out.resize(static_cast<size_t>(size));
+    int64_t got = 0;
+    while (got < size) {
+        int64_t n = rd(got, &out[static_cast<size_t>(got)], size - got);
+        if (n <= 0) return false;
+        got += n;
+    }
+    return true;
+}
+
+namespace {
 
 void sessionJson(Host& host, Response& res) {
     JsonW j;

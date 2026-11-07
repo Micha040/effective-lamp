@@ -37,6 +37,14 @@ public:
     virtual bool detail(const std::string& checksum, fd::Match& out) = 0;   // mit Kills, Runden, Highlights …
     virtual std::vector<ClipInfo> clips() = 0;
     virtual int newDemos() { return 0; }   // noch nicht ausgewertete Demos
+    // Pfad (UTF-8) einer Zusatzdatei neben der Auswertung: ext "heat" (Heatmap, FDHM) oder "replay" (2D-Ansicht, FDRP);
+    // leer, wenn es sie nicht gibt. Nur den Pfad hier holen – lesen und auswerten außerhalb (readAll im Thread der
+    // Anfrage), damit große Dateien nicht den Thread der Daten (FragDesk: UI-Thread) aufhalten.
+    virtual std::string matchFile(const std::string& checksum, const std::string& ext) {
+        (void)checksum;
+        (void)ext;
+        return std::string();
+    }
 };
 
 // Gekoppelte Geräte und Kopplungscode. Thread-sicher.
@@ -88,7 +96,13 @@ struct Host {
     std::function<bool(const ClipInfo& clip, std::string& jpeg)> thumbnail;
     // nicht leer: Grund, warum gerade keine Videos ausgeliefert werden (z. B. CS2 läuft)
     std::function<std::string()> mediaBlocked;
+    // Radarbild (PNG) einer Karte – name wie fd::RadarMap::name (z. B. "de_nuke"), lower: untere Ebene; false = keins
+    std::function<bool(const std::string& name, bool lower, std::string& png)> radar;
 };
+
+// Datei ganz lesen (über Host::openFile, im aufrufenden Thread); false, wenn sie fehlt, größer als maxBytes ist oder
+// sich nicht lesen lässt
+bool readAll(Host& host, const std::string& path, std::string& out, int64_t maxBytes);
 
 // Eine Anfrage beantworten (aus dem Thread des HTTP-Servers)
 void handle(Host& host, const Request& req, Response& res);
