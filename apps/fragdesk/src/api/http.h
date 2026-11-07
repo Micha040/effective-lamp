@@ -1,6 +1,6 @@
-// FragDesk – kleiner HTTP/1.1-Server für die Handy-App. Läuft in FragDesk (Windows) und im Testserver (Linux),
-// ohne Fremdbibliotheken. Bewusst schlank: GET/HEAD/POST, Keep-Alive, Range-Anfragen für Videos, feste Grenzen
-// für Kopf, Körper, Verbindungen und Wartezeiten.
+// FragDesk – kleiner HTTP/1.1-Server für die Handy-App. Läuft in FragDesk (Windows), im Testserver und in
+// fragdesk-server (Linux), ohne Fremdbibliotheken. Bewusst schlank: GET/HEAD/POST (fragdesk-server auch PUT/DELETE),
+// Keep-Alive, Range-Anfragen für Videos, feste Grenzen für Kopf, Körper, Verbindungen und Wartezeiten.
 #pragma once
 
 #include <cstdint>
@@ -38,6 +38,8 @@ struct Response {
 };
 
 using Handler = std::function<void(const Request&, Response&)>;
+// Größter erlaubter Körper einer Anfrage in Bytes, sobald ihr Kopf gelesen ist (req.body ist noch leer). Ohne: 512 KB.
+using BodyLimit = std::function<int64_t(const Request& head)>;
 
 class Server {
 public:
@@ -47,7 +49,8 @@ public:
     Server& operator=(const Server&) = delete;
 
     // addr: "127.0.0.1" (nur dieser PC) oder "0.0.0.0" (alle Netzwerke); port 0 = frei wählen. err auf Deutsch.
-    bool start(const std::string& addr, int port, Handler handler, std::string& err);
+    // limit: nur für fragdesk-server (Hochladen in Stücken), FragDesk bleibt bei 512 KB.
+    bool start(const std::string& addr, int port, Handler handler, std::string& err, BodyLimit limit = nullptr);
     void stop();   // beendet die Annahme und bricht laufende Verbindungen ab (wartet höchstens 3 s)
     bool running() const;
     int port() const;

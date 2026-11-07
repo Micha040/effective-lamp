@@ -212,6 +212,88 @@ und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
 Adresse wie `https://dein-pc.dein-tailnet.ts.net`. Adresse kopieren und in FragDesk bei „Adresse fürs Handy“ auf
 **Eigene einfügen** – dann steht sie im QR-Code. „Automatisch“ nimmt wieder die erkannte Adresse.
 
+**Ohne laufenden PC:** Mit einem [eigenen Server](#eigener-server) liest die Handy-App vom Server – dein PC darf aus
+sein, und Freunde können mitmachen.
+
+## Eigener Server
+
+Ein kleiner gemieteter Linux-Server speichert deine Stats und Clips – und auf Wunsch die deiner Freunde. FragDesk lädt
+im Hintergrund hoch, die Handy-App liest vom Server: dieselbe App mit denselben Ansichten wie oben, aber dein PC muss
+nicht an sein und Tailscale brauchst du nicht. Hochgeladen wird **nie, während CS2 läuft oder aufgenommen wird**.
+
+**Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64) und SSH-Zugang als root. Klein reicht völlig, z. B.
+ein netcup-VPS mit 2 vCPU, 2 GB RAM und 64 GB SSD („VPS 250 G11s“) für rund 3–4 € im Monat – Preise ändern sich,
+beim Anbieter nachsehen. Platz: ein Match belegt 100–400 KB (Auswertung und Heatmap), ein Clip 2–10 MB; 60 GB reichen
+für Tausende Matches und mehrere Tausend Clips.
+
+**Installieren – ein Befehl** (per SSH auf dem Server):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Micha040/effective-lamp/main/apps/fragdesk/server/install.sh | sudo bash
+```
+
+Das Skript installiert [Caddy](https://caddyserver.com) aus den Paketquellen (HTTPS mit kostenlosem Zertifikat von
+Let's Encrypt, erneuert sich selbst), legt den Benutzer `fragdesk` an, holt `fragdesk-server` aus dem neuesten
+[Release](https://github.com/Micha040/effective-lamp/releases/latest) (geprüft mit `SHA256SUMS.txt`), richtet den
+systemd-Dienst ein, gibt in ufw (falls aktiv) die Ports 80 und 443 frei, startet alles, prüft es – und zeigt zum
+Schluss **deine Einladung als Admin**:
+
+```
+Deine Einladung als Admin – gilt 7 Tage und nur einmal:
+
+  https://203-0-113-5.sslip.io/#invite=…
+```
+
+Ohne eigene Domain heißt dein Server `<IP-mit-Bindestrichen>.sslip.io` ([sslip.io](https://sslip.io) zeigt den Namen
+kostenlos auf deine IP – das reicht für das Zertifikat). Mit eigener Domain (DNS-A-Eintrag auf die IP des Servers):
+`… | sudo bash -s -- --domain stats.example.org`. Erst schauen, was passieren würde: `--dry-run`. Hat dein Anbieter
+eine eigene Firewall im Kundenmenü, müssen dort die Ports 80 und 443 offen sein.
+
+**Verbinden:** Den Einladungslink auf den PC bringen (z. B. per Messenger an dich selbst) und kopieren. In FragDesk
+unter **Einstellungen › Handy-App** den Modus **„Eigener Server“** wählen und **„Einladung einfügen“**. Ab dann lädt
+FragDesk neue Matches und Videos hoch (beim Start, nach jeder Auswertung und Aufnahme, sonst alle 15 Minuten; Videos in
+Stücken, ein Abbruch schadet nicht) und zeigt dort Server, Konto, Speicher und Stand. **„Handy verbinden“** zeigt wie
+gewohnt einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“ bleiben Videos auf Wunsch am PC;
+**„Trennen“** meldet FragDesk vom Server ab.
+
+**Freunde einladen:** als Admin in FragDesk mit **„Freund einladen“** (der Link landet in der Zwischenablage), in der
+Handy-App unter **Einstellungen › Server verwalten** (Link erstellen und direkt teilen) oder auf dem Server mit
+`sudo fragdesk-server invite` (`--admin` für einen weiteren Admin, `--days` für die Gültigkeit). Jeder Link gilt
+einmal und 7 Tage. Öffnet ihn jemand auf dem Handy, erklärt die Seite, dass er in FragDesk am PC gehört.
+
+**Konten und Speicher:** Jeder hat sein eigenes Konto und sieht nur seine eigenen Stats und Clips. Eingeladene Konten
+bekommen 15 GB, Admins unbegrenzt. Unter **Server verwalten** in der Handy-App siehst du alle Konten mit belegtem
+Speicher, änderst das Limit (5, 10, 15, 25, 50 GB oder unbegrenzt) und entfernst Konten samt Daten; die Stats der
+anderen sieht auch der Admin nicht. Ist ein Speicher voll, lädt FragDesk nichts Neues mehr hoch und sagt das – alles,
+was schon oben ist, bleibt zu sehen. Auf dem Server listet `sudo fragdesk-server users` alle Konten.
+
+**Aktualisieren:** Denselben Befehl noch einmal ausführen. Er holt das neueste Release; Daten, Domain und Zeitzone
+bleiben (eine neue Admin-Einladung gibt es nur, solange noch niemand Admin ist).
+
+**Deinstallieren:** `curl -fsSL …/install.sh | sudo bash -s -- --uninstall` entfernt Dienst, Programm und den
+Caddy-Eintrag. Die Daten bleiben in `/var/lib/fragdesk` – ganz weg damit: `sudo rm -rf /var/lib/fragdesk && sudo
+userdel fragdesk`. Caddy bleibt installiert.
+
+**Sicherheit:**
+
+- `fragdesk-server` lauscht nur auf `127.0.0.1:7420`; von außen geht es nur über Caddy und HTTPS.
+- FragDesk meldet sich mit einem langen Zufallsschlüssel an, Handys wie gewohnt mit dem 6-stelligen Code (gilt
+  10 Minuten, nach 5 Fehlversuchen verfallen) und danach einem eigenen Schlüssel. Auf der Platte liegen Schlüssel und
+  Einladungscodes nur als SHA-256 – wer die Dateien kopiert, kann sich damit nicht anmelden.
+- Gegen Raten: höchstens 5 falsche Einladungen bzw. Kopplungscodes pro 15 Minuten und IP.
+- Der Dienst läuft als eigener Benutzer ohne Rechte, darf nur in `/var/lib/fragdesk` schreiben (0700), keine
+  Verbindungen nach außen aufbauen und nur die nötigen Systemaufrufe benutzen (systemd-Härtung).
+- `fragdesk-server invite/users` sprechen über 127.0.0.1 mit dem Dienst und brauchen den Schlüssel aus
+  `/var/lib/fragdesk/local.key`; von außen sperrt Caddy diese Befehle.
+- Wer root auf dem Server hat, kann alle Daten lesen – miete den Server selbst und gib den Zugang nicht weiter.
+  Sichern: den Ordner `/var/lib/fragdesk` (oder Snapshots beim Anbieter).
+
+**Ressourcen:** Im Leerlauf schläft der Server (einmal pro Minute räumt er kurz auf) und braucht wenige MB
+Arbeitsspeicher. Die Matches eines Kontos lädt er erst, wenn ein Handy fragt (rund 150 KB pro Match), und gibt sie
+nach 15 Minuten ohne Handy wieder frei. Caddy komprimiert JSON und Text, Videos nicht. Uhrzeiten in der Handy-App
+rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh` Europe/Berlin
+(`--timezone <Zone>` ändert das).
+
 ## Anti-Cheat und Sicherheit
 
 - FragDesk **liest nur Demo-Dateien**. Es greift nie in ein laufendes Spiel ein: keine Injektion, keine Hooks,
@@ -222,6 +304,8 @@ Adresse wie `https://dein-pc.dein-tailnet.ts.net`. Adresse kopieren und in FragD
   deinem PC ab und verbindet sich mit keinem Server. Für Matches startest du CS2 danach wie gewohnt neu.
 - Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet. Die [Handy-App](#handy-app)
   (aus, bis du sie einschaltest) verbindet nur Handys, die du selbst gekoppelt hast – im Heimnetz oder über Tailscale.
+  Nur wenn du einen [eigenen Server](#eigener-server) einrichtest, lädt FragDesk Auswertungen und Videos dorthin – und
+  nirgendwo sonst hin.
 
 ## Ressourcen
 

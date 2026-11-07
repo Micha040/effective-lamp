@@ -31,6 +31,7 @@ const pages = {
   stats: () => import('./pages/stats.js'),
   moments: () => import('./pages/moments.js'),
   settings: () => import('./pages/settings.js'),
+  admin: () => import('./pages/admin.js'),
 };
 const routes = [
   {re: /^\/?$/, page: 'overview', nav: 0},
@@ -39,6 +40,7 @@ const routes = [
   {re: /^\/stats(?:\/(\d+))?$/, page: 'stats', nav: 2},
   {re: /^\/moments(?:\/(\d+))?$/, page: 'moments', nav: 3},
   {re: /^\/settings$/, page: 'settings', nav: -1, detail: true},
+  {re: /^\/admin$/, page: 'admin', nav: -1, detail: true},   // nur eigener Server, nur Admins
 ];
 const navItems = [
   ['#/', 'home', 'Übersicht'],
@@ -148,6 +150,7 @@ export function errorBox(e, retry) {
 
 let restoring = false;
 function onHash() {
+  if (isInvite()) return showInvite();
   const prev = visited[visited.length - 1];
   if (prev) scrollPos.set(prev, lastScroll);
   if (visited.length > 1 && visited[visited.length - 2] === location.hash) {
@@ -165,9 +168,11 @@ window.addEventListener('scroll', () => { lastScroll = window.scrollY; }, {passi
 // ---- Start ----------------------------------------------------------------------------------------------------------
 async function start() {
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (isInvite()) return showInvite();
   const code = new URLSearchParams(location.search).get('pair') || '';
   try {
-    await api.get('/api/v1/session');
+    const session = await api.get('/api/v1/session');
+    api.setKind(session && session.kind);
   } catch (e) {
     if (e.status === 401) return showPair(code);
     root.replaceChildren(h('div', {class: 'pair'}, errorBox(e, start)));
@@ -190,6 +195,24 @@ function showPair(code) {
   shell = null;
   api.forget();
   renderPair(root, {code, onPaired: () => { visited = []; start(); }});
+}
+
+// Einladungslink eines eigenen Servers (https://…/#invite=<Code>) auf dem Handy geöffnet: Der Link gehört in
+// FragDesk am PC – die Seite erklärt das und kopiert ihn
+function isInvite() { return /^#invite=[0-9a-f]+$/i.test(location.hash); }
+
+async function showInvite() {
+  window.removeEventListener('hashchange', onHash);
+  shell = null;
+  closeSheet();
+  const mod = await import('./pages/invite.js');
+  mod.renderInvite(root, {
+    onContinue: () => {
+      history.replaceState(null, '', location.pathname);
+      visited = [];
+      start();
+    },
+  });
 }
 
 window.addEventListener('fd:unpaired', () => showPair(''));

@@ -218,6 +218,7 @@ std::string statusText(int code) {
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
         case 503: return "Service Unavailable";
+        case 507: return "Insufficient Storage";
         default: return "Status";
     }
 }
@@ -231,6 +232,7 @@ struct Server::State {
     sock_t listen = kBad;
     std::thread acceptor;
     Handler handler;
+    BodyLimit bodyLimit;
     std::atomic<bool> running{false};
     int port = 0;
 };
@@ -350,7 +352,7 @@ void serveConnection(std::shared_ptr<Server::State> st, sock_t s, std::string re
             plainResponse(s, 400);
             break;
         }
-        if (len > int64_t(kMaxBody)) {
+        if (len > (st->bodyLimit ? st->bodyLimit(req) : int64_t(kMaxBody))) {
             plainResponse(s, 413);
             break;
         }
@@ -419,7 +421,7 @@ void acceptLoop(std::shared_ptr<Server::State> st) {
 
 Server::~Server() { stop(); }
 
-bool Server::start(const std::string& addr, int port, Handler handler, std::string& err) {
+bool Server::start(const std::string& addr, int port, Handler handler, std::string& err, BodyLimit limit) {
     stop();
 #ifdef _WIN32
     static bool wsa = [] {
@@ -466,6 +468,7 @@ bool Server::start(const std::string& addr, int port, Handler handler, std::stri
     auto st = std::make_shared<State>();
     st->listen = s;
     st->handler = std::move(handler);
+    st->bodyLimit = std::move(limit);
     st->port = ntohs(bound.sin_port);
     st->running = true;
     st->acceptor = std::thread(acceptLoop, st);

@@ -233,6 +233,53 @@ export function stars(n) {
   return box;
 }
 
+// ---- Zahlen und Zeiten ------------------------------------------------------------------------------------------
+const GiB = 1024 ** 3;
+// Bytes wie in FragDesk: 870 KB, 87 MB, 3,2 GB (ganze GB ohne Komma, z. B. für Limits)
+export function fmtBytes(n) {
+  if (!(n >= 0)) return '–';
+  if (n < 1024 * 1024) return Math.ceil(n / 1024).toLocaleString('de-DE') + ' KB';
+  if (n < GiB) return Math.round(n / (1024 * 1024)).toLocaleString('de-DE') + ' MB';
+  if (n % GiB === 0) return (n / GiB).toLocaleString('de-DE') + ' GB';
+  return (n / GiB).toLocaleString('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + ' GB';
+}
+
+// Heute, 21:13 / Gestern, 21:13 / 06.11., 21:13 / 06.11.2025 (Sekunden seit 1970)
+export function fmtDay(epoch) {
+  if (!epoch) return '–';
+  const d = new Date(epoch * 1000), now = new Date();
+  const two = x => String(x).padStart(2, '0');
+  const time = two(d.getHours()) + ':' + two(d.getMinutes());
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  if (diff === 0) return 'Heute, ' + time;
+  if (diff === 1) return 'Gestern, ' + time;
+  if (d.getFullYear() === now.getFullYear()) return two(d.getDate()) + '.' + two(d.getMonth() + 1) + '., ' + time;
+  return two(d.getDate()) + '.' + two(d.getMonth() + 1) + '.' + d.getFullYear();
+}
+
+// Speicher als Balken: belegt von Limit (0 = unbegrenzt)
+export function usageBar(used, limit, label = 'Speicher') {
+  const frac = limit > 0 ? Math.min(1, used / limit) : 0;
+  const text = limit > 0 ? `${fmtBytes(used)} von ${fmtBytes(limit)}` : `${fmtBytes(used)} · unbegrenzt`;
+  return h('div', {class: 'bar usage' + (frac >= 0.9 ? ' full' : '')},
+    h('div', {class: 'bt'}, label ? h('b', null, label) : null, h('span', null, text)),
+    limit > 0 ? h('div', {class: 'track'}, h('div', {class: 'fill', style: {width: Math.max(frac, used > 0 ? 0.01 : 0) * 100 + '%'}})) : null);
+}
+
+// Text in die Zwischenablage (mit Rückfall für ältere Browser); true = geklappt
+export async function copyText(text, input) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    if (!input) return false;
+    input.focus();
+    input.select();
+    try { return document.execCommand('copy'); } catch (e2) { return false; }
+  }
+}
+
 // Eigenes Stylesheet einer Seite einmal einbinden (z. B. useCss('css/match.css'))
 export function useCss(href) {
   if (document.querySelector(`link[data-fd="${href}"]`)) return;

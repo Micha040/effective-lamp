@@ -11,3 +11,5 @@ g++ -std=c++17 -O1 -Wall -Wextra -o build/tests/core_test tests/core_test.cpp sr
 g++ -std=c++17 -O1 -Wall -Wextra -o build/tests/api_test tests/api_test.cpp src/api/http.cpp src/api/mobile.cpp src/api/view_*.cpp \
   src/core/json.cpp src/core/model.cpp src/core/stats.cpp src/core/format.cpp src/core/radar.cpp src/core/heat.cpp src/core/replay.cpp -lpthread
 ./build/tests/api_test
+# Eigener Server (fragdesk-server): Einzelteile, ganzer Ablauf über HTTP, install.sh
+sh tests/server.sh

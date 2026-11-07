@@ -14,8 +14,9 @@ Für FragDesk braucht es zusätzlich **Go** (Version laut `apps/fragdesk/analyze
 ## Bauen
 
 ```sh
-sh tools/build-all.sh                  # DeskCats, SnowDesk, FragDesk und den Launcher (je build/ im Projektordner)
-python3 tools/package.py --tag v1.0.0  # ZIPs, EfficientLamp.exe, catalog.json und SHA256SUMS.txt nach dist/
+sh tools/build-all.sh                  # DeskCats, SnowDesk, FragDesk, den Launcher und fragdesk-server (je build/ im Projektordner)
+python3 tools/package.py --tag v1.0.0  # ZIPs, EfficientLamp.exe, fragdesk-server-linux-x64, catalog.json und SHA256SUMS.txt nach dist/
+sh apps/fragdesk/server/build.sh       # nur fragdesk-server (Linux x86_64, statisch, mit eingebauter Handy-App)
 ```
 
 Die ZIPs sind reproduzierbar (feste Zeitstempel und Reihenfolge): gleicher Quellstand ergibt dieselbe Prüfsumme.
@@ -32,9 +33,15 @@ sh launcher/tests/run.sh             # JSON, SHA-256, ZIP/Inflate, Katalog-Prüf
 sh launcher/tests/run.sh dist/catalog.json   # zusätzlich den erzeugten Katalog prüfen
 sh apps/deskcats/tests/run.sh        # Katzen: Dauertest mit drei Monitoren, sechs Startwerte
 sh apps/snowdesk/tests/run.sh        # Schnee-Simulation und "Echtes Wetter"
-sh apps/fragdesk/tests/run.sh        # FragDesk: Kennzahlen-Formeln, Karriere, Formatierung, JSON-Modell
+sh apps/fragdesk/tests/run.sh        # FragDesk: Kennzahlen-Formeln, Karriere, Formatierung, JSON-Modell, Handy-App, Server
+sh apps/fragdesk/tests/server.sh     # nur fragdesk-server: Einzelteile, ganzer Ablauf über HTTP, install.sh im Schein-Wurzelordner
 (cd apps/fragdesk/analyzer && go test ./...)   # Analyzer; mit FRAGDESK_DEMOS=<Ordner> auch gegen echte Demos
 ```
+
+`tests/server.sh` erzeugt künstliche Matches und Videos; mit `FD_TEST_DATA=<Ordner>` (Aufbau wie bei
+`make_testdata.py`: `matches/`, `clips.json`, `videos/`) laufen die Tests mit echten Daten, mit `CADDY_BIN=<caddy>`
+prüft der echte Caddy die Konfiguration aus `install.sh`. Der Server läuft auf einem freien Port zwischen 7451 und 7459
+(`FD_TEST_PORT` legt ihn fest).
 
 FragDesk zeichnet jede Seite auf Wunsch ohne Fenster als Bild (auch unter Wine) – praktisch zum Prüfen der Oberfläche:
 

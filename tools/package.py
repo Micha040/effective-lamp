@@ -6,7 +6,8 @@ Aufruf (im Repo-Hauptordner, nachdem tools/build-all.sh gelaufen ist):
     python3 tools/package.py --tag v1.0.0 --base-url http://127.0.0.1:8765/   # zum lokalen Testen
 
 Ergebnis in dist/:
-    EfficientLamp.exe, DeskCats.zip, SnowDesk.zip, TriggerSwitch.zip, WaveMuteSync.zip, catalog.json, SHA256SUMS.txt
+    EfficientLamp.exe, DeskCats.zip, SnowDesk.zip, TriggerSwitch.zip, WaveMuteSync.zip, FragDesk.zip, catalog.json,
+    fragdesk-server-linux-x64 (eigener Server für FragDesk, lädt server/install.sh), SHA256SUMS.txt
 
 Die ZIPs sind reproduzierbar (feste Zeitstempel, feste Reihenfolge): gleicher Quellstand -> gleiche Prüfsumme.
 Vorher wird geprüft, dass jede Versionsnummer in app.json mit den Quelltexten übereinstimmt.
@@ -23,6 +24,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REPO = 'Micha040/effective-lamp'
+SERVER_FILE = 'fragdesk-server-linux-x64'
 CRLF_SUFFIXES = {'.ps1', '.cmd', '.bat'}
 BOM_SUFFIXES = {'.ps1', '.cs'}   # Windows PowerShell 5.1 liest UTF-8 nur mit BOM richtig
 ZIP_TIME = (2026, 1, 1, 12, 0, 0)
@@ -73,6 +75,19 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def copy_server(src, out):
+    """fragdesk-server: nur ein statisch gelinktes Linux-Programm für x86_64 (install.sh lädt es aus dem Release)."""
+    if not src.is_file():
+        fail(f'{src.relative_to(ROOT)} fehlt – erst tools/build-all.sh ausführen')
+    data = src.read_bytes()
+    if data[:4] != b'\x7fELF' or data[4] != 2 or int.from_bytes(data[18:20], 'little') != 62:
+        fail(f'{src.name} ist kein Linux-Programm für x86_64')
+    if b'/lib64/ld-linux' in data:
+        fail(f'{src.name} ist nicht statisch gelinkt')
+    shutil.copyfile(src, out / SERVER_FILE)
+    (out / SERVER_FILE).chmod(0o755)
+
+
 def write_notes(path, tag, base, launcher_version, apps):
     lines = [
         f'**Am einfachsten:** [EfficientLamp.exe]({base}EfficientLamp.exe) herunterladen und starten. '
@@ -88,7 +103,9 @@ def write_notes(path, tag, base, launcher_version, apps):
     for a in apps:
         d = a['download']
         lines.append(f"| {a['name']} – {a['tagline']} | {a['version']} | [{d['file']}]({d['url']}) |")
-    lines += ['', 'Einzelne Programme: ZIP entpacken und `Setup.cmd` doppelklicken. Prüfsummen: `SHA256SUMS.txt`.', '']
+    lines += ['', 'Einzelne Programme: ZIP entpacken und `Setup.cmd` doppelklicken. Prüfsummen: `SHA256SUMS.txt`.', '',
+              f'**Eigener Server für FragDesk** (Linux, x86_64): [{SERVER_FILE}]({base}{SERVER_FILE}) – installiert mit einem Befehl, '
+              f'siehe [FragDesk › Eigener Server](https://github.com/{REPO}/tree/main/apps/fragdesk#eigener-server).', '']
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -98,6 +115,7 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'dist'))
     ap.add_argument('--base-url', help='Download-Adresse der Release-Dateien (Standard: GitHub-Release des Tags)')
     ap.add_argument('--launcher', default=str(ROOT / 'launcher/build/EfficientLamp.exe'))
+    ap.add_argument('--server', default=str(ROOT / 'apps/fragdesk/build' / SERVER_FILE))
     ap.add_argument('--notes', help='Release-Notizen (Markdown) in diese Datei schreiben')
     args = ap.parse_args()
 
@@ -121,6 +139,7 @@ def main():
     if not launcher_src.is_file():
         fail(f'{launcher_src} fehlt – erst tools/build-all.sh ausführen')
     shutil.copyfile(launcher_src, out / 'EfficientLamp.exe')
+    copy_server(pathlib.Path(args.server), out)
 
     apps = []
     for app_json in sorted(ROOT.glob('apps/*/app.json')):
@@ -167,7 +186,7 @@ def main():
         write_notes(pathlib.Path(args.notes), args.tag, base, lver, [a for _, a in apps])
     print(f'Release {args.tag} in {out}:')
     for p in sorted(out.iterdir()):
-        print(f'  {p.name:<22} {p.stat().st_size:>9,} Bytes'.replace(',', '.'))
+        print(f'  {p.name:<26} {p.stat().st_size:>9,} Bytes'.replace(',', '.'))
     for _, a in apps:
         print(f"  {a['name']} {a['version']}")
 
