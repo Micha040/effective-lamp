@@ -208,9 +208,9 @@ Anti-Cheat hat das nichts zu tun.
 KB), damit dein Ping nicht leidet. Im Leerlauf kostet die Handy-App nichts; Vorschaubilder der Videos entstehen einmal
 und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
 
-**HTTPS über Tailscale (für Profis):** `tailscale serve --bg 7420` auf dem PC liefert eine Adresse wie
-`https://dein-pc.dein-tailnet.ts.net`. FragDesk schließen, die Adresse in `%LOCALAPPDATA%\FragDesk\settings.json` unter
-`"mobile": {"address": "…"}` eintragen und FragDesk wieder starten – dann steht sie im QR-Code.
+**HTTPS über Tailscale (für Profis):** `tailscale serve --bg 7420` in einer Eingabeaufforderung auf dem PC liefert eine
+Adresse wie `https://dein-pc.dein-tailnet.ts.net`. Adresse kopieren und in FragDesk bei „Adresse fürs Handy“ auf
+**Eigene einfügen** – dann steht sie im QR-Code. „Automatisch“ nimmt wieder die erkannte Adresse.
 
 ## Anti-Cheat und Sicherheit
 

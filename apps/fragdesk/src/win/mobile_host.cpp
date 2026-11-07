@@ -324,6 +324,7 @@ MobileHost::~MobileHost() { stop(); }
 void MobileHost::apply() {
     Impl& d = *d_;
     const MobileSettings& s = d.app.settings.mobile;
+    d.addrAt = 0;   // Adressen neu bestimmen (z. B. eigene Adresse geändert)
     d.sh->hwnd = d.app.hwnd;
     std::vector<fdapi::Device> devs;
     for (const auto& md : s.devices) devs.push_back({md.token, md.name, md.created, md.lastSeen});
@@ -344,7 +345,6 @@ void MobileHost::apply() {
         d.error = widen(err);
         logLine(L"Handy-App: %ls", d.error.c_str());
     }
-    d.addrAt = 0;
 }
 
 void MobileHost::stop() {

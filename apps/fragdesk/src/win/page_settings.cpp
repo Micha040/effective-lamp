@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include <ctime>
+#include <cwctype>
 
 #include "../core/format.h"
 #include "app.h"
@@ -106,7 +107,39 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     // Adresse
     std::wstring where = addrs.empty() ? L"Kein Netzwerk gefunden" : addrs[0].url + L"  (" + addrs[0].label + L")";
     if (addrs.size() > 1) where += L"\nauch: " + addrs[1].url + L"  (" + addrs[1].label + L")";
-    sec.row(L"Adresse fürs Handy", where, 64, 10);
+    r = sec.row(L"Adresse fürs Handy", where, 64, 200);
+    // Eigene Adresse (z. B. die HTTPS-Adresse von „tailscale serve“) aus der Zwischenablage übernehmen
+    if (ms.address.empty())
+        c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), L"Eigene einfügen", "m-addr", [&app] {
+            std::wstring text;
+            if (OpenClipboard(app.hwnd)) {
+                if (HANDLE hd = GetClipboardData(CF_UNICODETEXT))
+                    if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(hd))) {
+                        text = p;
+                        GlobalUnlock(hd);
+                    }
+                CloseClipboard();
+            }
+            while (!text.empty() && iswspace(text.back())) text.pop_back();
+            while (!text.empty() && iswspace(text.front())) text.erase(text.begin());
+            bool ok = (text.rfind(L"https://", 0) == 0 || text.rfind(L"http://", 0) == 0) && text.size() < 200 &&
+                      text.find_first_of(L" \t\r\n\"<>") == std::wstring::npos;
+            if (!ok) {
+                app.notify(L"In der Zwischenablage steht keine Adresse (http://… oder https://…).", true);
+                return;
+            }
+            if (text.back() != L'/') text += L'/';
+            app.settings.mobile.address = narrow(text);
+            app.saveSettings();
+            app.mobile->apply();
+            app.notify(L"Adresse fürs Handy: " + text);
+        }, Btn::Secondary, Icon::Plus, true, L"Kopiere vorher die Adresse, z. B. die HTTPS-Adresse von „tailscale serve“");
+    else
+        c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), L"Automatisch", "m-addr0", [&app] {
+            app.settings.mobile.address.clear();
+            app.saveSettings();
+            app.mobile->apply();
+        }, Btn::Secondary, Icon::Refresh, true, L"Eigene Adresse entfernen und wieder automatisch wählen");
 
     // Unterwegs
     r = sec.row(L"Unterwegs", ts ? L"Tailscale ist verbunden: Dein Handy erreicht FragDesk auch unterwegs, wenn dort Tailscale an ist."
