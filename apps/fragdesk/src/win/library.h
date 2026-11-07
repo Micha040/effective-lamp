@@ -68,6 +68,7 @@ public:
 
     // Matches (neueste zuerst, ohne Details)
     std::vector<std::unique_ptr<fd::Match>> matches;
+    int generation = 0;   // zählt jede Änderung an matches (für Zwischenspeicher wie die Heatmap)
     std::vector<DemoFile> demos;   // noch nicht ausgewertet
     std::wstring lastError;        // letzte Fehlermeldung einer Auswertung
 

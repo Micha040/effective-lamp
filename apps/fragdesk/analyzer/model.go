@@ -1,12 +1,13 @@
 package main
 
-// Ausgabeformat von fdanalyze (Schema 1). Die App liest es in src/core/match.cpp.
+// Ausgabeformat von fdanalyze (Schema 2). Die App liest es in src/core/model.cpp.
+// Schema 2: Zähler fürs Zielen (cp…, ttd…) und die Heatmap-Datei neben der Ausgabe (<Name>.heat, siehe extras.go).
 //
 // Zähler ("stats", "statsT", "statsCT", Waffen) sind frei benannte Zahlen: Die App summiert sie über
 // beliebig viele Matches auf. Schlüssel, die auf "Max" enden, werden stattdessen über das Maximum
 // zusammengefasst. Bedeutung der einzelnen Zähler: siehe stats.go.
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 type Counters map[string]float64
 
@@ -24,6 +25,8 @@ type Output struct {
 	Clutches   []ClutchOut  `json:"clutches"`
 	Highlights []Highlight  `json:"highlights"`
 	Warnings   []string     `json:"warnings,omitempty"`
+
+	heat []byte // Inhalt der Heatmap-Datei (nicht im JSON)
 }
 
 type DemoInfo struct {

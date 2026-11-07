@@ -146,6 +146,7 @@ void Library::onLoaded(LibraryLoad* r) {
     matches = std::move(r->matches);
     sortMatches();
     loaded_ = true;
+    ++generation;
     logLine(L"Bibliothek: %zu Matches geladen, %d nicht lesbar", matches.size(), r->failed);
 }
 
@@ -175,13 +176,16 @@ bool Library::loadDetail(const std::string& checksum, fd::Match& out, std::wstri
 bool Library::remove(const std::string& checksum) {
     DeleteFileW(matchFile(checksum).c_str());
     DeleteFileW(joinPath(matchesDir(), widen(checksum) + L".replay").c_str());   // 2D-Daten
+    DeleteFileW(joinPath(matchesDir(), widen(checksum) + L".heat").c_str());     // Heatmap
     auto it = std::find_if(matches.begin(), matches.end(), [&](const auto& m) { return m->checksum == checksum; });
     if (it == matches.end()) return false;
     matches.erase(it);
+    ++generation;
     return true;
 }
 
 void Library::insertMatch(std::unique_ptr<fd::Match> m) {
+    ++generation;
     for (auto& old : matches)
         if (old->checksum == m->checksum) {
             old = std::move(m);
@@ -448,6 +452,12 @@ void Library::worker() {
             auto m = std::make_unique<fd::Match>();
             if (readFile(out, text, 64u << 20) && fd::parseMatch(text, *m, err, false) && !m->checksum.empty()) {
                 std::wstring final = matchFile(m->checksum);
+                // Heatmap-Daten (fdanalyze legt sie neben die Ausgabe) mitnehmen; ohne sie keine alte stehen lassen
+                std::wstring heatTmp = out.substr(0, out.size() - 5) + L".heat", heatFinal = final.substr(0, final.size() - 5) + L".heat";
+                if (!fileExists(heatTmp) || !MoveFileExW(heatTmp.c_str(), heatFinal.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                    DeleteFileW(heatTmp.c_str());
+                    DeleteFileW(heatFinal.c_str());
+                }
                 if (MoveFileExW(out.c_str(), final.c_str(), MOVEFILE_REPLACE_EXISTING)) {
                     logLine(L"Ausgewertet: %ls -> %ls", path.c_str(), final.c_str());
                     send(AnalysisEvent::Done, L"", std::move(m));
@@ -458,6 +468,7 @@ void Library::worker() {
             }
         }
         DeleteFileW(out.c_str());
+        DeleteFileW((out.substr(0, out.size() - 5) + L".heat").c_str());   // falls nicht übernommen
         if (!failText.empty()) send(AnalysisEvent::Failed, failText);
         {
             std::lock_guard<std::mutex> lock(mu_);

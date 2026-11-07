@@ -229,6 +229,32 @@ bool Window::renderPng() {
             if (app_.replay.data) app_.replay.seek(app_.replay.freezeTick + opt_.replayAt * app_.replay.data->tickrate);
         }
     }
+    if (!opt_.heat.empty()) {   // Heatmap-Auswahl: Liste wie "kills,deaths,me,t,points"
+        uint32_t layers = 0;
+        uint8_t who = 0, sides = 0;
+        bool throws = false, points = false;
+        std::wstring list = opt_.heat + L",";
+        for (size_t a = 0, b; (b = list.find(L',', a)) != std::wstring::npos; a = b + 1) {
+            std::wstring t = list.substr(a, b - a);
+            const wchar_t* names[] = {L"presence", L"kills", L"deaths", L"smoke", L"molly", L"flash", L"he"};
+            for (int i = 0; i < fd::HlCount; ++i)
+                if (t == names[i]) layers |= 1u << i;
+            if (t == L"me") who |= fd::WhoMe;
+            if (t == L"team") who |= fd::WhoTeam;
+            if (t == L"enemy") who |= fd::WhoEnemy;
+            if (t == L"t") sides |= fd::SideT;
+            if (t == L"ct") sides |= fd::SideCT;
+            if (t == L"throws") throws = true;
+            if (t == L"points") points = true;
+        }
+        for (HeatView* hv : {&app_.matchHeat, &app_.statsHeat}) {
+            if (layers) hv->layers = layers;
+            if (who) hv->filter.who = who;
+            if (sides) hv->filter.sides = sides;
+            hv->throws = throws;
+            hv->marks = points;
+        }
+    }
     if (opt_.selectCount > 0)   // Momente auswählen (für Bilder der Auswahl)
         for (const auto& m : app_.lib.matches)
             for (const auto& h : m->highlights)
@@ -730,10 +756,12 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             AnalysisEvent::Kind kind = e->kind;
             std::wstring text = e->text, path = e->path;
             std::wstring title = e->match ? matchTitle(*e->match, app_.me) : L"";
+            std::string checksum = e->match ? e->match->checksum : std::string();
             app_.lib.onEvent(e);
             if (kind == AnalysisEvent::Done) {
                 if (app_.me.empty()) app_.detectMe();
                 app_.invalidateCareer();
+                if (!checksum.empty() && checksum == app_.matchId) app_.refreshDetail();   // neu ausgewertet, während es offen ist
                 app_.notify(L"Ausgewertet: " + title);
             } else if (kind == AnalysisEvent::Failed) {
                 app_.notify(fileName(path) + L": " + text, true);
@@ -745,6 +773,13 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_FOLDER:
             SetTimer(hwnd_, kScanTimer, 1500, nullptr);
             return 0;
+        case WM_APP_HEAT: {
+            auto* e = reinterpret_cast<HeatEvent*>(lp);
+            if (!app_.statsHeat.apply(e)) app_.matchHeat.apply(e);
+            delete e;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         case WM_APP_REPLAY: {
             auto* e = reinterpret_cast<ReplayEvent*>(lp);
             const fd::Match* m = app_.detail && e && app_.detail->checksum == e->match ? app_.detail.get() : nullptr;

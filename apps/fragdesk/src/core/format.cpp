@@ -70,6 +70,16 @@ std::string fmtSeconds(double v, int decimals) {
     return fmtDec(v, decimals) + kNbsp + "s";
 }
 
+std::string fmtDeg(double v, int decimals) {
+    if (bad(v)) return kDash;
+    return fmtDec(v, decimals) + "\xC2\xB0";
+}
+
+std::string fmtMs(double v) {
+    if (bad(v)) return kDash;
+    return fmtInt(v) + kNbsp + "ms";
+}
+
 std::string fmtMoney(double v) {
     if (bad(v)) return kDash;
     return fmtInt(v) + kNbsp + "$";
@@ -114,6 +124,8 @@ std::string formatStat(double v, Fmt f) {
         case Fmt::Money: return fmtMoney(v);
         case Fmt::Signed: return fmtSigned(v, 0);
         case Fmt::Signed1: return fmtSigned(v, 1);
+        case Fmt::Deg1: return fmtDeg(v, 1);
+        case Fmt::Ms: return fmtMs(v);
     }
     return fmtDec(v, 2);
 }

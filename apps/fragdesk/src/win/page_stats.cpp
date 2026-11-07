@@ -263,8 +263,16 @@ float clutchTab(Canvas& c, const fd::Career& car, float x, float y, float w) {
     return y - y0 + 10;
 }
 
-float aimTab(Canvas& c, const fd::Career& car, float x, float y, float w) {
+std::vector<const fd::Match*> careerMatches(const fd::Career& car) {
+    std::vector<const fd::Match*> ms;
+    for (const auto& p : car.points) ms.push_back(p.match);
+    return ms;
+}
+
+float aimTab(Canvas& c, App& app, const fd::Career& car, float x, float y, float w) {
     float y0 = y;
+    y += reanalyzeNote(c, app, x, y, w, careerMatches(car), L"die Werte für Crosshair-Placement und Reaktionszeit");
+    y += groupCard(c, x, y, w, "crosshair", car) + 16;
     bool wide = w >= 980;
     float cw = wide ? (w - 16) / 2 : w;
     float h1 = groupCard(c, x, y, cw, "aim", car);
@@ -296,6 +304,10 @@ float trendTab(Canvas& c, App& app, const fd::Career& car, float x, float y, flo
         {L"K/D", L"Kills pro Tod", [](const fd::MatchPoint& p) { return p.kd; }, [](double v) { return W(fd::fmtDec(v, 1)); }, 1.0},
         {L"Headshot-Quote", L"in Prozent", [](const fd::MatchPoint& p) { return p.hsPct; }, [](double v) { return W(fd::fmtDec(v, 0)); }, NAN},
         {L"KAST", L"in Prozent", [](const fd::MatchPoint& p) { return p.kast; }, [](double v) { return W(fd::fmtDec(v, 0)); }, NAN},
+        {L"Crosshair-Placement", L"Ø Grad zum Kopf beim Auftauchen, kleiner ist besser", [](const fd::MatchPoint& p) { return p.crosshair; },
+         [](double v) { return W(fd::fmtDeg(v, 1)); }, NAN},
+        {L"Reaktionszeit", L"Ø ms bis zum ersten Treffer, kleiner ist besser", [](const fd::MatchPoint& p) { return p.reaction; },
+         [](double v) { return W(fd::fmtMs(v)); }, NAN},
     };
     // Premier zuerst, falls vorhanden
     auto pp = premierPoints(app, car);
@@ -326,6 +338,7 @@ float trendTab(Canvas& c, App& app, const fd::Career& car, float x, float y, flo
         for (const auto& p : car.points) {
             ChartPoint cp;
             cp.y = t.val(p);
+            if (std::isnan(cp.y)) continue;   // ältere Auswertung ohne diesen Wert
             int64_t when = matchEpoch(*p.match);
             cp.label = dateText(when).substr(0, 6);
             cp.tip = t.fmt(cp.y) + L"\n" + matchTitle(*p.match, app.me) + L" · " + W(fd::resultName(p.me->result)) + L"\n" + dateTimeText(when);
@@ -339,10 +352,73 @@ float trendTab(Canvas& c, App& app, const fd::Career& car, float x, float y, flo
         o.ref = t.ref;
         o.movingAvg = 5;
         if (std::wstring(t.sub) == L"in Prozent") o.yCap = 100;
-        lineChart(c, RectF(cx + 8, y + 56, cw - 22, h - 64), pts, o);
+        if (pts.empty())
+            c.text(L"Noch keine Werte – die Matches wurden mit einer älteren Version ausgewertet (Tab „Zielen“: Neu auswerten).", F::Small,
+                   c.th.text3, RectF(cx + 18, y + 56, cw - 36, h - 64), Align::Center, true, true);
+        else
+            lineChart(c, RectF(cx + 8, y + 56, cw - 22, h - 64), pts, o);
         if (!wide || i % 2 == 1 || i + 1 == charts.size()) y += h + 16;
     }
     return y - y0;
+}
+
+float heatTab(Canvas& c, App& app, const fd::Career& car, float x, float y, float w) {
+    float y0 = y;
+    std::vector<std::pair<std::string, int>> maps;   // Maps mit Radarbild, meistgespielte zuerst
+    for (const auto& kv : car.maps)
+        if (fd::radarMap(kv.first)) maps.push_back({kv.first, kv.second.matches});
+    std::stable_sort(maps.begin(), maps.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    if (maps.empty())
+        return emptyState(c, x, y, w, Icon::Map, L"Keine Karte mit Radarbild", L"Die Heatmap gibt es für die offiziellen Karten.");
+    std::string map = !app.mapFilter.empty() ? app.mapFilter : app.heatMap;
+    if (std::none_of(maps.begin(), maps.end(), [&](const auto& m) { return m.first == map; })) map = maps.front().first;
+    if (app.mapFilter.empty()) {   // ohne Map-Filter: Map hier wählen
+        std::vector<std::wstring> labels;
+        int sel = 0;
+        for (size_t i = 0; i < maps.size(); ++i) {
+            labels.push_back(W(fd::mapName(maps[i].first)) + L" · " + std::to_wstring(maps[i].second));
+            if (maps[i].first == map) sel = int(i);
+        }
+        float rowW = c.chipRowWidth(labels);
+        if (rowW <= w) {
+            c.chipRow(x, y, labels, sel, "heatmap-map", [&app, maps](int i) { app.heatMap = maps[size_t(i)].first; });
+            y += 30 + 18;
+        } else {   // zu viele: die meistgespielten, der Rest über den Map-Filter oben
+            std::vector<std::wstring> some;
+            float used = 0;
+            for (const auto& l : labels) {
+                float lw = c.chipRowWidth({l}) + 6;
+                if (used + lw > w) break;
+                some.push_back(l);
+                used += lw;
+            }
+            c.chipRow(x, y, some, sel < int(some.size()) ? sel : -1, "heatmap-map", [&app, maps](int i) { app.heatMap = maps[size_t(i)].first; });
+            y += 30 + 18;
+        }
+    }
+    std::vector<const fd::Match*> ms;
+    for (const auto& p : car.points)
+        if (p.match->map == map) ms.push_back(p.match);
+    y += reanalyzeNote(c, app, x, y, w, ms, L"die Heatmap-Daten");
+    std::vector<fd::HeatMatchInfo> infos;
+    std::string key = map + "|" + app.me + "|" + std::to_string(app.lib.generation);
+    for (const fd::Match* m : ms) {
+        if (App::outdated(*m)) continue;
+        infos.push_back(fd::heatMatchInfo(*m, app.me, narrow(matchTitle(*m, app.me) + L" · " + dateText(matchEpoch(*m)))));
+        key += "|" + m->checksum;
+    }
+    if (infos.empty()) {
+        y += emptyState(c, x, y, w, Icon::Map, L"Noch keine Heatmap-Daten für " + W(fd::mapName(map)),
+                        L"Die gibt es für Matches, die mit FragDesk 1.2 oder neuer ausgewertet wurden – ältere oben neu auswerten.");
+        return y - y0 + 20;
+    }
+    int n = int(infos.size());
+    if (app.statsHeat.key != key) app.statsHeat.loadMany(app.hwnd, std::move(infos), map, app.me, key, app.renderMode);
+    y += app.statsHeat.draw(c, app, x, y, w);
+    c.text(std::to_wstring(n) + (n == 1 ? L" Match" : L" Matches") + L" auf " + W(fd::mapName(map)) +
+               L" · Aufenthalt einmal pro Sekunde · Kills vom Ort des Schützen · Granaten am Landepunkt",
+           F::Small, c.th.text3, RectF(x, y + 10, w, 18));
+    return y - y0 + 44;
 }
 
 }  // namespace
@@ -361,7 +437,7 @@ float drawStats(Canvas& c, App& app, float w) {
         return y + 20;
     }
     std::vector<std::wstring> tabs = {L"Allgemein", L"Waffen", L"Maps", L"Eröffnung & Trades", L"Clutches", L"Utility", L"Zielen",
-                                      L"Besondere Kills", L"Schaden & Zeit", L"Economy & Bombe", L"Verlauf"};
+                                      L"Besondere Kills", L"Schaden & Zeit", L"Economy & Bombe", L"Verlauf", L"Heatmaps"};
     y += c.tabs(x, y, cw, tabs, app.statsTab, "stab", [&app](int i) {
         app.statsTab = i;
         app.invalidate();
@@ -373,11 +449,12 @@ float drawStats(Canvas& c, App& app, float w) {
         case 3: y += groupCard(c, x, y, cw, "opening", car) + 16; break;
         case 4: y += clutchTab(c, car, x, y, cw); break;
         case 5: y += groupCard(c, x, y, cw, "utility", car) + 16; break;
-        case 6: y += aimTab(c, car, x, y, cw); break;
+        case 6: y += aimTab(c, app, car, x, y, cw); break;
         case 7: y += groupCard(c, x, y, cw, "special", car) + 16; break;
         case 8: y += groupCard(c, x, y, cw, "damage", car) + 16; break;
         case 9: y += twoGroups(c, x, y, cw, "economy", "bomb", car) + 16; break;
-        default: y += trendTab(c, app, car, x, y, cw); break;
+        case 10: y += trendTab(c, app, car, x, y, cw); break;
+        default: y += heatTab(c, app, car, x, y, cw); break;
     }
     c.text(L"Werte als T und CT beziehen sich auf die Runden auf der jeweiligen Seite. Fahr mit der Maus über eine Kennzahl für eine Erklärung.",
            F::Small, c.th.text3, RectF(x, y, cw, 20));

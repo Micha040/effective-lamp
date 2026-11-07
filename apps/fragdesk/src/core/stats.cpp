@@ -257,6 +257,26 @@ const StatDef kDefs[] = {
     {"teamUtilDmg", "Utility-Schaden an Mitspielern", "teamUtilDmg", Fmt::Int, -1, ""},
     // Zielen
     {"shots", "Schüsse", "shots", Fmt::Int, 0, "Abgefeuerte Kugeln (ohne Granaten und Messer)"},
+    {"crosshair", "Crosshair-Placement", "cpSum/cpN", Fmt::Deg1, -1,
+     "Ø Winkel zwischen deinem Fadenkreuz und dem Kopf des Gegners in dem Moment, in dem er für dich sichtbar wird. "
+     "Gezählt wird nur mit Schusswaffe in der Hand, nicht geblendet und wenn der Gegner auf deinem Bildschirm auftaucht. "
+     "Kleiner ist besser"},
+    {"crosshairGood", "Fadenkreuz am Kopf", "100*cpGood/cpN", Fmt::Pct0, 1,
+     "Anteil der Begegnungen, in denen dein Fadenkreuz beim Auftauchen des Gegners höchstens 5° von seinem Kopf entfernt war"},
+    {"crosshairH", "Daneben waagerecht", "cpYaw/cpN", Fmt::Deg1, -1, "Ø Abstand links oder rechts vom Kopf beim Auftauchen"},
+    {"crosshairV", "Daneben senkrecht", "cpPitch/cpN", Fmt::Deg1, -1, "Ø Abstand über oder unter dem Kopf beim Auftauchen"},
+    {"reaction", "Reaktionszeit", "ttdSum/ttdN", Fmt::Ms, -1,
+     "Ø Zeit vom Sichtbarwerden eines Gegners bis zu deinem ersten Treffer an ihm (nur Treffer innerhalb von 2 Sekunden). "
+     "Das Spiel meldet „sichtbar“ manchmal ein paar Ticks zu spät – gut für Vergleiche, kein Labor-Messwert"},
+    {"sightings", "Gemessene Begegnungen", "cpN", Fmt::Int, 0, "Wie oft ein Gegner für dich sichtbar wurde und gemessen werden konnte"},
+    {"crosshairRifle", "Crosshair mit Gewehren", "cpSumRifle/cpNRifle", Fmt::Deg1, -1, "AK-47, M4, FAMAS, Galil, AUG, SG 553"},
+    {"crosshairSniper", "Crosshair mit Scharfschützengewehren", "cpSumSniper/cpNSniper", Fmt::Deg1, -1, "AWP, SSG 08, Autosniper"},
+    {"crosshairPistol", "Crosshair mit Pistolen", "cpSumPistol/cpNPistol", Fmt::Deg1, -1, ""},
+    {"crosshairSmg", "Crosshair mit MPs", "cpSumSmg/cpNSmg", Fmt::Deg1, -1, ""},
+    {"reactionRifle", "Reaktion mit Gewehren", "ttdSumRifle/ttdNRifle", Fmt::Ms, -1, ""},
+    {"reactionSniper", "Reaktion mit Scharfschützengewehren", "ttdSumSniper/ttdNSniper", Fmt::Ms, -1, ""},
+    {"reactionPistol", "Reaktion mit Pistolen", "ttdSumPistol/ttdNPistol", Fmt::Ms, -1, ""},
+    {"reactionSmg", "Reaktion mit MPs", "ttdSumSmg/ttdNSmg", Fmt::Ms, -1, ""},
     {"accuracy", "Treffsicherheit", "100*shotsHit/shots", Fmt::Pct1, 1, "Anteil der Schüsse, die einen Spieler getroffen haben"},
     {"firstShotAcc", "Erster Schuss", "100*firstShotsHit/firstShots", Fmt::Pct1, 1, "Treffsicherheit des ersten Schusses einer Salve"},
     {"sprayAcc", "Spray ab der 4. Kugel", "100*sprayShotsHit/sprayShots", Fmt::Pct1, 1, ""},
@@ -410,6 +430,9 @@ const std::vector<StatGroup>& statGroups() {
         {"aim", "Zielen",
          {"accuracy", "firstShotAcc", "sprayAcc", "movingPct", "movingAcc", "standingAcc", "headHitPct", "hsPct",
           "shots", "shotsPerKill", "dmgPerHit", "avgDist", "maxDist", "longKills"}},
+        {"crosshair", "Crosshair & Reaktion",
+         {"crosshair", "crosshairGood", "crosshairH", "crosshairV", "reaction", "sightings", "crosshairRifle", "crosshairSniper",
+          "crosshairPistol", "crosshairSmg", "reactionRifle", "reactionSniper", "reactionPistol", "reactionSmg"}},
         {"hitzones", "Trefferzonen", {"headHitPct", "hitNeckPct", "hitChestPct", "hitStomachPct", "hitArmsPct", "hitLegsPct"}},
         {"special", "Besondere Kills",
          {"kWallbang", "kNoscope", "kSmoke", "kBlind", "kOnBlind", "kAirborne", "kOnAirborne", "kCollateral",
@@ -512,6 +535,9 @@ Career buildCareer(const std::vector<const Match*>& matches, const std::string& 
         double k = p.all.get("kills"), d = p.all.get("deaths");
         pt.kd = d > 0 ? k / d : k;
         pt.hsPct = k > 0 ? 100 * p.all.get("hsKills") / k : 0;
+        double cpN = p.all.get("cpN"), ttdN = p.all.get("ttdN");
+        pt.crosshair = cpN > 0 ? p.all.get("cpSum") / cpN : std::numeric_limits<double>::quiet_NaN();
+        pt.reaction = ttdN > 0 ? p.all.get("ttdSum") / ttdN : std::numeric_limits<double>::quiet_NaN();
         if (p.rankType == 11) {
             pt.premierOld = p.rankOld;
             pt.premierNew = p.rankNew;

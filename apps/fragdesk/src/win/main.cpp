@@ -5,6 +5,7 @@
 //   --theme dark|light                   Farbschema erzwingen
 //   --render <bild.png> [--page dashboard|matches|match|stats|highlights|settings|replay] [--tab N] [--match N]
 //                       [--at <s>]  (replay: --tab = Runde, --at = Sekunden nach der Kaufphase)
+//                       [--heat presence,kills,deaths,smoke,molly,flash,he,throws,points,me,team,enemy,t,ct]  (Heatmap-Auswahl)
 //            [--size 1440x900] [--scale 100] [--scroll Y] [--data <Ordner>] [--me <SteamID>] [--select N]
 //                                        Seite ohne Fenster als Bild zeichnen (Tests, README)
 #include <objbase.h>
@@ -57,6 +58,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         else if (a == L"--page") opt.page = pageFromName(next());
         else if (a == L"--tab") opt.tab = _wtoi(next().c_str());
         else if (a == L"--at") opt.replayAt = _wtof(next().c_str());
+        else if (a == L"--heat") opt.heat = next();
         else if (a == L"--match") opt.matchIndex = _wtoi(next().c_str());
         else if (a == L"--select") opt.selectCount = _wtoi(next().c_str());
         else if (a == L"--scale") opt.renderScale = std::max(50, std::min(300, _wtoi(next().c_str())));

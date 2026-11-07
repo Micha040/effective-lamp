@@ -1,4 +1,4 @@
-// FragDesk – Daten eines ausgewerteten Matches (Ausgabe von fdanalyze, Schema 1)
+// FragDesk – Daten eines ausgewerteten Matches (Ausgabe von fdanalyze, Schema 1 und 2)
 #pragma once
 #include <cstdint>
 #include <string>
@@ -107,6 +107,9 @@ struct HighlightInfo {
     double seconds(double tickrate) const;
     bool hasTag(const char* tag) const;
 };
+
+// Version der Auswertung. 2: mit Crosshair/Reaktion und Heatmap-Datei – ältere Matches lassen sich neu auswerten.
+constexpr int kMatchSchema = 2;
 
 struct Match {
     int schema = 0;

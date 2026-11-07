@@ -18,6 +18,7 @@ struct Options {
     int renderWidth = 1440, renderHeight = 900, renderScale = 100;
     float renderScroll = 0;
     double replayAt = 0;   // 2D-Ansicht: Sekunden nach der Kaufphase
+    std::wstring heat;     // Heatmap: Ebenen und Auswahl (Bilder für die Doku)
     std::wstring me;
     std::vector<std::wstring> demos;    // beim Start übergebene Demos (z. B. „Öffnen mit“)
 };

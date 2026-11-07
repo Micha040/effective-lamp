@@ -36,7 +36,18 @@ func analyzeFile(path, tempDir string, step func(string)) (*Output, error) {
 	defer cleanup()
 
 	step("parse")
+	// Heatmap-Daten und Zielen im zweiten Durchgang, gleichzeitig mit cs-demo-analyzer (beide lesen nur)
+	extrasDone := make(chan *extrasResult, 1)
+	var extrasErr error
+	go func() {
+		res, err := buildExtras(demoPath)
+		if err != nil {
+			extrasErr = err
+		}
+		extrasDone <- res
+	}()
 	m, err := analyzeSafely(demoPath)
+	ex := <-extrasDone // auch bei Fehlern abwarten: cleanup() löscht gleich die entpackte Demo
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +72,12 @@ func analyzeFile(path, tempDir string, step func(string)) (*Output, error) {
 	fillKills(out, m)
 	fillRounds(out, m)
 	fillPlayers(out, m, sb)
+	if ex != nil {
+		mergeAim(out, ex.aim)
+		out.heat = ex.heat
+	} else if extrasErr != nil {
+		out.Warnings = append(out.Warnings, "Heatmap und Zielen: "+extrasErr.Error())
+	}
 	out.Highlights = buildHighlights(out, sb.tickrate)
 	if out.Highlights == nil {
 		out.Highlights = []Highlight{}

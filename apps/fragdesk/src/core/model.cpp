@@ -158,7 +158,7 @@ bool parseMatch(const std::string& text, Match& m, std::string& error, bool deta
     }
     m = Match();
     m.schema = num(root, "schema");
-    if (m.schema != 1) {
+    if (m.schema < 1 || m.schema > kMatchSchema) {
         error = "unbekanntes Format " + std::to_string(m.schema);
         return false;
     }

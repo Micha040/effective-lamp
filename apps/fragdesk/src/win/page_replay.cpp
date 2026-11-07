@@ -170,26 +170,8 @@ void mapPanel(Canvas& c, App& app, const RectF& area) {
         geo.upper = RectF(a.X + (a.Width - s) / 2, a.Y + (a.Height - s) / 2, s, s);
     }
 
-    // Radarbild in Bildschirmpixeln (vorbereitet, deshalb ohne Skalieren gezeichnet)
-    auto image = [&](bool lower, const RectF& rr) {
-        int px = int(std::lround(rr.Width * c.scale));
-        Bitmap* bmp = rv.radarBitmap(lower, px);
-        if (!bmp) {   // ohne Bild: Raster
-            Pen pen(Color(26, 255, 255, 255), 1);
-            for (int i = 0; i <= 8; ++i) {
-                float gx = rr.X + rr.Width * i / 8, gy = rr.Y + rr.Height * i / 8;
-                c.g.DrawLine(&pen, gx, rr.Y, gx, rr.Y + rr.Height);
-                c.g.DrawLine(&pen, rr.X, gy, rr.X + rr.Width, gy);
-            }
-            return;
-        }
-        GraphicsState st = c.g.Save();
-        float dx = std::round((rr.X + c.ox()) * c.scale), dy = std::round((rr.Y + c.oy()) * c.scale);
-        c.g.ResetTransform();
-        c.g.SetInterpolationMode(InterpolationModeNearestNeighbor);
-        c.g.DrawImage(bmp, dx, dy, REAL(px), REAL(px));
-        c.g.Restore(st);
-    };
+    // Radarbild in Bildschirmpixeln (ohne Bild: Raster)
+    auto image = [&](bool lower, const RectF& rr) { drawRadarImage(c, rv.images, rv.radar ? rv.radarIndex : -1, lower, rr); };
     image(false, geo.upper);
     if (geo.twoLevels) {
         image(true, geo.lower);

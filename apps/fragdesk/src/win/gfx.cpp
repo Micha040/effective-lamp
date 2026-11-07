@@ -632,21 +632,48 @@ float Canvas::chipRowWidth(const std::vector<std::wstring>& labels) {
 float Canvas::tabs(float x, float y, float w, const std::vector<std::wstring>& labels, int selected, const std::string& key,
                    std::function<void(int)> pick) {
     const float h = 42;
-    line(x, y + h - 0.5f, x + w, y + h - 0.5f, th.border, 1);
-    float cx = x;
-    for (size_t i = 0; i < labels.size(); ++i) {
-        float tw = measure(labels[i], F::BodySemi);
-        RectF r(cx, y, tw + 24, h);
+    size_t n = labels.size();
+    std::vector<float> tw(n);
+    float labelsW = 0;
+    for (size_t i = 0; i < n; ++i) labelsW += tw[i] = measure(labels[i], F::BodySemi);
+    // zu breit: erst enger, dann in mehrere Zeilen
+    float pad = 24, gap = 4;
+    if (n && labelsW + n * pad + (n - 1) * gap > w) {
+        gap = 2;
+        pad = std::max(14.0f, (w - labelsW - (n - 1) * gap) / float(n));
+    }
+    std::vector<int> rowOf(n, 0);
+    int rows = 1;
+    float cx = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (cx > 0 && cx + tw[i] + pad > w) {
+            ++rows;
+            cx = 0;
+        }
+        rowOf[i] = rows - 1;
+        cx += tw[i] + pad + gap;
+    }
+    float total = h * float(rows);
+    line(x, y + total - 0.5f, x + w, y + total - 0.5f, th.border, 1);
+    cx = x;
+    int row = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (rowOf[i] != row) {
+            row = rowOf[i];
+            cx = x;
+        }
+        float ry = y + h * float(row);
+        RectF r(cx, ry, tw[i] + pad, h);
         uint32_t id = hashId("tab:" + key + ":" + std::to_string(i));
         bool sel = int(i) == selected, hv = hot(id);
         if (hv && !sel) round(RectF(r.X + 2, r.Y + 5, r.Width - 4, h - 12), 6, th.hover);
         text(labels[i], F::BodySemi, sel ? th.text : hv ? th.text : th.text2, RectF(r.X, r.Y, r.Width, h - 2), Align::Center);
-        if (sel) round(RectF(r.X + 10, y + h - 3, r.Width - 20, 3), 1.5f, th.accent);
+        if (sel) round(RectF(r.X + std::min(10.0f, pad / 2 - 2), ry + h - 3, r.Width - 2 * std::min(10.0f, pad / 2 - 2), 3), 1.5f, th.accent);
         int idx = int(i);
         region(r, id, [pick, idx] { pick(idx); }, L"", true);
-        cx += r.Width + 4;
+        cx += r.Width + gap;
     }
-    return h;
+    return total;
 }
 
 void Canvas::card(const RectF& r, float rad) {

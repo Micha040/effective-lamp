@@ -14,6 +14,8 @@ std::string fmtDec(double v, int decimals);   // 1,23
 std::string fmtSigned(double v, int decimals);   // +3 / −2,5
 std::string fmtPct(double v, int decimals);   // 45 %
 std::string fmtSeconds(double v, int decimals);   // 12,3 s
+std::string fmtDeg(double v, int decimals);       // 4,3°
+std::string fmtMs(double v);                      // 520 ms
 std::string fmtMoney(double v);            // 4.350 $
 std::string fmtRating(int rating);         // 21.595
 std::string fmtDuration(double seconds);   // 43 min, 1 h 05 min

@@ -73,15 +73,47 @@ void App::go(Page p) {
         replay.playing = false;
         replay.releaseBitmaps();
     }
+    if (page == Page::Match && p != Page::Match) matchHeat.release();
+    if (page == Page::Stats && p != Page::Stats) statsHeat.release();
     page = p;
     invalidate();
 }
 
-void App::openReplay(int round) {
+void App::openReplay(int round, int tick) {
     if (!detail) return;
+    matchHeat.release();   // die großen Bilder der Heatmaps braucht die 2D-Ansicht nicht
+    statsHeat.release();
     page = Page::Replay;
+    replay.pendingTick = tick;   // −1: keine Stelle (auch kein Rest von einem früheren Sprung)
     replay.open(hwnd, *detail, round);
     invalidate();
+}
+
+void App::openReplayAt(const std::string& checksum, int round, int tick) {
+    if (matchId != checksum || !detail) {
+        int tab = matchTab;
+        openMatch(checksum, tab);
+        if (!detail) return;
+    }
+    openReplay(round, std::max(0, tick - int(2 * (detail->tickrate > 0 ? detail->tickrate : 64))));   // kurz davor
+}
+
+void App::refreshDetail() {
+    if (matchId.empty() || !detail) return;
+    auto d = std::make_unique<fd::Match>();
+    std::wstring err;
+    if (lib.loadDetail(matchId, *d, err)) detail = std::move(d);
+}
+
+int App::reanalyze(const std::vector<const fd::Match*>& matches) {
+    int n = 0;
+    for (const fd::Match* m : matches) {
+        if (!m || !outdated(*m) || !demoAvailable(*m)) continue;
+        lib.analyze(widen(m->demoPath));
+        ++n;
+    }
+    if (n) notify(n == 1 ? L"Ein Match wird neu ausgewertet" : std::to_wstring(n) + L" Matches werden neu ausgewertet");
+    return n;
 }
 
 void App::openMatch(const std::string& checksum, int tab) {
@@ -465,6 +497,45 @@ float pageTitle(ui::Canvas& c, float x, float y, float w, const std::wstring& ti
     c.text(title, ui::F::Display, c.th.text, Gdiplus::RectF(x, y, w, 36));
     if (!sub.empty()) c.text(sub, ui::F::Body, c.th.text2, Gdiplus::RectF(x, y + 38, w, 20));
     return sub.empty() ? 44 : 64;
+}
+
+float reanalyzeNote(ui::Canvas& c, App& app, float x, float y, float w, const std::vector<const fd::Match*>& matches, const wchar_t* missing) {
+    using namespace ui;
+    std::vector<const fd::Match*> old;
+    int withDemo = 0;
+    for (const fd::Match* m : matches)
+        if (m && App::outdated(*m)) {
+            old.push_back(m);
+            if (app.demoAvailable(*m)) ++withDemo;
+        }
+    if (old.empty()) return 0;
+    const float h = 64;
+    Gdiplus::RectF r(x, y, w, h);
+    c.round(r, 12, alpha(c.th.accent, c.th.dark ? 26 : 40));
+    c.roundStroke(r, 12, alpha(c.th.accent, 90), 1);
+    c.icon(Icon::Info, Gdiplus::RectF(x + 16, y + 21, 22, 22), c.th.accentText, 1.7f);
+    std::wstring head = old.size() == 1 ? L"Ein Match wurde mit einer älteren FragDesk-Version ausgewertet"
+                                        : std::to_wstring(old.size()) + L" Matches wurden mit einer älteren FragDesk-Version ausgewertet";
+    std::wstring sub = std::wstring(L"Ihnen fehlen ") + missing + L".";
+    if (withDemo < int(old.size())) {
+        int gone = int(old.size()) - withDemo;
+        sub += L" " + (gone == 1 ? std::wstring(L"Bei einem") : L"Bei " + std::to_wstring(gone)) + L" ist die Demo nicht mehr da.";
+    }
+    float bw = 0;
+    bool busy = app.lib.busy();
+    if (busy) {
+        std::wstring t = L"Wird ausgewertet … noch " + std::to_wstring(app.lib.queued());
+        bw = c.measure(t, F::SmallSemi) + 8;
+        c.text(t, F::SmallSemi, c.th.text2, Gdiplus::RectF(x + w - bw - 16, y, bw, h), Align::Right);
+    } else if (withDemo > 0) {
+        std::wstring label = withDemo == int(old.size()) ? L"Neu auswerten" : L"Neu auswerten (" + std::to_wstring(withDemo) + L")";
+        bw = c.buttonWidth(label, Icon::Refresh);
+        c.button(Gdiplus::RectF(x + w - bw - 14, y + 14, bw, 36), label, "reanalyze", [&app, old] { app.reanalyze(old); }, Btn::Primary,
+                 Icon::Refresh);
+    }
+    c.text(head, F::BodySemi, c.th.text, Gdiplus::RectF(x + 50, y + 11, w - 70 - bw, 22));
+    c.text(sub, F::Small, c.th.text2, Gdiplus::RectF(x + 50, y + 33, w - 70 - bw, 20));
+    return h + 16;
 }
 
 std::vector<ui::ChartPoint> premierPoints(App& app, const fd::Career& c) {

@@ -8,6 +8,7 @@
 
 #include "../core/stats.h"
 #include "gfx.h"
+#include "heat_view.h"
 #include "library.h"
 #include "replay_view.h"
 #include "widgets.h"
@@ -59,8 +60,12 @@ public:
     Page page = Page::Dashboard, backPage = Page::Matches;
     void go(Page p);
     void openMatch(const std::string& checksum, int tab = 0);
-    void openReplay(int round = 0);   // 2D-Ansicht des offenen Matches (Runde 0 = erste)
+    void openReplay(int round = 0, int tick = -1);   // 2D-Ansicht des offenen Matches (Runde 0 = erste; tick: dorthin springen)
+    void openReplayAt(const std::string& checksum, int round, int tick);   // 2D-Ansicht kurz vor tick (aus der Heatmap)
     ReplayView replay;
+    HeatView matchHeat{false}, statsHeat{true};   // Heatmap eines Matches / aller Matches einer Map
+    std::string heatMap;                          // Map der Heatmap in den Statistiken (leer = meistgespielte)
+    void refreshDetail();                         // offenes Match neu laden (nach dem Neu-Auswerten)
     std::string matchId;
     std::unique_ptr<fd::Match> detail;
     std::wstring detailError;
@@ -105,6 +110,10 @@ public:
     std::wstring recordError;                 // Grund, warum die letzte Aufnahme scheiterte (bis zum Wegklicken)
     std::wstring recordBlocker();             // Grund gegen Ansehen/Aufnehmen unabhängig vom Match (leer = es geht)
 
+    // Matches aus einer älteren Version (ohne Heatmap und Crosshair-Werte) neu auswerten
+    static bool outdated(const fd::Match& m) { return m.schema < fd::kMatchSchema; }
+    int reanalyze(const std::vector<const fd::Match*>& matches);   // stellt die mit vorhandener Demo an; liefert ihre Zahl
+
     // Fenster
     HWND hwnd = nullptr;
     bool renderMode = false;
@@ -148,5 +157,7 @@ float filterRow(ui::Canvas& c, App& app, float x, float y, float w);   // Modus 
 std::wstring matchTitle(const fd::Match& m, const std::string& me = std::string());   // "Mirage · 13:11" (Team von me zuerst)
 int64_t matchEpoch(const fd::Match& m);
 std::vector<ui::ChartPoint> premierPoints(App& app, const fd::Career& c);
+// Hinweis „mit älterer Version ausgewertet“ samt Knopf „Neu auswerten“ (nichts, wenn keins veraltet ist); liefert die Höhe
+float reanalyzeNote(ui::Canvas& c, App& app, float x, float y, float w, const std::vector<const fd::Match*>& matches, const wchar_t* missing);
 
 }  // namespace fdw

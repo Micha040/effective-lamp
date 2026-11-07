@@ -8,7 +8,7 @@
 
 namespace fd {
 
-enum class Fmt { Int, Dec1, Dec2, Pct0, Pct1, Sec0, Sec1, Meter, Money, Signed, Signed1 };
+enum class Fmt { Int, Dec1, Dec2, Pct0, Pct1, Sec0, Sec1, Meter, Money, Signed, Signed1, Deg1, Ms };
 
 // Kleine Formel über Zählern, z. B. "100 * hsKills / kills". Division durch 0 ergibt NaN (Anzeige "–").
 class Expr {
@@ -65,6 +65,7 @@ struct MatchPoint {   // ein Match in Zeitreihen und Listen
     const Match* match = nullptr;
     const PlayerInfo* me = nullptr;
     double rating2 = 0, kd = 0, adr = 0, kast = 0, hsPct = 0;
+    double crosshair = 0, reaction = 0;   // Grad / ms, NaN ohne Messung (ältere Auswertung)
     int premierOld = 0, premierNew = 0;   // 0 = unbekannt
 };
 

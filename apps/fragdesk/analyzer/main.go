@@ -1,6 +1,7 @@
 // fdanalyze wertet eine CS2-Demo für FragDesk aus (Teil von efficient lamp).
 //
 //	fdanalyze -demo <Datei> -out <Datei.json> [-temp <Ordner>] [-pretty]
+//	        (schreibt daneben <Datei>.heat mit den Heatmap-Daten, siehe extras.go)
 //	fdanalyze -demo <Datei> -unpack <Datei.dem> [-temp <Ordner>]   (nur entpacken, z. B. zum Abspielen in CS2)
 //	fdanalyze -demo <Datei> -replay <Datei.replay> [-temp <Ordner>]   (Daten für die 2D-Ansicht, siehe replay.go)
 //	fdanalyze -version
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	version     = "1.1.0"
+	version     = "1.2.0"
 	csdaVersion = "1.13.0"
 )
 
@@ -91,9 +92,17 @@ func main() {
 	if err := writeJSON(*outPath, out, *pretty); err != nil {
 		fail(coded("WRITE", "%v", err))
 	}
+	if len(out.heat) > 0 { // ohne Heatmap-Daten bleibt die Auswertung trotzdem gültig
+		if err := writeHeat(heatPath(*outPath), out.heat); err != nil {
+			fmt.Fprintf(os.Stderr, "Heatmap-Daten nicht geschrieben: %v\n", err)
+		}
+	}
 	fmt.Fprintf(stdout, "DONE %s\n", *outPath)
 	stdout.Flush()
 }
+
+// heatPath: Heatmap-Datei neben der Ausgabe (x.json -> x.heat)
+func heatPath(out string) string { return strings.TrimSuffix(out, filepath.Ext(out)) + ".heat" }
 
 // unpackDemo legt die Demo entpackt unter target ab (ungepackte Demos werden kopiert).
 func unpackDemo(demo, target, tempDir string) error {

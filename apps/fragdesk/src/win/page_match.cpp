@@ -185,58 +185,91 @@ float tabScoreboard(Canvas& c, App& app, const fd::Match& m, float x, float y, f
                    std::to_wstring(team.scoreSecondHalf),
                F::Small, c.th.text3, RectF(x + 56, y + 22, w - 300, 18));
         y += 50;
-        std::vector<Col> cols = {
-            {L"SPIELER", -3},
-            {L"K", 44, Align::Right},
-            {L"D", 44, Align::Right},
-            {L"A", 44, Align::Right},
-            {L"+/−", 50, Align::Right},
-            {L"ADR", 58, Align::Right},
-            {L"KAST", 60, Align::Right},
-            {L"HS", 52, Align::Right},
-            {L"RATING", 64, Align::Right},
-            {L"EK", 42, Align::Right, L"Eröffnungskills"},
-            {L"ET", 42, Align::Right, L"Eröffnungstode"},
-            {L"MK", 42, Align::Right, L"Multikill-Runden (2+ Kills)"},
-            {L"CL", 48, Align::Right, L"Clutches gewonnen / gespielt"},
-            {L"GB", 44, Align::Right, L"Geblendete Gegner"},
-            {L"UD", 50, Align::Right, L"Utility-Schaden"},
-            {L"MVP", 46, Align::Right},
+        // Spalten: bei schmalem Fenster fallen die unwichtigsten zuerst weg (Spalten bis RATING bleiben immer)
+        struct ColDef {
+            Col col;
+            int prio;   // 0 = bleibt immer, größer = fällt eher weg
         };
-        if (premier) cols.push_back({L"PREMIER", 120, Align::Right});
+        std::vector<ColDef> defs = {
+            {{L"SPIELER", -3}, 0},
+            {{L"K", 44, Align::Right}, 0},
+            {{L"D", 44, Align::Right}, 0},
+            {{L"A", 44, Align::Right}, 0},
+            {{L"+/−", 50, Align::Right}, 0},
+            {{L"ADR", 58, Align::Right}, 0},
+            {{L"KAST", 60, Align::Right}, 0},
+            {{L"HS", 52, Align::Right}, 0},
+            {{L"RATING", 64, Align::Right}, 0},
+            {{L"CP", 56, Align::Right, L"Crosshair-Placement: Ø Winkel zwischen Fadenkreuz und Kopf des Gegners, wenn er sichtbar wird (kleiner ist besser)"}, 2},
+            {{L"REAKT.", 66, Align::Right, L"Reaktionszeit: Ø Zeit vom Sichtbarwerden eines Gegners bis zum ersten Treffer"}, 2},
+            {{L"EK", 42, Align::Right, L"Eröffnungskills"}, 3},
+            {{L"ET", 42, Align::Right, L"Eröffnungstode"}, 3},
+            {{L"MK", 42, Align::Right, L"Multikill-Runden (2+ Kills)"}, 5},
+            {{L"CL", 48, Align::Right, L"Clutches gewonnen / gespielt"}, 4},
+            {{L"GB", 44, Align::Right, L"Geblendete Gegner"}, 6},
+            {{L"UD", 50, Align::Right, L"Utility-Schaden"}, 6},
+            {{L"MVP", 46, Align::Right}, 7},
+        };
+        if (premier) defs.push_back({{L"PREMIER", 120, Align::Right}, 1});
+        std::vector<bool> keep(defs.size(), true);
+        auto fixedWidth = [&] {
+            float f = 24;
+            for (size_t i = 0; i < defs.size(); ++i)
+                if (keep[i] && defs[i].col.width > 0) f += std::max(defs[i].col.width, c.measure(defs[i].col.title, F::TinySemi) + 26);
+            return f;
+        };
+        for (int prio = 7; prio >= 1 && w - fixedWidth() < 120; --prio)   // der Name braucht Platz
+            for (size_t i = 0; i < defs.size(); ++i)
+                if (defs[i].prio == prio) keep[i] = false;
+        std::vector<Col> cols;
+        for (size_t i = 0; i < defs.size(); ++i)
+            if (keep[i]) cols.push_back(defs[i].col);
         std::vector<Row> rows;
         for (const auto& p : m.players) {
             if (p.team != team.letter) continue;
             fd::Counters cnt = fd::matchCounters(p, p.all);
             Row row;
+            size_t ci = 0;
+            auto add = [&](Cell cell) {
+                if (ci < keep.size() && keep[ci]) row.cells.push_back(std::move(cell));
+                ++ci;
+            };
             Cell name(W(p.name), NAN);
             name.font = F::BodySemi;
             if (!p.crosshair.empty()) name.tip = L"Fadenkreuz-Code: " + W(p.crosshair);
-            row.cells.push_back(name);
+            add(name);
             auto num = [&](double v) { return Cell(W(fd::fmtInt(v)), v); };
-            row.cells.push_back(num(p.stat("kills")));
-            row.cells.push_back(num(p.stat("deaths")));
-            row.cells.push_back(num(p.stat("assists") + p.stat("flashAssists")));
+            add(num(p.stat("kills")));
+            add(num(p.stat("deaths")));
+            add(num(p.stat("assists") + p.stat("flashAssists")));
             double diff = p.stat("kills") - p.stat("deaths");
             Cell d(W(fd::fmtSigned(diff, 0)), diff);
             d.color = diff > 0 ? c.th.success : diff < 0 ? c.th.danger : c.th.text2;
-            row.cells.push_back(d);
-            row.cells.push_back(Cell(W(fd::fmtDec(p.adr, 1)), p.adr));
-            row.cells.push_back(Cell(W(fd::fmtPct(p.kast, 0)), p.kast));
+            add(d);
+            add(Cell(W(fd::fmtDec(p.adr, 1)), p.adr));
+            add(Cell(W(fd::fmtPct(p.kast, 0)), p.kast));
             double hs = V("hsPct", cnt);
-            row.cells.push_back(Cell(W(fd::formatStat(hs, fd::Fmt::Pct0)), hs));
+            add(Cell(W(fd::formatStat(hs, fd::Fmt::Pct0)), hs));
             Cell rat(W(fd::fmtDec(p.rating, 2)), p.rating);
             rat.color = ratingColor(c.th, p.rating);
             rat.font = F::BodySemi;
-            row.cells.push_back(rat);
-            row.cells.push_back(num(p.stat("openKills")));
-            row.cells.push_back(num(p.stat("openDeaths")));
-            row.cells.push_back(num(V("multiRounds", cnt)));
+            add(rat);
+            double cp = V("crosshair", cnt), rt = V("reaction", cnt);
+            Cell cpc(W(fd::formatStat(cp, fd::Fmt::Deg1)), std::isnan(cp) ? 1e9 : cp);   // ohne Wert ans Ende
+            cpc.tip = std::isnan(cp) ? (App::outdated(m) ? L"Erst nach dem Neu-Auswerten (Tab „Heatmap“)" : L"Keine Begegnung gemessen")
+                                     : W(fd::fmtInt(V("sightings", cnt))) + L" Begegnungen gemessen · am Kopf: " + W(fd::formatStat(V("crosshairGood", cnt), fd::Fmt::Pct0));
+            add(cpc);
+            Cell rtc(W(fd::formatStat(rt, fd::Fmt::Ms)), std::isnan(rt) ? 1e9 : rt);
+            if (!std::isnan(rt)) rtc.tip = W(fd::fmtInt(cnt.get("ttdN"))) + L" erste Treffer innerhalb von 2 Sekunden";
+            add(rtc);
+            add(num(p.stat("openKills")));
+            add(num(p.stat("openDeaths")));
+            add(num(V("multiRounds", cnt)));
             double cw = V("clutchWins", cnt), ca = V("clutches", cnt);
-            row.cells.push_back(Cell(W(fd::fmtInt(cw)) + L"/" + W(fd::fmtInt(ca)), cw * 100 + ca));
-            row.cells.push_back(num(p.stat("enemiesFlashed")));
-            row.cells.push_back(num(p.stat("utilDmg")));
-            row.cells.push_back(num(p.mvps));
+            add(Cell(W(fd::fmtInt(cw)) + L"/" + W(fd::fmtInt(ca)), cw * 100 + ca));
+            add(num(p.stat("enemiesFlashed")));
+            add(num(p.stat("utilDmg")));
+            add(num(p.mvps));
             if (premier) {
                 Cell pr(L"", NAN);
                 if (p.rankType == 11 && (p.rankNew > 0 || p.rankOld > 0)) {
@@ -247,7 +280,7 @@ float tabScoreboard(Canvas& c, App& app, const fd::Match& m, float x, float y, f
                     pr.sort = v;
                     if (p.rankOld > 0 && p.rankNew > 0 && p.rankOld != p.rankNew) pr.sub = W(fd::fmtSigned(p.rankNew - p.rankOld, 0));
                 } else pr.text = L"–";
-                row.cells.push_back(pr);
+                add(pr);
             }
             row.highlight = p.steamId == app.me;
             std::string sid = p.steamId;
@@ -713,6 +746,29 @@ float tabMoments(Canvas& c, App& app, const fd::Match& m, float x, float y, floa
 
 }  // namespace
 
+// ---- Heatmap --------------------------------------------------------------------------------------------------
+float tabHeatmap(Canvas& c, App& app, const fd::Match& m, float x, float y, float w) {
+    float y0 = y;
+    y += reanalyzeNote(c, app, x, y, w, {&m}, L"die Heatmap-Daten und die Werte für Crosshair-Placement und Reaktionszeit");
+    HeatView& hv = app.matchHeat;
+    std::string key = m.checksum + "#" + std::to_string(m.schema) + "#" + std::to_string(app.lib.generation);
+    if (hv.key != key) hv.loadMatch(m, app.me, key);
+    if (hv.state == HeatView::State::Missing) {
+        if (App::outdated(m))
+            y += emptyState(c, x, y, w, Icon::Map, L"Die Heatmap kommt mit dem Neu-Auswerten",
+                            L"Dafür liest FragDesk die Demo noch einmal – ein paar Sekunden.");
+        else
+            y += emptyState(c, x, y, w, Icon::Warning, L"Keine Heatmap-Daten für dieses Match",
+                            L"Beim Auswerten sind sie nicht entstanden. Details stehen im Protokoll (fragdesk.log im Datenordner).");
+        return y - y0 + 20;
+    }
+    y += hv.draw(c, app, x, y, w);
+    c.text(L"Aufenthalt: wo die gewählten Spieler während der Runden waren (einmal pro Sekunde) · Kills vom Ort des Schützen · "
+           L"Granaten am Landepunkt",
+           F::Small, c.th.text3, RectF(x, y + 10, w, 18));
+    return y - y0 + 40;
+}
+
 float drawMatch(Canvas& c, App& app, float w) {
     const float pad = 32;
     float x = pad, cw = w - pad * 2, y = 22;
@@ -762,7 +818,7 @@ float drawMatch(Canvas& c, App& app, float w) {
         if (!m.shareCode.empty()) c.text(L"Share-Code: " + W(m.shareCode), F::Small, c.th.text3, RectF(bx + b2 + 16, y, 420, 34));
     }
     y += 50;
-    y += c.tabs(x, y, cw, {L"Übersicht", L"Scoreboard", L"Runden", L"Waffen", L"Duelle", L"Utility", L"Momente"}, app.matchTab, "mtab",
+    y += c.tabs(x, y, cw, {L"Übersicht", L"Scoreboard", L"Runden", L"Waffen", L"Duelle", L"Utility", L"Momente", L"Heatmap"}, app.matchTab, "mtab",
                 [&app](int i) {
                     app.matchTab = i;
                     app.invalidate();
@@ -775,7 +831,8 @@ float drawMatch(Canvas& c, App& app, float w) {
         case 3: y += tabWeapons(c, app, m, x, y, cw); break;
         case 4: y += tabDuels(c, app, m, x, y, cw); break;
         case 5: y += tabUtility(c, app, m, x, y, cw); break;
-        default: y += tabMoments(c, app, m, x, y, cw); break;
+        case 6: y += tabMoments(c, app, m, x, y, cw); break;
+        default: y += tabHeatmap(c, app, m, x, y, cw); break;
     }
     return y + 24;
 }

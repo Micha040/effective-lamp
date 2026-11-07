@@ -1,7 +1,5 @@
 #include "replay_view.h"
 
-#include <shlwapi.h>
-
 #include <algorithm>
 #include <cmath>
 #include <thread>
@@ -126,22 +124,6 @@ void loadWorker(HWND hwnd, std::string checksum, std::wstring demo) {
     if (!PostMessageW(hwnd, WM_APP_REPLAY, 0, reinterpret_cast<LPARAM>(e))) delete e;
 }
 
-// PNG aus den Ressourcen
-std::unique_ptr<Bitmap> loadPng(int id) {
-    HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10));   // RT_RCDATA
-    if (!res) return nullptr;
-    HGLOBAL h = LoadResource(nullptr, res);
-    DWORD size = SizeofResource(nullptr, res);
-    const void* p = h ? LockResource(h) : nullptr;
-    if (!p || !size) return nullptr;
-    IStream* s = SHCreateMemStream(static_cast<const BYTE*>(p), size);
-    if (!s) return nullptr;
-    std::unique_ptr<Bitmap> bmp(Bitmap::FromStream(s));
-    s->Release();
-    if (!bmp || bmp->GetLastStatus() != Ok) return nullptr;
-    return bmp;
-}
-
 double perfSeconds() {
     static LARGE_INTEGER freq = [] {
         LARGE_INTEGER f;
@@ -172,7 +154,10 @@ void ReplayView::open(HWND hwnd, const fd::Match& m, int n) {
         std::thread(loadWorker, hwnd, m.checksum, widen(m.demoPath)).detach();
     }
     round = n > 0 ? n : (m.rounds.empty() ? 1 : m.rounds.front().n);
-    if (data) setRound(m, round);
+    if (data) {
+        setRound(m, round);
+        applyPending();
+    }
 }
 
 void ReplayView::openNow(const fd::Match& m, int n) {
@@ -189,10 +174,14 @@ bool ReplayView::apply(ReplayEvent* e, const fd::Match* m) {
         data = e->data;
         state = State::Ready;
         prepareMap();
-        if (m) setRound(*m, round);
+        if (m) {
+            setRound(*m, round);
+            applyPending();
+        }
     } else {
         state = State::Failed;
         error = e->error;
+        pendingTick = -1;
     }
     return true;
 }
@@ -292,40 +281,10 @@ bool ReplayView::advance() {
     return true;
 }
 
-Bitmap* ReplayView::radarBitmap(bool lower, int px) {
-    if (!radar || radarIndex < 0 || px <= 0) return nullptr;
-    int l = lower ? 1 : 0;
-    if (lower && !radar->lower) return nullptr;
-    if (srcIndex_ != radarIndex) {
-        releaseBitmaps();
-        srcIndex_ = radarIndex;
-    }
-    if (scaled_[l] && scaledPx_[l] == px) return scaled_[l].get();
-    // Quelle nur zum Skalieren laden (spart den Speicher für das große Bild)
-    std::unique_ptr<Bitmap> src = loadPng(fd::kRadarResBase + 2 * radarIndex + l);
-    if (!src) {
-        logLine(L"Radarbild %d fehlt", fd::kRadarResBase + 2 * radarIndex + l);
-        return nullptr;
-    }
-    auto out = std::make_unique<Bitmap>(px, px, PixelFormat32bppPARGB);
-    {
-        Graphics g(out.get());
-        g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-        g.SetPixelOffsetMode(PixelOffsetModeHalf);
-        g.Clear(Color(0, 0, 0, 0));
-        g.DrawImage(src.get(), 0, 0, px, px);
-    }
-    scaled_[l] = std::move(out);
-    scaledPx_[l] = px;
-    return scaled_[l].get();
-}
-
-void ReplayView::releaseBitmaps() {
-    for (int i = 0; i < 2; ++i) {
-        scaled_[i].reset();
-        scaledPx_[i] = 0;
-    }
-    srcIndex_ = -1;
+void ReplayView::applyPending() {
+    if (pendingTick < 0 || !data) return;
+    seek(pendingTick);
+    pendingTick = -1;
 }
 
 }  // namespace fdw

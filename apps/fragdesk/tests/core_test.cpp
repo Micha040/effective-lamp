@@ -10,6 +10,7 @@
 #include <string>
 
 #include "../src/core/format.h"
+#include "../src/core/heat.h"
 #include "../src/core/model.h"
 #include "../src/core/radar.h"
 #include "../src/core/replay.h"
@@ -217,7 +218,10 @@ static void testModel() {
     Match slim;
     check(parseMatch(kMiniMatch, slim, err, false) && slim.kills.empty() && slim.players[0].rounds.empty() && !slim.highlights.empty(),
           "Bibliotheksmodus ohne Details");
-    check(!parseMatch("{\"schema\":2}", slim, err), "unbekanntes Schema abgelehnt");
+    check(!parseMatch("{\"schema\":3}", slim, err), "unbekanntes Schema abgelehnt");
+    std::string v2 = kMiniMatch;
+    v2.replace(v2.find("\"schema\":1"), 10, "\"schema\":2");
+    check(parseMatch(v2, slim, err) && slim.schema == 2, "Schema 2 gelesen");
     check(!parseMatch("kaputt", slim, err), "kaputtes JSON abgelehnt");
 
     // Karriere über zwei Kopien
@@ -422,6 +426,173 @@ static void testRealReplays(const char* dir) {
     closedir(d);
 }
 
+// ---- Heatmap ------------------------------------------------------------------------------------------------
+// gleiche Daten wie TestHeatEncode in analyzer/extras_test.go (plus Abtastungen in zwei Runden)
+static std::string sampleHeat() {
+    Bytes f;   // Abtastungen
+    f.u32(1500); f.u8(2);
+    f.u8(0); f.u8(HsCT); f.vec(-1000, 1000, 0);    // Ich (CT, Team A in Runde 1)
+    f.u8(1); f.u8(0); f.vec(0, 0, -600);            // Bot, T, untere Ebene
+    f.u32(3000); f.u8(1); f.u8(0); f.u8(HsCT); f.vec(-1000, 1000, 0);
+    f.u32(500); f.u8(1); f.u8(0); f.u8(HsCT); f.vec(-1000, 1000, 0);    // Kaufzeit: zählt nicht
+    Bytes b;
+    b.b = "FDHM"; b.u16(1); b.u16(0); b.f32(64); b.str("de_nuke");
+    b.u16(2); b.u64(76561198000000001ull); b.str("Micha"); b.u64(0); b.str("Bot Ich");
+    b.u16(2); b.str(""); b.str("AK-47");
+    b.u32(2);
+    b.u32(2000); b.u8(0); b.u8(1); b.u8(HkKillerCT | HkHeadshot); b.u8(1); b.vec(-1000, 1000, 0); b.vec(0, 0, -600);
+    b.u32(9000); b.u8(0); b.u8(1); b.u8(HkKillerCT); b.u8(1); b.vec(0, 0, 0); b.vec(0, 0, 0);       // nach dem Match
+    b.u32(3);
+    b.u32(1200); b.u32(1300); b.u8(GrSmoke); b.u8(0); b.u8(HnCT); b.vec(-1000, 1000, 0); b.vec(0, 0, 0);
+    b.u32(1200); b.u32(1310); b.u8(GrDecoy); b.u8(0); b.u8(HnCT); b.vec(-1000, 1000, 0); b.vec(0, 0, 0);    // Decoy: nicht angezeigt
+    b.u32(1250); b.u32(1260); b.u8(GrIncendiary); b.u8(1); b.u8(HnNoThrow); b.vec(5, 5, 5); b.vec(100, 100, 0);
+    b.u32(3); b.u32(uint32_t(f.b.size())); b.b += f.b;
+    b.b += "END!";
+    return b.b;
+}
+
+static void testHeat() {
+    Heat h;
+    std::string err;
+    std::string bytes = sampleHeat();
+    check(parseHeat(bytes, h, err), "Heatmap lesen: " + err);
+    check(h.map == "de_nuke" && h.players.size() == 2 && h.players[0].steamId == "76561198000000001" && h.players[1].steamId.empty() &&
+              h.weapons.size() == 2 && h.kills.size() == 2 && h.nades.size() == 3 && h.frames.size() == 3 && h.samples.size() == 4,
+          "Heatmap: Inhalt");
+    check(h.kills[0].flags == (HkKillerCT | HkHeadshot) && h.kills[0].victimPos.z == -600 && h.nades[2].flags == HnNoThrow,
+          "Heatmap: Felder");
+    for (size_t cut : {size_t(3), size_t(20), bytes.size() - 5, bytes.size() - 1}) {
+        Heat x;
+        check(!parseHeat(bytes.substr(0, cut), x, err), "Heatmap abgeschnitten bei " + std::to_string(cut));
+    }
+    std::string wrong = bytes;
+    wrong[4] = 9;
+    check(!parseHeat(wrong, h, err) && err.find("Version") != std::string::npos, "Heatmap: andere Version");
+    parseHeat(bytes, h, err);
+
+    Match m;
+    check(parseMatch(kMiniMatch, m, err), "Mini-Match");
+    m.map = "de_nuke";
+    RoundInfo r2 = m.rounds[0];
+    r2.n = 2;
+    r2.start = 5400;
+    r2.freezeEnd = 6000;
+    r2.end = 8000;
+    r2.endOfficial = 8400;
+    r2.sideA = "T";
+    m.rounds.push_back(r2);
+    const RadarMap* map = radarMap("de_nuke");
+    check(map && map->lower, "Nuke hat zwei Ebenen");
+    if (!map) return;
+    HeatSet set;
+    HeatMatchInfo info = heatMatchInfo(m, "76561198000000001", "");
+    check(info.myTeam == "A" && info.rounds.size() == 2, "Heatmap: mein Team");
+    addMatchHeat(set, info, h, *map, "76561198000000001");
+    check(set.hasMe && set.matches.size() == 1, "Heatmap: Match");
+    check(set.points.size() == 3, "Heatmap: nur Aufenthalt in der Runde (" + std::to_string(set.points.size()) + ")");
+    int me = 0, enemy = 0, lower = 0;
+    for (const auto& p : set.points) {
+        if (p.who == WhoMe) ++me;
+        if (p.who == WhoEnemy) ++enemy;
+        if (p.lower) ++lower;
+    }
+    check(me == 2 && enemy == 1 && lower == 1, "Heatmap: Ich/Gegner/Ebene");
+    int kills = 0, deaths = 0, smokes = 0, fires = 0;
+    for (const auto& mk : set.marks) {
+        if (mk.layer == HlKills) {
+            ++kills;
+            check(mk.who == WhoMe && mk.side == SideCT && mk.round == 1 && mk.tip.find("Micha tötet Bot Ich (AK-47, Kopfschuss)") != std::string::npos,
+                  "Heatmap: Kill " + mk.tip);
+        }
+        if (mk.layer == HlDeaths) {
+            ++deaths;
+            check(mk.who == WhoEnemy && mk.side == SideT && mk.lower, "Heatmap: Tod unten");
+        }
+        if (mk.layer == HlSmoke) {
+            ++smokes;
+            check(mk.thrown && (mk.fu != mk.u || mk.fv != mk.v) && mk.tip.find("Smoke von Micha") != std::string::npos, "Heatmap: Smoke mit Wurf");
+        }
+        if (mk.layer == HlMolotov) {
+            ++fires;
+            check(!mk.thrown && mk.fu == mk.u && mk.who == WhoEnemy, "Heatmap: Brandgranate ohne Wurf");
+        }
+    }
+    check(kills == 1 && deaths == 1 && smokes == 1 && fires == 1 && set.marks.size() == 4, "Heatmap: Kills, Tode, Granaten");
+
+    // Dichte: ein Punkt ergibt einen weichen Fleck mit 1 in der Mitte
+    std::vector<float> g;
+    HeatFilter all;
+    int n = heatDensity(set, HlPresence, all, false, 64, 2, g);
+    check(n == 2 && g.size() == 64 * 64, "Dichte: zwei Punkte oben");
+    float mx = *std::max_element(g.begin(), g.end());
+    near(mx, 1.0, 1e-6, "Dichte: Höchstwert 1");
+    int lit = 0;
+    for (float v : g)
+        if (v > 0.01f) ++lit;
+    check(lit > 20 && lit < 400, "Dichte: weicher Fleck (" + std::to_string(lit) + " Zellen)");
+    HeatFilter onlyEnemy;
+    onlyEnemy.who = WhoEnemy;
+    check(heatDensity(set, HlPresence, onlyEnemy, false, 64, 2, g) == 0, "Dichte: Filter Gegner oben leer");
+    check(heatDensity(set, HlPresence, onlyEnemy, true, 64, 2, g) == 1, "Dichte: Gegner unten");
+    HeatFilter t;
+    t.sides = SideT;
+    check(heatDensity(set, HlKills, t, false, 64, 2, g) == 0 && heatDensity(set, HlKills, all, false, 64, 2, g) == 1, "Dichte: Seite");
+}
+
+static void testRealHeat(const char* dir) {
+    DIR* d = opendir(dir);
+    if (!d) return;
+    while (dirent* e = readdir(d)) {
+        std::string name = e->d_name;
+        if (name.size() < 6 || name.substr(name.size() - 5) != ".heat") continue;
+        std::string base = std::string(dir) + "/" + name.substr(0, name.size() - 5);
+        Heat h;
+        std::string err;
+        bool ok = parseHeat(readAll(base + ".heat"), h, err);
+        check(ok, name + ": " + err);
+        Match m;
+        if (!ok || !parseMatch(readAll(base + ".json"), m, err)) continue;
+        const RadarMap* map = radarMap(h.map);
+        check(map != nullptr, name + ": Radar");
+        if (!map) continue;
+        HeatSet set;
+        const std::string me = m.players.empty() ? std::string() : m.players[0].steamId;
+        addMatchHeat(set, heatMatchInfo(m, me, "x"), h, *map, me);
+        int layers[HlCount] = {};
+        for (const auto& mk : set.marks) ++layers[mk.layer];
+        check(set.points.size() > h.samples.size() / 2, name + ": Aufenthalt in Runden");
+        check(layers[HlKills] >= int(m.kills.size()) * 8 / 10 && layers[HlDeaths] >= int(m.kills.size()) * 9 / 10, name + ": Kills und Tode");
+        check(layers[HlSmoke] + layers[HlFlash] + layers[HlMolotov] + layers[HlHE] > 30, name + ": Granaten");
+        int inside = 0;
+        for (const auto& p : set.points)
+            if (p.u > 1000 && p.u < 64535 && p.v > 1000 && p.v < 64535) ++inside;
+        check(inside > int(set.points.size()) * 98 / 100, name + ": Positionen liegen auf dem Radar");
+        std::vector<float> g;
+        int n = heatDensity(set, HlPresence, HeatFilter(), false, 256, 2.5f, g);
+        check(n > 1000, name + ": Dichte");
+        std::printf("  %s: %zu Aufenthalte, %d Kills, %d Tode, %d Smokes, %d Mollys, %d Flashes, %d HEs\n", name.c_str(), set.points.size(),
+                    layers[HlKills], layers[HlDeaths], layers[HlSmoke], layers[HlMolotov], layers[HlFlash], layers[HlHE]);
+    }
+    closedir(d);
+}
+
+static void testCrosshairStats() {
+    Counters c;
+    c.add(Keys::id("cpN"), 4);
+    c.add(Keys::id("cpSum"), 18);
+    c.add(Keys::id("cpGood"), 3);
+    c.add(Keys::id("ttdN"), 2);
+    c.add(Keys::id("ttdSum"), 900);
+    near(statValue("crosshair", c), 4.5, 1e-9, "Crosshair-Formel");
+    near(statValue("crosshairGood", c), 75, 1e-9, "Fadenkreuz am Kopf");
+    near(statValue("reaction", c), 450, 1e-9, "Reaktionszeit-Formel");
+    check(std::isnan(statValue("crosshairRifle", c)), "ohne Messung: kein Wert");
+    check(formatStat(4.25, Fmt::Deg1) == "4,3\xC2\xB0" || formatStat(4.25, Fmt::Deg1) == "4,2\xC2\xB0", "Grad: " + formatStat(4.25, Fmt::Deg1));
+    check(formatStat(452.4, Fmt::Ms) == "452\xC2\xA0ms", "ms: " + formatStat(452.4, Fmt::Ms));
+    check(findGroup("crosshair") != nullptr, "Gruppe Crosshair");
+    for (const char* id : findGroup("crosshair")->stats) check(findStat(id) != nullptr, std::string("Kennzahl ") + id);
+}
+
 int main(int argc, char** argv) {
     testExpr();
     testCountersMerge();
@@ -431,9 +602,12 @@ int main(int argc, char** argv) {
     testModel();
     testReplay();
     testRadar();
+    testHeat();
+    testCrosshairStats();
     if (argc > 1) {
         testRealFiles(argv[1]);
         testRealReplays(argv[1]);
+        testRealHeat(argv[1]);
     }
     std::printf("%d Prüfungen, %d Fehler\n", checks, failures);
     return failures ? 1 : 0;

@@ -2,7 +2,7 @@
   "id": "fragdesk",
   "order": 5,
   "name": "FragDesk",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "versionCheck": [
     {
       "file": "setup/Setup.ps1",
@@ -22,7 +22,7 @@
     }
   ],
   "tagline": "CS2-Stats und Highlights aus deinen Demos",
-  "description": "Wertet deine CS2-Demos lokal aus: über 150 Kennzahlen, Premier-Verlauf, Runden in 2D und Momente als Video.",
+  "description": "Wertet deine CS2-Demos lokal aus: 150+ Kennzahlen, Premier-Verlauf, Runden in 2D, Heatmaps und Momente als Video.",
   "requires": "für Videos: CS2 mit Workshop Tools",
   "color": "#F97316",
   "process": "FragDesk.exe",

@@ -6,6 +6,7 @@
 #pragma once
 
 #include "gfx.h"   // windows.h und gdiplus.h in der richtigen Reihenfolge
+#include "radar_image.h"
 
 #include <memory>
 #include <string>
@@ -67,18 +68,16 @@ public:
     bool advance();
 
     const fd::RadarMap& map() const { return radar ? *radar : fallback; }
-    // Radarbild in Pixelgröße (zwischengespeichert, nullptr ohne Bild)
-    Gdiplus::Bitmap* radarBitmap(bool lower, int px);
-    void releaseBitmaps();
+    RadarImages images;   // Radarbilder in Bildschirmpixeln
+    void releaseBitmaps() { images.release(); }
+    int pendingTick = -1;   // nach dem Laden dorthin springen (aus der Heatmap), −1 = nicht
 
     static std::string playerKey(const fd::ReplayPlayer& p) { return p.steamId.empty() ? "#" + p.name : p.steamId; }
 
 private:
     double last_ = 0;   // Zeit des letzten Schritts (Sekunden, 0 = neu beginnen)
-    std::unique_ptr<Gdiplus::Bitmap> scaled_[2];
-    int scaledPx_[2] = {0, 0};
-    int srcIndex_ = -1;
     void prepareMap();
+    void applyPending();
 };
 
 }  // namespace fdw

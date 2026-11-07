@@ -5,9 +5,9 @@
 
 **Deine CS2-Stats und Highlights – komplett auf deinem PC.** FragDesk liest deine Demos (Premier, Wettkampf, Wingman,
 FACEIT) und zeigt daraus über 150 Kennzahlen, deinen Premier-Verlauf als Graph, jedes Match bis zur einzelnen Runde,
-jede Runde als **2D-Ansicht von oben** – und die Momente, die sich lohnen: Multikills, gewonnene Clutches, Noscopes,
-Wallbangs, Kills durch Smoke und mehr. Welche Demo ausgewertet und welcher Moment als Video aufgenommen wird,
-entscheidest du.
+jede Runde als **2D-Ansicht von oben**, **Heatmaps**, dein **Crosshair-Placement** und deine **Reaktionszeit** – und
+die Momente, die sich lohnen: Multikills, gewonnene Clutches, Noscopes, Wallbangs, Kills durch Smoke und mehr. Welche
+Demo ausgewertet und welcher Moment als Video aufgenommen wird, entscheidest du.
 
 <p align="center"><img src="../../docs/media/fragdesk-dashboard.png" width="760" alt="FragDesk: Übersicht mit Premier-Verlauf, Form und Kennzahlen"></p>
 
@@ -46,18 +46,19 @@ Wer es automatisch mag: Einstellungen › „Neue Demos sofort auswerten“.
 - **Übersicht:** Premier-Rating mit Verlauf (Farben wie im Spiel), Form der letzten 10 Matches, die wichtigsten
   Kennzahlen mit T- und CT-Seite, letzte Matches, beste Waffen und Maps, deine besten Momente.
   Filter für Modus (Premier, FACEIT, Wettkampf …), Zeitraum (letzte 10 / 30 / alle) und Map gelten für alles.
-- **Matches:** alle ausgewerteten Matches als sortierbare Tabelle. Ein Klick öffnet das Match mit sieben Bereichen:
-  *Übersicht* (Rundenstreifen mit Kills und Clutches) · *Scoreboard* (beide Teams, Rating, ADR, KAST, Eröffnungen,
-  Clutches, Utility, MVPs, Premier vorher/nachher) · *Runden* (Kauf, Schaden, Tod, Eröffnung) · *Waffen* (Kills,
-  Treffer, Kopfquote, Körperzonen, „gestorben durch“) · *Duelle* (gegen jeden Gegner, kompletter Killfeed) ·
-  *Utility* · *Momente*. Die Werte jedes anderen Spielers lassen sich ebenfalls anzeigen.
+- **Matches:** alle ausgewerteten Matches als sortierbare Tabelle. Ein Klick öffnet das Match mit acht Bereichen:
+  *Übersicht* (Rundenstreifen mit Kills und Clutches) · *Scoreboard* (beide Teams, Rating, ADR, KAST, Crosshair-Placement,
+  Reaktionszeit, Eröffnungen, Clutches, Utility, MVPs, Premier vorher/nachher) · *Runden* (Kauf, Schaden, Tod, Eröffnung) ·
+  *Waffen* (Kills, Treffer, Kopfquote, Körperzonen, „gestorben durch“) · *Duelle* (gegen jeden Gegner, kompletter
+  Killfeed) · *Utility* · *Momente* · *Heatmap*. Die Werte jedes anderen Spielers lassen sich ebenfalls anzeigen.
 - **2D-Ansicht:** jede Runde von oben zum Abspielen – wo alle stehen und hinschauen, Smokes, Mollys, Flashes und
   HEs, Kills, Bombe (siehe [unten](#2d-ansicht)).
-- **Statistiken:** über 150 Kennzahlen in elf Bereichen – Allgemein, Waffen, Maps, Eröffnung & Trades, Clutches
-  (1v1 bis 1v5), Utility (Flashes, geblendete Gegner, Blendzeit, Flash-Assists …), Zielen (Treffsicherheit, erster
-  Schuss, Spray, in Bewegung, Trefferzonen), Besondere Kills (Wallbang, Noscope, durch Smoke, geblendet, im Sprung …),
-  Schaden & Zeit, Economy & Bombe und **Verlauf** (Premier, Rating, ADR, K/D, KAST, HS-Quote als Graphen).
-  Jede Kennzahl hat einen Tooltip mit Erklärung.
+- **Statistiken:** über 150 Kennzahlen in zwölf Bereichen – Allgemein, Waffen, Maps, Eröffnung & Trades, Clutches
+  (1v1 bis 1v5), Utility (Flashes, geblendete Gegner, Blendzeit, Flash-Assists …), Zielen (Crosshair-Placement und
+  Reaktionszeit, auch nach Waffenart, Treffsicherheit, erster Schuss, Spray, in Bewegung, Trefferzonen), Besondere
+  Kills (Wallbang, Noscope, durch Smoke, geblendet, im Sprung …), Schaden & Zeit, Economy & Bombe, **Verlauf**
+  (Premier, Rating, ADR, K/D, KAST, HS-Quote, Crosshair-Placement, Reaktionszeit als Graphen) und **Heatmaps** pro Map
+  über alle Matches. Jede Kennzahl hat einen Tooltip mit Erklärung.
 - **Momente:** alle erkannten Highlights, nach Wert sortiert, mit **In CS2 ansehen** und **Aufnehmen**;
   dazu die Liste deiner Videos.
 
@@ -93,6 +94,43 @@ die Positionen neben die Auswertung (`matches\<Prüfsumme>.replay`, 0,5–3 MB p
 auch ohne die Demo. Positionen werden 8-mal pro Sekunde gespeichert und dazwischen weich verschoben – für genaue
 Pixel-Duelle ist die Demo in CS2 das Original. Radarbilder gibt es für alle aktuellen Karten; bei einer unbekannten
 Karte stehen die Punkte auf einem Raster.
+
+## Heatmaps
+
+Pro Match im Tab **Heatmap**, über alle Matches einer Map unter **Statistiken › Heatmaps** (dort gelten die Filter für
+Modus und Zeitraum). Auf dem Radarbild lässt sich ein- und ausschalten, was zu sehen ist:
+
+- **Aufenthalt:** wo die gewählten Spieler während der Runden waren (einmal pro Sekunde, ohne Kaufzeit).
+- **Kills** (vom Ort des Schützen) und **Tode**.
+- **Smokes, Mollys, Flashes, HEs** am Landepunkt – wie viel wo landet. Mit **Wurfpositionen** dazu eine Linie von der
+  Stelle, an der geworfen wurde, also die Lineups.
+- **Spieler:** Ich, mein Team, Gegner (einzeln oder zusammen), **Seite:** beide, T oder CT.
+- **Punkte:** jedes Ereignis einzeln mit Tooltip (Runde, Zeit, wer, Waffe). Ein Klick öffnet die **2D-Ansicht** genau
+  dort, 2 Sekunden davor.
+
+Ist eine Ebene allein an, zeigt die Karte den klassischen Verlauf von blau (wenig) bis rot (viel); mehrere Ebenen
+bekommen je eine eigene Farbe.
+
+<p align="center"><img src="../../docs/media/fragdesk-heatmap.png" width="760" alt="FragDesk: Heatmap eines Matches auf Mirage – wo sich die Spieler aufgehalten haben"></p>
+
+## Crosshair-Placement und Reaktionszeit
+
+- **Crosshair-Placement:** der Winkel zwischen deinem Fadenkreuz und dem Kopf des Gegners in dem Moment, in dem er für
+  dich sichtbar wird – im Schnitt, kleiner ist besser. Dazu der Anteil der Begegnungen mit höchstens 5° („Fadenkreuz am
+  Kopf“) und die Aufteilung in waagerecht und senkrecht.
+- **Reaktionszeit:** die Zeit vom Sichtbarwerden bis zu deinem ersten Treffer an diesem Gegner (nur Treffer innerhalb
+  von 2 Sekunden).
+
+Gezählt wird nur, wenn du eine Schusswaffe in der Hand hast, nicht geblendet bist und der Gegner auf deinem Bildschirm
+auftaucht. Taucht er nach mindestens einer Sekunde Pause wieder auf, ist das eine neue Begegnung. „Sichtbar“ meldet
+das Spiel selbst (dieselbe Information, mit der es das Radar füllt) – manchmal ein paar Ticks zu spät. Für Vergleiche
+und deinen Verlauf taugt das gut, ein Labor-Messwert ist es nicht, und die Zahlen sind nicht dieselben wie bei Leetify.
+Zu finden unter **Statistiken › Zielen** (auch nach Gewehr, Scharfschützengewehr, Pistole und MP), im **Verlauf** und
+im **Scoreboard** jedes Matches für alle Spieler.
+
+**Ältere Matches:** Heatmap-Daten, Crosshair-Placement und Reaktionszeit entstehen beim Auswerten (ab FragDesk 1.2).
+Für Matches, die vorher ausgewertet wurden, zeigt FragDesk einen Hinweis mit **Neu auswerten** – dafür muss die Demo
+noch da sein.
 
 ## Videos aufnehmen
 
@@ -149,12 +187,14 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 
 - Im Leerlauf tut FragDesk nichts außer auf neue Dateien in den Demo-Ordnern zu warten (Windows meldet sich dann).
 - Ausgewertet wird in einem eigenen Prozess (`fdanalyze.exe`) mit niedriger Priorität: ein paar Sekunden lang
-  ca. 100–150 MB Arbeitsspeicher, danach ist er wieder weg.
+  ca. 150–250 MB Arbeitsspeicher, danach ist er wieder weg. Er liest die Demo dafür zweimal gleichzeitig (Statistiken
+  und Heatmap/Zielen) – auf einem Mehrkern-Prozessor kaum langsamer als einmal.
 - Ausgewertete Matches liegen als kleine JSON-Dateien (50–200 KB pro Match) in `%LOCALAPPDATA%\FragDesk\matches`,
-  dazu die Daten der 2D-Ansicht für die Matches, die du dir so angesehen hast. Die Demo selbst brauchst du danach nur
+  daneben die Heatmap-Daten (30–200 KB) und die Daten der 2D-Ansicht für die Matches, die du dir so angesehen hast. Die Demo selbst brauchst du danach nur
   noch zum Ansehen und Aufnehmen in CS2.
 - Die 2D-Ansicht zeichnet nur, solange sie abspielt und das Fenster zu sehen ist (rund 30 Bilder pro Sekunde),
-  angehalten oder minimiert kostet sie nichts.
+  angehalten oder minimiert kostet sie nichts. Heatmaps rechnet FragDesk nur, wenn sich die Auswahl ändert; die
+  Daten vieler Matches liest es im Hintergrund.
 
 ## Genauigkeit
 
