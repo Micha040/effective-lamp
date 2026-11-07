@@ -4,9 +4,12 @@
 IDI_APP ICON "fragdesk.ico"
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
 
+// Radarbilder der 2D-Ansicht
+#include "radars.rc"
+
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,2,0
- PRODUCTVERSION 1,0,2,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -19,11 +22,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "FragDesk"
       VALUE "FileDescription", "FragDesk - CS2-Stats und Highlights"
-      VALUE "FileVersion", "1.0.2.0"
+      VALUE "FileVersion", "1.1.0.0"
       VALUE "InternalName", "FragDesk"
       VALUE "OriginalFilename", "FragDesk.exe"
       VALUE "ProductName", "FragDesk"
-      VALUE "ProductVersion", "1.0.2.0"
+      VALUE "ProductVersion", "1.1.0.0"
     END
   END
   BLOCK "VarFileInfo"

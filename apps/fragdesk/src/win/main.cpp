@@ -3,7 +3,8 @@
 //   FragDesk.exe                         normal starten (läuft schon eins, kommt dessen Fenster nach vorne)
 //   FragDesk.exe <Demo> …               Demos auswerten lassen (z. B. „Öffnen mit“)
 //   --theme dark|light                   Farbschema erzwingen
-//   --render <bild.png> [--page dashboard|matches|match|stats|highlights|settings] [--tab N] [--match N]
+//   --render <bild.png> [--page dashboard|matches|match|stats|highlights|settings|replay] [--tab N] [--match N]
+//                       [--at <s>]  (replay: --tab = Runde, --at = Sekunden nach der Kaufphase)
 //            [--size 1440x900] [--scale 100] [--scroll Y] [--data <Ordner>] [--me <SteamID>] [--select N]
 //                                        Seite ohne Fenster als Bild zeichnen (Tests, README)
 #include <objbase.h>
@@ -28,6 +29,7 @@ Page pageFromName(const std::wstring& s) {
     if (s == L"stats") return Page::Stats;
     if (s == L"highlights") return Page::Highlights;
     if (s == L"settings") return Page::Settings;
+    if (s == L"replay") return Page::Replay;
     return Page::Dashboard;
 }
 
@@ -54,6 +56,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         else if (a == L"--render") opt.renderPath = next();
         else if (a == L"--page") opt.page = pageFromName(next());
         else if (a == L"--tab") opt.tab = _wtoi(next().c_str());
+        else if (a == L"--at") opt.replayAt = _wtof(next().c_str());
         else if (a == L"--match") opt.matchIndex = _wtoi(next().c_str());
         else if (a == L"--select") opt.selectCount = _wtoi(next().c_str());
         else if (a == L"--scale") opt.renderScale = std::max(50, std::min(300, _wtoi(next().c_str())));

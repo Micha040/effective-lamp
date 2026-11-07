@@ -107,7 +107,7 @@ float tabOverview(Canvas& c, App& app, const fd::Match& m, float x, float y, flo
     y += ((ks.size() + perRow - 1) / perRow) * (kh + gap) + 8;
 
     // Rundenleiste
-    y += sectionTitle(c, x, y, w, L"Runden", L"Grün gewonnen, Rot verloren · Punkte = Kills · Stern = Clutch · × = gestorben");
+    y += sectionTitle(c, x, y, w, L"Runden", L"Grün gewonnen, Rot verloren · Punkte = Kills · Stern = Clutch · × = gestorben · Klick: 2D-Ansicht");
     std::vector<RoundMark> marks;
     int prevHalf = -1;
     for (const auto& r : m.rounds) {
@@ -130,7 +130,9 @@ float tabOverview(Canvas& c, App& app, const fd::Match& m, float x, float y, flo
             if (pr->clutch) tip += L"\nClutch 1v" + std::to_wstring(pr->clutch) + (pr->clutchWon ? L" gewonnen" : L" verloren");
             tip += L"\n" + W(fd::econName(pr->econ)) + L", Ausrüstung " + W(fd::fmtMoney(pr->equip));
         }
-        mk.tip = tip;
+        mk.tip = tip + L"\n\nKlick: Runde in der 2D-Ansicht";
+        int n = r.n;
+        mk.click = [&app, n] { app.openReplay(n); };
         marks.push_back(mk);
     }
     roundStrip(c, RectF(x, y, w, 44), marks, "ov-" + m.checksum);
@@ -347,6 +349,8 @@ float tabRounds(Canvas& c, App& app, const fd::Match& m, float x, float y, float
         t.color = c.th.text2;
         row.cells.push_back(t);
         row.accentBar = won ? c.th.success : c.th.danger;
+        int n = r.n;
+        row.click = [&app, n] { app.openReplay(n); };
         rows.push_back(row);
     }
     float th = 34 + rows.size() * 48 + 12;
@@ -744,6 +748,10 @@ float drawMatch(Canvas& c, App& app, float w) {
     {
         float bx = x;
         std::wstring demo = widen(m.demoPath);
+        float b0 = c.buttonWidth(L"2D-Ansicht", Icon::Map);
+        c.button(RectF(bx, y, b0, 34), L"2D-Ansicht", "m2d", [&app] { app.openReplay(0); }, Btn::Primary, Icon::Map, true,
+                 L"Jede Runde von oben: wo alle stehen, wohin sie schauen, Smokes, Mollys, Flashes und Kills");
+        bx += b0 + 8;
         float b1 = c.buttonWidth(L"Demo im Ordner zeigen", Icon::Folder);
         c.button(RectF(bx, y, b1, 34), L"Demo im Ordner zeigen", "mshow", [demo] { showInExplorer(demo); }, Btn::Secondary, Icon::Folder,
                  fileExists(demo), fileExists(demo) ? L"" : L"Die Demo-Datei ist nicht mehr da");

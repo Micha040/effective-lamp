@@ -4,9 +4,10 @@
 > oder direkt als [FragDesk.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/FragDesk.zip) herunterladen.
 
 **Deine CS2-Stats und Highlights – komplett auf deinem PC.** FragDesk liest deine Demos (Premier, Wettkampf, Wingman,
-FACEIT) und zeigt daraus über 150 Kennzahlen, deinen Premier-Verlauf als Graph, jedes Match bis zur einzelnen Runde –
-und die Momente, die sich lohnen: Multikills, gewonnene Clutches, Noscopes, Wallbangs, Kills durch Smoke und mehr.
-Welche Demo ausgewertet und welcher Moment als Video aufgenommen wird, entscheidest du.
+FACEIT) und zeigt daraus über 150 Kennzahlen, deinen Premier-Verlauf als Graph, jedes Match bis zur einzelnen Runde,
+jede Runde als **2D-Ansicht von oben** – und die Momente, die sich lohnen: Multikills, gewonnene Clutches, Noscopes,
+Wallbangs, Kills durch Smoke und mehr. Welche Demo ausgewertet und welcher Moment als Video aufgenommen wird,
+entscheidest du.
 
 <p align="center"><img src="../../docs/media/fragdesk-dashboard.png" width="760" alt="FragDesk: Übersicht mit Premier-Verlauf, Form und Kennzahlen"></p>
 
@@ -50,6 +51,8 @@ Wer es automatisch mag: Einstellungen › „Neue Demos sofort auswerten“.
   Clutches, Utility, MVPs, Premier vorher/nachher) · *Runden* (Kauf, Schaden, Tod, Eröffnung) · *Waffen* (Kills,
   Treffer, Kopfquote, Körperzonen, „gestorben durch“) · *Duelle* (gegen jeden Gegner, kompletter Killfeed) ·
   *Utility* · *Momente*. Die Werte jedes anderen Spielers lassen sich ebenfalls anzeigen.
+- **2D-Ansicht:** jede Runde von oben zum Abspielen – wo alle stehen und hinschauen, Smokes, Mollys, Flashes und
+  HEs, Kills, Bombe (siehe [unten](#2d-ansicht)).
 - **Statistiken:** über 150 Kennzahlen in elf Bereichen – Allgemein, Waffen, Maps, Eröffnung & Trades, Clutches
   (1v1 bis 1v5), Utility (Flashes, geblendete Gegner, Blendzeit, Flash-Assists …), Zielen (Treffsicherheit, erster
   Schuss, Spray, in Bewegung, Trefferzonen), Besondere Kills (Wallbang, Noscope, durch Smoke, geblendet, im Sprung …),
@@ -67,6 +70,29 @@ Jede Runde jedes Spielers bekommt Punkte: für die Zahl der Kills (Doppelkill bi
 Zeus, weiter Schuss, zwei auf einen Streich, alles Kopfschüsse, schnelle Folge. Ab einer Schwelle ist es ein Moment;
 der Ausschnitt beginnt 4 Sekunden vor dem ersten Kill und endet 2 Sekunden nach dem letzten (bei Clutches die ganze
 entscheidende Phase).
+
+## 2D-Ansicht
+
+Im Match oben auf **2D-Ansicht** – oder direkt auf eine Runde im Rundenstreifen bzw. im Bereich *Runden* klicken.
+Zu sehen ist die Runde auf der Karte von oben, so wie im Radar:
+
+- **Spieler** als Punkte in Teamfarbe mit Blickrichtung (Kegel), HP-Ring, Name; Bombenträger, Entschärfen/Legen,
+  geblendet und Schüsse sind markiert. Ein Klick auf einen Spieler (auf der Karte oder in der Liste) hebt ihn hervor.
+- **Granaten:** Flugbahn, dann die Wirkung – Smoke (so lange sie steht), Molotov/Brandgranate als tatsächliche
+  Feuerfläche, Flash, HE, Decoy.
+- **Kills** als Kreuz mit kurzer Linie vom Schützen, rechts die Killliste mit Zeit (Klick springt kurz davor);
+  **Bombe** liegend, gelegt (mit Restzeit) und entschärft.
+- Unten die **Zeitleiste** mit allen Kills und Bomben-Ereignissen, Tempo ½× bis 4×.
+  Tasten: **Leertaste** Abspielen/Anhalten, **Pfeile links/rechts** 5 Sekunden, **Pfeile hoch/runter** Runde,
+  **Esc** zurück.
+
+<p align="center"><img src="../../docs/media/fragdesk-2d.png" width="760" alt="FragDesk: 2D-Ansicht einer Runde auf Mirage mit Spielern, Blickrichtung, Smokes, Molotov und Killliste"></p>
+
+Beim ersten Öffnen liest FragDesk die Demo einmal komplett (wieder mit `fdanalyze.exe`, ein paar Sekunden) und legt
+die Positionen neben die Auswertung (`matches\<Prüfsumme>.replay`, 0,5–3 MB pro Match); danach geht es sofort und
+auch ohne die Demo. Positionen werden 8-mal pro Sekunde gespeichert und dazwischen weich verschoben – für genaue
+Pixel-Duelle ist die Demo in CS2 das Original. Radarbilder gibt es für alle aktuellen Karten; bei einer unbekannten
+Karte stehen die Punkte auf einem Raster.
 
 ## Videos aufnehmen
 
@@ -124,8 +150,11 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 - Im Leerlauf tut FragDesk nichts außer auf neue Dateien in den Demo-Ordnern zu warten (Windows meldet sich dann).
 - Ausgewertet wird in einem eigenen Prozess (`fdanalyze.exe`) mit niedriger Priorität: ein paar Sekunden lang
   ca. 100–150 MB Arbeitsspeicher, danach ist er wieder weg.
-- Ausgewertete Matches liegen als kleine JSON-Dateien (50–200 KB pro Match) in `%LOCALAPPDATA%\FragDesk\matches`.
-  Die Demo selbst brauchst du danach nur noch zum Ansehen und Aufnehmen.
+- Ausgewertete Matches liegen als kleine JSON-Dateien (50–200 KB pro Match) in `%LOCALAPPDATA%\FragDesk\matches`,
+  dazu die Daten der 2D-Ansicht für die Matches, die du dir so angesehen hast. Die Demo selbst brauchst du danach nur
+  noch zum Ansehen und Aufnehmen in CS2.
+- Die 2D-Ansicht zeichnet nur, solange sie abspielt und das Fenster zu sehen ist (rund 30 Bilder pro Sekunde),
+  angehalten oder minimiert kostet sie nichts.
 
 ## Genauigkeit
 
@@ -159,3 +188,8 @@ FragDesk steht unter der MIT-Lizenz (wie ganz efficient lamp). `fdanalyze.exe` e
 [cs-demo-analyzer](https://github.com/akiver/cs-demo-analyzer) von AkiVer und
 [demoinfocs-golang](https://github.com/markus-wa/demoinfocs-golang) von markus-wa (beide MIT) sowie weitere
 Open-Source-Bibliotheken – alle Lizenztexte stehen in `THIRD-PARTY-NOTICES.txt` im Programmordner.
+
+Die Radarbilder der 2D-Ansicht stammen aus Counter-Strike 2 und gehören Valve (© Valve Corporation); FragDesk
+liefert sie mit wie [CS Demo Manager](https://github.com/akiver/cs-demo-manager), von dem auch die Kartenwerte
+stammen (MIT, © AkiVer). FragDesk ist kein offizielles Produkt von Valve. Einzelheiten stehen ebenfalls in
+`THIRD-PARTY-NOTICES.txt` (im Quelltext: [`res/radars/NOTICE.txt`](res/radars/NOTICE.txt)).

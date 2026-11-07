@@ -281,6 +281,24 @@ float Canvas::textHeight(const std::wstring& s, F font, float width) {
     return bounds.Height;
 }
 
+void Canvas::dragRegion(const RectF& r, uint32_t id, std::function<void(float, float)> drag, const std::wstring& tipText) {
+    RECT rc = toPx(r);
+    if (rc.right <= rc.left || rc.bottom <= rc.top) return;
+    // Anteil bezieht sich auf die ganze Fläche, nicht nur den sichtbaren Teil
+    RECT full = {LONG((r.X + ox_) * scale), LONG((r.Y + oy_) * scale), LONG((r.X + r.Width + ox_) * scale), LONG((r.Y + r.Height + oy_) * scale)};
+    Region reg;
+    reg.px = rc;
+    reg.id = id;
+    reg.tip = tipText;
+    reg.hand = true;
+    reg.drag = [full, drag](float px, float py) {
+        float fx = (px - full.left) / std::max(1.0f, float(full.right - full.left));
+        float fy = (py - full.top) / std::max(1.0f, float(full.bottom - full.top));
+        drag(std::clamp(fx, 0.0f, 1.0f), std::clamp(fy, 0.0f, 1.0f));
+    };
+    regions_.push_back(std::move(reg));
+}
+
 void Canvas::region(const RectF& r, uint32_t id, std::function<void()> click, const std::wstring& tip, bool hand) {
     RECT rc = toPx(r);
     if (rc.right <= rc.left || rc.bottom <= rc.top) return;
@@ -448,6 +466,11 @@ void Canvas::icon(Icon ic, const RectF& r, const Color& c, float sw) {
             break;
         }
         case Icon::Chevron: poly({P(9, 5.5f), P(15.5f, 12), P(9, 18.5f)}, false); break;
+        case Icon::ChevronLeft: poly({P(15, 5.5f), P(8.5f, 12), P(15, 18.5f)}, false); break;
+        case Icon::Pause:
+            poly({P(6.5f, 5), P(10, 5), P(10, 19), P(6.5f, 19)}, true, true);
+            poly({P(14, 5), P(17.5f, 5), P(17.5f, 19), P(14, 19)}, true, true);
+            break;
         case Icon::ChevronDown: poly({P(5.5f, 9), P(12, 15.5f), P(18.5f, 9)}, false); break;
         case Icon::ChevronUp: poly({P(5.5f, 15), P(12, 8.5f), P(18.5f, 15)}, false); break;
         case Icon::Star: {

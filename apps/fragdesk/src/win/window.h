@@ -17,6 +17,7 @@ struct Options {
     int tab = 0, matchIndex = 0, selectCount = 0;
     int renderWidth = 1440, renderHeight = 900, renderScale = 100;
     float renderScroll = 0;
+    double replayAt = 0;   // 2D-Ansicht: Sekunden nach der Kaufphase
     std::wstring me;
     std::vector<std::wstring> demos;    // beim Start übergebene Demos (z. B. „Öffnen mit“)
 };

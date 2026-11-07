@@ -26,7 +26,7 @@ constexpr const wchar_t* kWindowClass = L"FragDeskWindow";
 constexpr float kSideW = 232;
 constexpr float kMaxContent = 1320;
 
-enum Timer { kTipTimer = 1, kScanTimer = 2, kBusyTimer = 3, kToastTimer = 7, kRecordTimer = 8 };
+enum Timer { kTipTimer = 1, kScanTimer = 2, kBusyTimer = 3, kToastTimer = 7, kRecordTimer = 8, kReplayTimer = 9 };
 
 bool windowsDark() {
     DWORD v = 1, size = sizeof v;
@@ -97,8 +97,11 @@ private:
     HDC backDc_ = nullptr;
     void* backBits_ = nullptr;
     int backW_ = 0, backH_ = 0;
+    bool animTimer_ = false;                      // 2D-Ansicht läuft (Timer aktiv)
+    std::function<void(float, float)> dragFn_;   // gerade gezogene Fläche (Zeitleiste)
 
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
+    void updateAnimation();
     void setScale(UINT dpi);
     void applyTheme();
     void paint(Graphics& g, float wPx, float hPx);
@@ -107,6 +110,7 @@ private:
     void onPaint();
     int regionAt(int x, int y) const;
     void updateHover(int x, int y);
+    void refreshHover();
     void scrollBy(float dy);
     float& scroll() { return app_.scroll[int(app_.page)]; }
     void startup();
@@ -216,9 +220,14 @@ bool Window::renderPng() {
     app_.detectMe();
     app_.page = opt_.page;
     app_.matchTab = app_.statsTab = app_.highlightsTab = opt_.tab;
-    if (opt_.page == Page::Match && !app_.lib.matches.empty()) {
+    if ((opt_.page == Page::Match || opt_.page == Page::Replay) && !app_.lib.matches.empty()) {
         size_t idx = size_t(std::max(0, opt_.matchIndex)) % app_.lib.matches.size();
-        app_.openMatch(app_.lib.matches[idx]->checksum, opt_.tab);
+        app_.openMatch(app_.lib.matches[idx]->checksum, opt_.page == Page::Replay ? 0 : opt_.tab);
+        if (opt_.page == Page::Replay && app_.detail) {
+            app_.page = Page::Replay;
+            app_.replay.openNow(*app_.detail, opt_.tab);
+            if (app_.replay.data) app_.replay.seek(app_.replay.freezeTick + opt_.replayAt * app_.replay.data->tickrate);
+        }
     }
     if (opt_.selectCount > 0)   // Momente auswählen (für Bilder der Auswahl)
         for (const auto& m : app_.lib.matches)
@@ -264,7 +273,7 @@ void Window::drawSidebar(Canvas& c, float h) {
         {Page::Settings, L"Einstellungen", Icon::Gear},
     };
     float y = 96;
-    Page current = app_.page == Page::Match ? app_.backPage : app_.page;
+    Page current = app_.page == Page::Match || app_.page == Page::Replay ? app_.backPage : app_.page;
     for (const auto& n : nav) {
         RectF r(12, y, kSideW - 24, 42);
         uint32_t id = hashId(std::string("nav:") + std::to_string(int(n.page)));
@@ -372,7 +381,8 @@ void Window::paint(Graphics& g, float wPx, float hPx) {
 
     // Inhalt
     float areaX = kSideW, areaW = w - kSideW;
-    float pageW = std::min(areaW, kMaxContent);
+    bool full = app_.page == Page::Replay;   // die 2D-Ansicht nutzt die ganze Breite und Höhe
+    float pageW = full ? areaW : std::min(areaW, kMaxContent);
     float pageX = areaX + std::max(0.0f, (areaW - pageW) / 2);
     viewH_ = h;
     float& sc = scroll();
@@ -386,6 +396,7 @@ void Window::paint(Graphics& g, float wPx, float hPx) {
         case Page::Match: ch = drawMatch(c, app_, pageW); break;
         case Page::Stats: ch = drawStats(c, app_, pageW); break;
         case Page::Highlights: ch = drawHighlights(c, app_, pageW); break;
+        case Page::Replay: ch = drawReplay(c, app_, pageW, h); break;
         default: ch = drawSettings(c, app_, pageW); break;
     }
     c.translate(-pageX, sc);
@@ -432,6 +443,33 @@ void Window::onPaint() {
     }
     BitBlt(dc, 0, 0, w, h, backDc_, 0, 0, SRCCOPY);
     EndPaint(hwnd_, &ps);
+    refreshHover();
+    updateAnimation();
+}
+
+// Nach dem Zeichnen gibt es neue Flächen (z. B. nach einem Seitenwechsel ohne Mausbewegung): Fläche unter der Maus neu
+// bestimmen, sonst zeigt der Tooltip den Text einer Fläche, die zufällig an derselben Stelle der alten Liste stand
+void Window::refreshHover() {
+    if (hot_ == 0 && hotIndex_ < 0) return;
+    int i = regionAt(mouse_.x, mouse_.y);
+    uint32_t id = i >= 0 ? regions_[i].id : 0;
+    if (id == hot_) {
+        hotIndex_ = i;
+        return;
+    }
+    updateHover(mouse_.x, mouse_.y);
+}
+
+// 2D-Ansicht: Timer nur, solange abgespielt wird und das Fenster zu sehen ist (spart Rechenzeit)
+void Window::updateAnimation() {
+    bool want = app_.page == Page::Replay && app_.replay.playing && !IsIconic(hwnd_);
+    if (want && !animTimer_) {
+        SetTimer(hwnd_, kReplayTimer, 33, nullptr);   // ~30 Bilder pro Sekunde
+        animTimer_ = true;
+    } else if (!want && animTimer_) {
+        KillTimer(hwnd_, kReplayTimer);
+        animTimer_ = false;
+    }
 }
 
 // ---- Eingaben -------------------------------------------------------------------------------------------------
@@ -513,6 +551,12 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                 TRACKMOUSEEVENT t = {sizeof t, TME_LEAVE, hwnd_, 0};
                 tracking_ = TrackMouseEvent(&t);
             }
+            if (dragFn_ && (wp & MK_LBUTTON)) {
+                dragFn_(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
+                mouse_ = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0;
+            }
             updateHover(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
             return 0;
         }
@@ -535,10 +579,16 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             updateHover(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
             pressed_ = hot_;
             showTip_ = false;
+            dragFn_ = nullptr;
+            if (hotIndex_ >= 0 && hotIndex_ < int(regions_.size()) && regions_[hotIndex_].drag) {
+                dragFn_ = regions_[hotIndex_].drag;
+                dragFn_(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
+            }
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         case WM_LBUTTONUP: {
             ReleaseCapture();
+            dragFn_ = nullptr;
             int i = regionAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
             uint32_t was = pressed_;
             pressed_ = 0;
@@ -556,11 +606,34 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_XBUTTONUP:
             if (GET_XBUTTON_WPARAM(wp) == XBUTTON1 && app_.page == Page::Match) app_.go(app_.backPage);
+            else if (GET_XBUTTON_WPARAM(wp) == XBUTTON1 && app_.page == Page::Replay) app_.go(Page::Match);
             return TRUE;
         case WM_MOUSEWHEEL:
             scrollBy(-float(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA * 72.0f);
             return 0;
         case WM_KEYDOWN:
+            if (app_.page == Page::Replay) {   // 2D-Ansicht: Abspielen, Springen, Runden
+                ReplayView& rv = app_.replay;
+                double tr = rv.data ? rv.data->tickrate : 64;
+                bool handled = true;
+                switch (wp) {
+                    case VK_SPACE: rv.togglePlay(); break;
+                    case VK_LEFT: rv.seek(rv.tick - 5 * tr); break;
+                    case VK_RIGHT: rv.seek(rv.tick + 5 * tr); break;
+                    case VK_UP:
+                    case VK_DOWN:
+                    case VK_PRIOR:
+                    case VK_NEXT:
+                        if (app_.detail && rv.data) rv.stepRound(*app_.detail, wp == VK_UP || wp == VK_PRIOR ? -1 : 1);
+                        break;
+                    case VK_ESCAPE: app_.go(Page::Match); break;
+                    default: handled = false;
+                }
+                if (handled) {
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                    return 0;
+                }
+            }
             switch (wp) {
                 case VK_ESCAPE:
                     if (app_.page == Page::Match) app_.go(app_.backPage);
@@ -606,6 +679,13 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     if (GetTickCount64() >= app_.toastUntil) {
                         KillTimer(hwnd_, kToastTimer);
                         app_.toast.clear();
+                    }
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                    break;
+                case kReplayTimer:
+                    if (app_.page != Page::Replay || !app_.replay.advance() || IsIconic(hwnd_)) {
+                        KillTimer(hwnd_, kReplayTimer);
+                        animTimer_ = false;
                     }
                     InvalidateRect(hwnd_, nullptr, FALSE);
                     break;
@@ -665,6 +745,14 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_FOLDER:
             SetTimer(hwnd_, kScanTimer, 1500, nullptr);
             return 0;
+        case WM_APP_REPLAY: {
+            auto* e = reinterpret_cast<ReplayEvent*>(lp);
+            const fd::Match* m = app_.detail && e && app_.detail->checksum == e->match ? app_.detail.get() : nullptr;
+            app_.replay.apply(e, m);
+            delete e;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         case WM_APP_RECORD: {
             std::unique_ptr<RecordEvent> e(reinterpret_cast<RecordEvent*>(lp));
             switch (e->kind) {

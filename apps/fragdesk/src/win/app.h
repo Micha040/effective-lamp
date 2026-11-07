@@ -9,6 +9,7 @@
 #include "../core/stats.h"
 #include "gfx.h"
 #include "library.h"
+#include "replay_view.h"
 #include "widgets.h"
 #include "settings.h"
 #include "steam.h"
@@ -17,7 +18,7 @@ namespace fdw {
 
 class Recorder;
 
-enum class Page { Dashboard, Matches, Match, Stats, Highlights, Settings, Count };
+enum class Page { Dashboard, Matches, Match, Stats, Highlights, Settings, Replay, Count };
 
 struct SortState {
     int col = -1;
@@ -58,6 +59,8 @@ public:
     Page page = Page::Dashboard, backPage = Page::Matches;
     void go(Page p);
     void openMatch(const std::string& checksum, int tab = 0);
+    void openReplay(int round = 0);   // 2D-Ansicht des offenen Matches (Runde 0 = erste)
+    ReplayView replay;
     std::string matchId;
     std::unique_ptr<fd::Match> detail;
     std::wstring detailError;
@@ -137,6 +140,7 @@ float drawMatch(ui::Canvas& c, App& app, float w);
 float drawStats(ui::Canvas& c, App& app, float w);
 float drawHighlights(ui::Canvas& c, App& app, float w);
 float drawSettings(ui::Canvas& c, App& app, float w);
+float drawReplay(ui::Canvas& c, App& app, float w, float h);   // füllt die Höhe, kein Blättern
 
 // gemeinsame Teile der Seiten
 float pageTitle(ui::Canvas& c, float x, float y, float w, const std::wstring& title, const std::wstring& sub);

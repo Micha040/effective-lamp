@@ -2,6 +2,7 @@
 //
 //	fdanalyze -demo <Datei> -out <Datei.json> [-temp <Ordner>] [-pretty]
 //	fdanalyze -demo <Datei> -unpack <Datei.dem> [-temp <Ordner>]   (nur entpacken, z. B. zum Abspielen in CS2)
+//	fdanalyze -demo <Datei> -replay <Datei.replay> [-temp <Ordner>]   (Daten für die 2D-Ansicht, siehe replay.go)
 //	fdanalyze -version
 //
 // Fortschritt und Ergebnis stehen zeilenweise auf der Standardausgabe:
@@ -25,7 +26,7 @@ import (
 )
 
 const (
-	version     = "1.0.2"
+	version     = "1.1.0"
 	csdaVersion = "1.13.0"
 )
 
@@ -35,6 +36,7 @@ func main() {
 	tempDir := flag.String("temp", "", "Ordner für entpackte Demos (Standard: TEMP)")
 	pretty := flag.Bool("pretty", false, "JSON eingerückt schreiben")
 	unpackTo := flag.String("unpack", "", "Demo nur entpacken und als diese .dem-Datei speichern")
+	replayTo := flag.String("replay", "", "Daten für die 2D-Ansicht (Positionen, Granaten, Kills) in diese Datei schreiben")
 	showVersion := flag.Bool("version", false, "Version ausgeben")
 	flag.Parse()
 
@@ -50,6 +52,17 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Fprintf(stdout, "DONE %s\n", *unpackTo)
+		stdout.Flush()
+		return
+	}
+	if *demo != "" && *replayTo != "" {
+		stdout := bufio.NewWriter(os.Stdout)
+		if err := replayFile(*demo, *replayTo, *tempDir); err != nil {
+			fmt.Fprintf(stdout, "ERROR %s %s\n", errorCode(err), strings.ReplaceAll(err.Error(), "\n", " "))
+			stdout.Flush()
+			os.Exit(1)
+		}
+		fmt.Fprintf(stdout, "DONE %s\n", *replayTo)
 		stdout.Flush()
 		return
 	}

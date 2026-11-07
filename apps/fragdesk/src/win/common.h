@@ -9,8 +9,8 @@
 namespace fdw {
 
 constexpr const wchar_t* kAppName = L"FragDesk";
-constexpr const wchar_t* kVersion = L"1.0.2";
-constexpr const char* kVersionA = "1.0.2";
+constexpr const wchar_t* kVersion = L"1.1.0";
+constexpr const char* kVersionA = "1.1.0";
 constexpr const wchar_t* kRepoUrl = L"https://github.com/Micha040/effective-lamp";
 constexpr const wchar_t* kAnalyzerExe = L"fdanalyze.exe";
 
@@ -20,6 +20,7 @@ constexpr UINT WM_APP_DEMOS = WM_APP + 2;      // Demo-Ordner durchsucht
 constexpr UINT WM_APP_ANALYSIS = WM_APP + 3;   // Fortschritt einer Auswertung (lParam: AnalysisEvent*)
 constexpr UINT WM_APP_RECORD = WM_APP + 4;     // Fortschritt einer Aufnahme (lParam: RecordEvent*)
 constexpr UINT WM_APP_FOLDER = WM_APP + 5;     // ein überwachter Ordner hat sich geändert
+constexpr UINT WM_APP_REPLAY = WM_APP + 6;     // 2D-Daten geladen oder Fehler (lParam: ReplayEvent*)
 
 std::wstring widen(const std::string& utf8);
 std::string narrow(const std::wstring& w);

@@ -174,6 +174,7 @@ bool Library::loadDetail(const std::string& checksum, fd::Match& out, std::wstri
 
 bool Library::remove(const std::string& checksum) {
     DeleteFileW(matchFile(checksum).c_str());
+    DeleteFileW(joinPath(matchesDir(), widen(checksum) + L".replay").c_str());   // 2D-Daten
     auto it = std::find_if(matches.begin(), matches.end(), [&](const auto& m) { return m->checksum == checksum; });
     if (it == matches.end()) return false;
     matches.erase(it);

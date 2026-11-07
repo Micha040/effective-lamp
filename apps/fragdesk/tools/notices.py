@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""FragDesk – THIRD-PARTY-NOTICES.txt erzeugen: die Lizenztexte aller Go-Module, die in fdanalyze.exe stecken.
+"""FragDesk – THIRD-PARTY-NOTICES.txt erzeugen: die Lizenztexte aller Go-Module, die in fdanalyze.exe stecken,
+und der Hinweis zu den Radarbildern in FragDesk.exe (res/radars/NOTICE.txt).
 
 Aufruf (im Ordner apps/fragdesk, nach dem Bauen von fdanalyze.exe):
     python3 tools/notices.py build/THIRD-PARTY-NOTICES.txt
@@ -26,6 +27,9 @@ https://github.com/Micha040/effective-lamp).
 fdanalyze.exe liest die Demos und enthält dafür die folgenden Open-Source-Bibliotheken,
 allen voran cs-demo-analyzer von AkiVer und demoinfocs-golang von markus-wa (beide MIT-Lizenz).
 Ihre Lizenztexte stehen unten vollständig, dazu die Lizenz von Go selbst.
+
+FragDesk.exe enthält für die 2D-Ansicht die Radarbilder aus Counter-Strike 2 (© Valve Corporation),
+übernommen aus CS Demo Manager von AkiVer (MIT-Lizenz) – Einzelheiten ganz unten.
 """
 
 
@@ -77,6 +81,10 @@ def main():
     goroot = go('env', 'GOROOT').strip()
     goversion = go('env', 'GOVERSION').strip()
     blocks.append(f'\n=== Go {goversion} (Standardbibliothek und Laufzeit)\n\n{license_text("Go", goroot)}\n')
+    radars = HERE / 'res' / 'radars' / 'NOTICE.txt'
+    if not radars.is_file():
+        sys.exit(f'FEHLER: {radars} fehlt')
+    blocks.append(f'\n=== Radarbilder in FragDesk.exe\n\n{radars.read_text(encoding="utf-8").strip()}\n')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(blocks).replace('\r\n', '\n'), encoding='utf-8')
     print(f'{out}: {len(mods)} Module')

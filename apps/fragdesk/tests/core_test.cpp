@@ -1,5 +1,7 @@
 // FragDesk – Tests für den plattformunabhängigen Teil (Linux, g++). Aufruf: sh tests/run.sh [Ordner mit fdanalyze-JSON]
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
@@ -9,6 +11,8 @@
 
 #include "../src/core/format.h"
 #include "../src/core/model.h"
+#include "../src/core/radar.h"
+#include "../src/core/replay.h"
 #include "../src/core/stats.h"
 #include "../src/core/vdf.h"
 
@@ -291,6 +295,133 @@ static void testRealFiles(const char* dir) {
     }
 }
 
+// ---- 2D-Ansicht ---------------------------------------------------------------------------------------------
+namespace {
+struct Bytes {
+    std::string b;
+    void u8(int v) { b.push_back(char(uint8_t(v))); }
+    void u16(int v) { u8(v & 0xFF); u8((v >> 8) & 0xFF); }
+    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) u8(int((v >> (8 * i)) & 0xFF)); }
+    void u64(uint64_t v) { u32(uint32_t(v)); u32(uint32_t(v >> 32)); }
+    void f32(float f) { uint32_t v; std::memcpy(&v, &f, 4); u32(v); }
+    void str(const std::string& s) { u16(int(s.size())); b += s; }
+    void vec(int x, int y, int z) { u16(x & 0xFFFF); u16(y & 0xFFFF); u16(z & 0xFFFF); }
+};
+
+// gleiche Daten wie TestReplayEncode in analyzer/replay_test.go
+std::string sampleReplay() {
+    Bytes f;   // Frames
+    f.u32(100); f.u8(0); f.u8(2);
+    f.u8(0); f.vec(-100, 200, 30); f.u8(64); f.u8(100); f.u8(1); f.u8(RpCT | RpKit);
+    f.u8(1); f.vec(500, -500, 0); f.u8(192); f.u8(35); f.u8(1); f.u8(RpBomb);
+    f.u32(108); f.u8(1); f.vec(1, 2, 3); f.u8(1);
+    f.u8(0); f.vec(-90, 210, 30); f.u8(70); f.u8(100); f.u8(1); f.u8(RpCT);
+    Bytes b;
+    b.b = "FDRP"; b.u16(1); b.u16(0); b.f32(128); b.u16(8); b.str("de_mirage");
+    b.u16(2); b.u64(76561198000000001ull); b.str("Testspieler"); b.u64(0); b.str("Bot Ich");
+    b.u16(2); b.str(""); b.str("AK-47");
+    b.u32(2); b.u32(uint32_t(f.b.size())); b.b += f.b;
+    b.u32(1); b.u8(GrSmoke); b.u8(0); b.u8(1); b.u16(2); b.u32(100); b.vec(1, 1, 1); b.u32(108); b.vec(50, 60, 5);
+    b.u32(1); b.u8(FxFire); b.u8(1); b.u8(0); b.u32(120); b.u32(1400); b.vec(10, 20, 0); b.u8(3);
+    b.u16(0); b.u16(0); b.u16(10); b.u16(0); b.u16(0); b.u16(10);
+    b.u32(1); b.u32(104); b.u8(0); b.u8(1); b.u8(255); b.u8(1); b.u8(KfHeadshot | KfSmoke); b.vec(-100, 200, 30); b.vec(500, -500, 0);
+    b.u32(1); b.u32(103); b.u8(0); b.u8(1);
+    b.u32(1); b.u32(200); b.u8(BombPlanted); b.u8(1); b.vec(7, 8, 9);
+    b.b += "END!";
+    return b.b;
+}
+}  // namespace
+
+static void testReplay() {
+    Replay r;
+    std::string err;
+    std::string bytes = sampleReplay();
+    check(parseReplay(bytes, r, err), "Replay lesen: " + err);
+    check(r.tickrate == 128 && r.interval == 8 && r.map == "de_mirage", "Replay-Kopf");
+    check(r.players.size() == 2 && r.players[0].steamId == "76561198000000001" && r.players[1].steamId.empty() && r.players[1].name == "Bot Ich",
+          "Replay-Spieler");
+    check(r.frames.size() == 2 && r.samples.size() == 3 && r.frames[1].bomb == 1 && r.frames[1].bombPos.y == 2, "Replay-Frames");
+    check(r.tracks.size() == 1 && r.tracks[0].points.size() == 2 && r.tracks[0].ct, "Replay-Flugbahn");
+    check(r.effects.size() == 1 && r.effects[0].hull.size() == 3 && r.effects[0].end == 1400, "Replay-Wirkung");
+    check(r.kills.size() == 1 && r.kills[0].flags == (KfHeadshot | KfSmoke) && r.kills[0].victimPos.x == 500 && r.kills[0].assister == kNoPlayer,
+          "Replay-Kill");
+    check(r.shots.size() == 1 && r.bomb.size() == 1 && r.bomb[0].pos.z == 9, "Replay-Schüsse/Bombe");
+    check(replayWeapon(r, 1) == "AK-47" && replayWeapon(r, 9).empty(), "Replay-Waffen");
+    check(frameAt(r, 50) == 0 && frameAt(r, 100) == 0 && frameAt(r, 107.9) == 0 && frameAt(r, 108) == 1 && frameAt(r, 1e9) == 1, "frameAt");
+
+    std::vector<PlayerAt> ps;
+    playersAt(r, 104, ps);   // halb zwischen den Frames
+    check(ps.size() == 2, "playersAt: zwei Spieler");
+    if (ps.size() == 2) {
+        near(ps[0].x, -95, 0.01, "playersAt: x verschoben");
+        near(ps[0].y, 205, 0.01, "playersAt: y verschoben");
+        near(ps[0].yaw, (64 + 3) * 360.0 / 256, 0.01, "playersAt: Blickrichtung");
+        check(ps[1].x == 500 && ps[1].hp == 35, "playersAt: Spieler ohne zweiten Frame bleibt stehen");
+    }
+    // Blickrichtung über 0°: von 250 (≈351°) nach 6 (≈8°) geht es kurz nach rechts, nicht einmal herum
+    Replay w = r;
+    w.samples[0].yaw = 250;
+    w.samples[2].yaw = 6;
+    playersAt(w, 104, ps);
+    check(!ps.empty() && (ps[0].yaw > 355 || ps[0].yaw < 5), "playersAt: Blickrichtung über 0° (" + std::to_string(ps.empty() ? 0 : ps[0].yaw) + ")");
+
+    // kaputte Dateien
+    Replay bad;
+    check(!parseReplay("FDRP", bad, err), "Replay zu kurz");
+    check(!parseReplay(bytes.substr(0, bytes.size() - 6), bad, err), "Replay abgeschnitten");
+    std::string v2 = bytes;
+    v2[4] = 2;
+    check(!parseReplay(v2, bad, err) && err.find("Version") != std::string::npos, "Replay andere Version");
+    std::string garbage = bytes;
+    garbage[60] = char(0xFF);   // Länge der Frames zerstört
+    parseReplay(garbage, bad, err);   // darf nicht abstürzen
+    check(true, "Replay mit Müll");
+}
+
+static void testRadar() {
+    int idx = -1;
+    const RadarMap* m = radarMap("de_mirage", &idx);
+    check(m && idx >= 0 && !m->lower, "Radar Mirage");
+    if (m) {
+        float u, v;
+        radarUV(*m, m->posX, m->posY, u, v);
+        check(u == 0 && v == 0, "Radar: linke obere Ecke");
+        radarUV(*m, m->posX + m->span / 2, m->posY - m->span, u, v);
+        near(u, 0.5, 1e-6, "Radar: Mitte");
+        near(v, 1.0, 1e-6, "Radar: unten");
+    }
+    check(radarMap("workshop/123456/DE_NUKE") && radarMap("de_nuke")->lower && radarLower(*radarMap("de_nuke"), -600) &&
+              !radarLower(*radarMap("de_nuke"), 0),
+          "Radar Nuke mit unterer Ebene");
+    check(radarMap("de_unbekannt") == nullptr, "Radar unbekannte Karte");
+    check(radarMapCount() >= 20, "Radar: Karten vorhanden");
+}
+
+static void testRealReplays(const char* dir) {
+    DIR* d = opendir(dir);
+    if (!d) return;
+    while (dirent* e = readdir(d)) {
+        std::string name = e->d_name;
+        if (name.size() < 8 || name.substr(name.size() - 7) != ".replay") continue;
+        Replay r;
+        std::string err;
+        bool ok = parseReplay(readAll(std::string(dir) + "/" + name), r, err);
+        check(ok, name + ": " + err);
+        if (!ok) continue;
+        check(r.frames.size() > 1000 && !r.kills.empty() && radarMap(r.map), name + ": Inhalt und Karte");
+        std::vector<PlayerAt> ps;
+        size_t most = 0;
+        for (size_t i = 0; i < r.frames.size(); i += 97) {
+            playersAt(r, r.frames[i].tick + r.interval / 2.0, ps);
+            most = std::max(most, ps.size());
+            for (const auto& p : ps) check(p.player < r.players.size() && p.yaw >= 0 && p.yaw < 360, name + ": Spieler im Frame");
+        }
+        check(most >= 8, name + ": genug Spieler gleichzeitig");
+        std::printf("  %s: %s, %zu Frames, %zu Kills, %zu Granaten\n", name.c_str(), r.map.c_str(), r.frames.size(), r.kills.size(), r.tracks.size());
+    }
+    closedir(d);
+}
+
 int main(int argc, char** argv) {
     testExpr();
     testCountersMerge();
@@ -298,7 +429,12 @@ int main(int argc, char** argv) {
     testVdf();
     testSideless();
     testModel();
-    if (argc > 1) testRealFiles(argv[1]);
+    testReplay();
+    testRadar();
+    if (argc > 1) {
+        testRealFiles(argv[1]);
+        testRealReplays(argv[1]);
+    }
     std::printf("%d Prüfungen, %d Fehler\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -49,7 +49,7 @@ private:
 enum class Icon {
     None, Home, List, Stats, Film, Gear, Play, Folder, Plus, Refresh, Back, Check, Close, Info, Crosshair, Flash, Bomb,
     Trophy, Clock, Target, Map, Download, Warning, Eye, Chevron, ChevronDown, ChevronUp, Star, External, Trash, Record, Users, Shield,
-    Fire, Smoke, Coin, Spark
+    Fire, Smoke, Coin, Spark, Pause, ChevronLeft
 };
 
 enum class Align { Left, Center, Right };
@@ -60,6 +60,7 @@ struct Region {
     std::function<void()> click;
     std::wstring tip;
     bool hand = false;
+    std::function<void(float, float)> drag;   // Ziehen: Anteil 0..1 in der Fläche (x, y), auch außerhalb
 };
 
 uint32_t hashId(const std::string& key);
@@ -101,6 +102,7 @@ public:
     bool down(uint32_t id) const { return id && id == pressed_ && id == hot_; }
     void region(const RectF& r, uint32_t id, std::function<void()> click, const std::wstring& tip = L"", bool hand = true);
     void tip(const RectF& r, const std::wstring& tip);
+    void dragRegion(const RectF& r, uint32_t id, std::function<void(float, float)> drag, const std::wstring& tip = L"");
     bool visible(const RectF& r) const;   // liegt (teilweise) in der Schnittfläche?
 
     // Bausteine

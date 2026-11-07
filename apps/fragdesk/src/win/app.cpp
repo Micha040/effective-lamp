@@ -68,8 +68,19 @@ void App::saveSettings() {
 }
 
 void App::go(Page p) {
-    if (p != Page::Match) backPage = p;
+    if (p != Page::Match && p != Page::Replay) backPage = p;
+    if (page == Page::Replay && p != Page::Replay) {   // Daten bleiben für die Rückkehr, die großen Bilder nicht
+        replay.playing = false;
+        replay.releaseBitmaps();
+    }
     page = p;
+    invalidate();
+}
+
+void App::openReplay(int round) {
+    if (!detail) return;
+    page = Page::Replay;
+    replay.open(hwnd, *detail, round);
     invalidate();
 }
 
