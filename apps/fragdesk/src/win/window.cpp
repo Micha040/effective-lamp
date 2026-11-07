@@ -13,6 +13,7 @@
 #include "common.h"
 #include "mobile_host.h"
 #include "recorder.h"
+#include "server_sync.h"
 #include "../../res/resource.h"
 
 using namespace Gdiplus;
@@ -198,7 +199,8 @@ bool Window::create() {
     ShowWindow(hwnd_, SW_SHOWNORMAL);
     UpdateWindow(hwnd_);
     app_.lib.loadAsync();
-    app_.mobile->apply();   // Handy-App, falls eingeschaltet
+    app_.mobile->apply();   // Handy-App direkt vom PC, falls eingeschaltet
+    app_.sync->apply();     // oder über den eigenen Server (gleicht ab, sobald die Bibliothek geladen ist)
     return true;
 }
 
@@ -721,9 +723,16 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     if (!app_.recording()) KillTimer(hwnd_, kRecordTimer);
                     if (!IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
                     break;
-                case kMobileTimer:   // Restzeit des Kopplungscodes
-                    if (app_.mobile->pairingCode().empty()) KillTimer(hwnd_, kMobileTimer);
+                case kMobileTimer:   // Restzeit des Kopplungscodes (direkt vom PC oder vom Server)
+                    if (app_.mobile->pairingCode().empty() && app_.sync->pairingCode().empty()) KillTimer(hwnd_, kMobileTimer);
                     if (app_.page == Page::Settings && !IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
+                    break;
+                case kSyncTimer:   // eigener Server: alle 15 Minuten abgleichen
+                    app_.sync->request(0);
+                    break;
+                case kSyncViewTimer:   // „zuletzt vor … min“ auffrischen, solange die Einstellungen offen sind
+                    if (app_.page != Page::Settings || !app_.sync->active()) KillTimer(hwnd_, kSyncViewTimer);
+                    else if (!IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
                     break;
             }
             return 0;
@@ -732,6 +741,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             app_.detectMe();
             app_.lib.startWatching();
             app_.lib.scanAsync();
+            app_.sync->request(5000);   // eigener Server: Abgleich beim Start (kurz warten, bis FragDesk steht)
             loaded_ = true;
             if (!pending_.empty()) {   // beim Start übergebene Demos
                 openDemos(pending_);
@@ -768,6 +778,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                 if (app_.me.empty()) app_.detectMe();
                 app_.invalidateCareer();
                 if (!checksum.empty() && checksum == app_.matchId) app_.refreshDetail();   // neu ausgewertet, während es offen ist
+                app_.sync->request();   // eigener Server: neues Match hochladen
                 app_.notify(L"Ausgewertet: " + title);
             } else if (kind == AnalysisEvent::Failed) {
                 app_.notify(fileName(path) + L": " + text, true);
@@ -781,6 +792,8 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_APP_MOBILE:
             return app_.mobile->onMessage(wp, lp);
+        case WM_APP_SYNC:
+            return app_.sync->onMessage(wp, lp);
         case WM_APP_HEAT: {
             auto* e = reinterpret_cast<HeatEvent*>(lp);
             if (!app_.statsHeat.apply(e)) app_.matchHeat.apply(e);
@@ -828,6 +841,9 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     app_.notify(e->text, true);
                     break;
             }
+            // eigener Server: Pause während der Aufnahme, danach die neuen Videos hochladen
+            app_.sync->setRecording(app_.recording());
+            if (e->kind != RecordEvent::Status) app_.sync->request();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
@@ -838,6 +854,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_DESTROY:
             app_.mobile->stop();
+            app_.sync->stop();
             app_.cancelRecording();
             releaseInstanceLock();
             PostQuitMessage(0);

@@ -5,6 +5,7 @@
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
+#include "server_sync.h"
 
 namespace fdw {
 
@@ -214,6 +215,7 @@ float videos(Canvas& c, App& app, float x, float y, float w) {
                          app.clips.erase(std::remove_if(app.clips.begin(), app.clips.end(), [&](const Clip& x) { return x.path == path; }),
                                          app.clips.end());
                          app.saveClips();
+                         app.sync->request();   // auch auf dem eigenen Server löschen
                          app.invalidate();
                      },
                      L"Video löschen");

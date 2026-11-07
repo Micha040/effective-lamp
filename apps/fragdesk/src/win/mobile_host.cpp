@@ -45,10 +45,8 @@ struct Shared {
     std::atomic<HWND> hwnd{nullptr};
     fdapi::Auth auth;
     fdapi::Host host;
-    std::wstring thumbs;   // Ordner für Vorschaubilder
     std::atomic<ULONGLONG> cs2At{0};
     std::atomic<bool> cs2{false};
-    std::mutex thumbMu;    // immer nur ein Vorschaubild gleichzeitig erzeugen
 };
 
 class AppSource : public fdapi::Source {
@@ -240,11 +238,18 @@ bool grabFrame(const std::wstring& path, std::string& jpeg) {
     return fits && encodeJpeg(px, w, h, jpeg);
 }
 
-bool videoThumbnail(Shared& sh, const fdapi::ClipInfo& clip, std::string& jpeg) {
-    std::wstring video = widen(clip.path), cache = joinPath(sh.thumbs, widen(clip.id) + L".jpg");
-    std::lock_guard<std::mutex> lk(sh.thumbMu);
-    int64_t vt = fileTime(video);
-    if (fileExists(cache) && fileTime(cache) >= vt && readFile(cache, jpeg, 4u << 20) && !jpeg.empty()) return true;
+}  // namespace
+
+bool videoThumbnail(const std::wstring& video, const std::string& clipId, std::string& jpeg, bool cachedOnly) {
+    std::wstring dir = joinPath(dataDir(), L"thumbs"), cache = joinPath(dir, widen(clipId) + L".jpg");
+    auto cached = [&] { return fileExists(cache) && fileTime(cache) >= fileTime(video) && readFile(cache, jpeg, 4u << 20) && !jpeg.empty(); };
+    if (cachedOnly) return cached();   // die Datei entsteht atomar: Lesen geht ohne Sperre
+    // Immer nur ein Vorschaubild gleichzeitig (Handy-App und Abgleich mit dem Server). Hängt Media Foundation an einem
+    // Video fest, warten die anderen nicht ewig.
+    static std::timed_mutex mu;
+    std::unique_lock<std::timed_mutex> lk(mu, std::chrono::seconds(30));
+    if (!lk.owns_lock()) return false;
+    if (cached()) return true;
     if (!fileExists(video)) return false;
     HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     bool ok = false;
@@ -254,13 +259,11 @@ bool videoThumbnail(Shared& sh, const fdapi::ClipInfo& clip, std::string& jpeg) 
     }
     if (SUCCEEDED(co)) CoUninitialize();
     if (ok) {
-        createDirs(sh.thumbs);
+        createDirs(dir);
         writeFileAtomic(cache, jpeg);
     } else logLine(L"Handy-App: kein Vorschaubild für %ls", video.c_str());
     return ok;
 }
-
-}  // namespace
 
 // ---- MobileHost ---------------------------------------------------------------------------------------------------
 struct MobileHost::Impl {
@@ -276,7 +279,6 @@ struct MobileHost::Impl {
 
 MobileHost::MobileHost(App& app) : d_(std::make_unique<Impl>(app)) {
     std::shared_ptr<Shared> sh = d_->sh;
-    sh->thumbs = joinPath(dataDir(), L"thumbs");
     Shared* raw = sh.get();   // die Lambdas gehören zu sh selbst – ein shared_ptr darin wäre ein Kreis
     fdapi::Host& host = sh->host;
     host.version = kVersionA;
@@ -304,7 +306,7 @@ MobileHost::MobileHost(App& app) : d_(std::make_unique<Impl>(app)) {
     };
     host.asset = loadAsset;
     host.openFile = openFile;
-    host.thumbnail = [raw](const fdapi::ClipInfo& clip, std::string& jpeg) { return videoThumbnail(*raw, clip, jpeg); };
+    host.thumbnail = [](const fdapi::ClipInfo& clip, std::string& jpeg) { return videoThumbnail(widen(clip.path), clip.id, jpeg); };
     host.mediaBlocked = [raw]() -> std::string {
         ULONGLONG now = GetTickCount64();
         if (now - raw->cs2At.load() > 5000) {   // höchstens alle 5 s nachsehen
@@ -330,7 +332,7 @@ void MobileHost::apply() {
     for (const auto& md : s.devices) devs.push_back({md.token, md.name, md.created, md.lastSeen});
     d.sh->auth.setDevices(devs);
     d.knownDevices = devs.size();
-    if (!s.enabled || d.app.renderMode || !d.app.hwnd) {
+    if (!s.enabled || s.server || d.app.renderMode || !d.app.hwnd) {   // im Modus „Eigener Server“ lauscht FragDesk nicht
         stop();
         return;
     }

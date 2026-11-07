@@ -23,7 +23,10 @@ constexpr UINT WM_APP_FOLDER = WM_APP + 5;     // ein überwachter Ordner hat si
 constexpr UINT WM_APP_REPLAY = WM_APP + 6;     // 2D-Daten geladen oder Fehler (lParam: ReplayEvent*)
 constexpr UINT WM_APP_HEAT = WM_APP + 7;       // Heatmap vieler Matches geladen (lParam: HeatEvent*)
 constexpr UINT WM_APP_MOBILE = WM_APP + 8;     // Handy-App: Anfrage im UI-Thread beantworten bzw. Geräteliste geändert
+constexpr UINT WM_APP_SYNC = WM_APP + 9;       // eigener Server: Stand des Abgleichs, Ergebnis einer Aktion (lParam: SyncEvent*)
 constexpr UINT_PTR kMobileTimer = 10;          // Countdown des Kopplungscodes
+constexpr UINT_PTR kSyncTimer = 11;            // eigener Server: alle 15 Minuten abgleichen
+constexpr UINT_PTR kSyncViewTimer = 12;        // eigener Server: „zuletzt vor …“ in den Einstellungen auffrischen
 
 std::wstring widen(const std::string& utf8);
 std::string narrow(const std::wstring& w);
@@ -63,6 +66,9 @@ void openInShell(const std::wstring& target);          // Datei, Ordner oder Adr
 void showInExplorer(const std::wstring& file);         // Ordner öffnen und Datei markieren
 bool pickFolder(HWND owner, const std::wstring& title, std::wstring& folder);
 bool pickFiles(HWND owner, std::vector<std::wstring>& files);
+
+std::wstring clipboardText(HWND owner);                        // Text aus der Zwischenablage, ohne Leerraum am Rand
+bool setClipboardText(HWND owner, const std::wstring& text);   // Text in die Zwischenablage
 
 void logLine(const wchar_t* fmt, ...);
 

@@ -1,6 +1,7 @@
 // FragDesk – Einstellungen (siehe settings.h)
 #include "settings.h"
 
+#include <cctype>
 #include <cstdio>
 
 #include "../core/json.h"
@@ -26,6 +27,13 @@ std::string jsonQuote(const std::string& s) {
         }
     }
     return o + "\"";
+}
+
+bool validToken(const std::string& token) {
+    if (token.size() < 16 || token.size() > 256) return false;
+    for (unsigned char c : token)
+        if (!(std::isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~')) return false;
+    return true;
 }
 
 static std::wstring settingsPath() { return joinPath(dataDir(), L"settings.json"); }
@@ -65,6 +73,22 @@ bool Settings::load() {
         int port = int(mo.getNumber("port", 7420));
         mobile.port = port >= 1024 && port <= 65535 ? port : 7420;
         mobile.address = mo.getString("address");
+        mobile.server = mo.getString("mode") == "server";
+        const json::Value& sv = mo["server"];
+        if (sv.isObject()) {
+            ServerSettings& s = mobile.srv;
+            s.url = sv.getString("url");
+            s.token = sv.getString("token");
+            if (!validToken(s.token)) s.token.clear();
+            s.user = sv.getString("user");
+            s.userId = sv.getString("userId");
+            s.admin = sv.getBool("admin", false);
+            s.videos = sv.getBool("videos", true);
+            s.profile = sv.getString("profile");
+            s.lastSync = int64_t(sv.getNumber("lastSync"));
+            s.used = int64_t(sv.getNumber("used", -1));
+            s.limit = int64_t(sv.getNumber("limit", 0));
+        }
         mobile.devices.clear();
         for (const auto& d : mo["devices"].arr) {
             MobileDevice md;
@@ -97,8 +121,16 @@ bool Settings::save() const {
                   record.height, record.fps, record.quality, record.onlyKillfeed ? "true" : "false", record.voices ? "true" : "false",
                   record.sound ? "true" : "false");
     o += b;
-    std::snprintf(b, sizeof b, "  \"mobile\": {\"enabled\": %s, \"port\": %d, \"address\": ", mobile.enabled ? "true" : "false", mobile.port);
-    o += b + jsonQuote(mobile.address) + ", \"devices\": [";
+    std::snprintf(b, sizeof b, "  \"mobile\": {\"enabled\": %s, \"mode\": \"%s\", \"port\": %d, \"address\": ", mobile.enabled ? "true" : "false",
+                  mobile.server ? "server" : "pc", mobile.port);
+    o += b + jsonQuote(mobile.address) + ",\n";
+    const ServerSettings& sv = mobile.srv;
+    o += "    \"server\": {\"url\": " + jsonQuote(sv.url) + ", \"token\": " + jsonQuote(sv.token) + ", \"user\": " + jsonQuote(sv.user) +
+         ", \"userId\": " + jsonQuote(sv.userId) + ", \"admin\": " + (sv.admin ? "true" : "false") + ", \"videos\": " + (sv.videos ? "true" : "false") +
+         ", \"profile\": " + jsonQuote(sv.profile);
+    std::snprintf(b, sizeof b, ", \"lastSync\": %lld, \"used\": %lld, \"limit\": %lld},\n    \"devices\": [", static_cast<long long>(sv.lastSync),
+                  static_cast<long long>(sv.used), static_cast<long long>(sv.limit));
+    o += b;
     for (size_t i = 0; i < mobile.devices.size(); ++i) {
         const MobileDevice& d = mobile.devices[i];
         std::snprintf(b, sizeof b, ", \"created\": %lld, \"lastSeen\": %lld}", static_cast<long long>(d.created), static_cast<long long>(d.lastSeen));
