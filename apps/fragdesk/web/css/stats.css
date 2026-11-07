@@ -1,0 +1,75 @@
+/* FragDesk Handy-App – Statistiken: Kennzahlen-Gruppen, sortierbare Tabellen, Verlauf, Trefferbild. Farben aus app.css. */
+
+/* ---- Kennzahlen einer Gruppe: Kennzahl | Gesamt | als T | als CT (wie statTable) -------------------------------- */
+.st-group { padding-bottom: 6px; }
+.st-group .card-head { margin-bottom: 4px; }
+.st-stats { width: 100%; border-collapse: collapse; font-size: 14px; }
+.st-stats th {
+  font-size: 10.5px; font-weight: 650; color: var(--text3); text-transform: uppercase; letter-spacing: .03em; text-align: right;
+  padding: 4px 0 7px 8px; white-space: nowrap;
+}
+.st-stats th:first-child { text-align: left; padding-left: 0; width: 100%; }
+.st-stats th.t { color: var(--t); }
+.st-stats th.ct { color: var(--ct); }
+.st-stats td { padding: 9px 0 9px 8px; text-align: right; white-space: nowrap; border-top: 1px solid var(--border); }
+.st-stats td:first-child {
+  text-align: left; white-space: normal; padding-left: 0; overflow-wrap: anywhere; font-variant-numeric: normal;
+  /* Trennung nur für lange Wörter (Scharfschützengewehren), nicht für „Geweh-ren“ */
+  -webkit-hyphens: auto; hyphens: auto; hyphenate-limit-chars: 12 6 6; -webkit-hyphenate-limit-before: 6; -webkit-hyphenate-limit-after: 6;
+}
+.st-stats td.v { font-weight: 650; }
+.st-stats td.sd { color: var(--text2); font-size: 13.5px; }
+.st-stats td.sd.none { color: var(--text3); }
+.st-stats td button { border: 0; background: none; padding: 0 18px 0 0; margin: 0; color: inherit; font: inherit; text-align: left; }
+/* Das Symbol hängt in den Innenabstand rechts und zählt beim Umbrechen nicht mit: es rutscht nie allein in die
+   nächste Zeile und trennt kein Wort */
+.st-stats td button svg { width: 13px; height: 13px; color: var(--text3); vertical-align: -2px; margin: 0 -18px 0 5px; }
+.st-stats tr.tap { cursor: pointer; }
+.st-stats tr.tap:active td { background: var(--hover); }
+@media (max-width: 359px) {   /* sehr schmale Handys: etwas kleiner, damit die Kennzahl Platz hat */
+  .st-stats { font-size: 13px; }
+  .st-stats td.sd { font-size: 12.5px; }
+  .st-stats th, .st-stats td { padding-left: 6px; }
+}
+
+/* ---- Tabellen (Waffen, Maps): .tbl aus app.css, Spaltenköpfe zum Sortieren ---------------------------------------- */
+.st-tcard { padding: 0 16px; overflow: hidden; }
+.st-tcard .tbl th { padding: 0; }
+.st-tcard .tbl th:first-child { padding-left: 8px; }
+.st-tcard .tbl th:last-child { padding-right: 8px; }
+.st-sort {
+  display: flex; align-items: center; justify-content: flex-end; gap: 3px; width: 100%; border: 0; background: none; margin: 0;
+  padding: 12px 8px 8px; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; white-space: nowrap;
+}
+.st-tcard th:first-child .st-sort { justify-content: flex-start; }
+.st-sort.on { color: var(--text); }
+.st-sort svg { width: 11px; height: 11px; flex: none; }
+.st-sort svg.up { transform: rotate(180deg); }
+.st-tcard td { padding-top: 11px; padding-bottom: 11px; }
+.st-tcard td .dot { margin-right: 7px; vertical-align: 0; }
+.st-tcard tr.tap { cursor: pointer; }
+.st-tcard tr.tap:active td { background: var(--hover); }
+.st-tcard tr.on td { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--card); }
+.st-tcard tr.on td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.st-note { color: var(--text3); font-size: 12.5px; margin: -4px 4px 14px; }
+.st-none { color: var(--text3); font-size: 13.5px; padding: 6px 0 8px; }
+.st-tcard > .st-none { padding: 14px 0; }
+
+/* ---- Balken ------------------------------------------------------------------------------------------------------- */
+.st-bad .fill { background: var(--danger); }
+
+/* ---- Verlauf ------------------------------------------------------------------------------------------------------ */
+.st-chart .chart { height: auto; }   /* so hoch wie gezeichnet (lineChart: height) */
+.st-chartempty { color: var(--text3); font-size: 13px; text-align: center; padding: 30px 12px 34px; }
+.st-avg { fill: none; stroke: var(--text); stroke-opacity: .55; stroke-width: 1.6; stroke-dasharray: 3 3; pointer-events: none; }
+
+/* ---- Treffer nach Körperzonen ------------------------------------------------------------------------------------- */
+.st-figure { display: block; width: 100%; max-width: 330px; height: auto; margin: 0 auto 4px; }
+.st-figure .base { fill: var(--track); }
+.st-figure .heat { fill: var(--accent); }
+.st-figure .lead { stroke: var(--text3); stroke-opacity: .5; stroke-width: 1; }
+.st-figure .name { fill: var(--text2); font-size: 12.5px; }
+.st-figure .val { fill: var(--text); font-size: 14px; font-weight: 650; }
+
+/* ---- Fußnote ------------------------------------------------------------------------------------------------------ */
+.st-foot { color: var(--text3); font-size: 12.5px; margin: 4px 4px 0; }
