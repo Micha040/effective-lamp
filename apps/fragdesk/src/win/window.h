@@ -22,5 +22,6 @@ struct Options {
 };
 
 int runApp(HINSTANCE inst, const Options& opt);
+void releaseInstanceLock();   // main.cpp: "nur eine Instanz"-Sperre freigeben
 
 }  // namespace fdw

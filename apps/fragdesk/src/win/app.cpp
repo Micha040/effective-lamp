@@ -169,6 +169,31 @@ const Clip* App::clipFor(const std::string& match, const std::string& highlight)
     return nullptr;
 }
 
+// Gültiger Datei- oder Ordnername für Windows (Workshop-Maps können "/" im Namen haben)
+static std::wstring safeName(const std::wstring& name, size_t maxLen) {
+    std::wstring clean;
+    for (wchar_t c : name) clean += (wcschr(L"<>:\"/\\|?*", c) || c < 32) ? L'_' : c == L'·' ? L'-' : c;
+    if (clean.size() > maxLen) clean.resize(maxLen);
+    while (!clean.empty() && (clean.back() == L'.' || clean.back() == L' ')) clean.pop_back();   // Windows mag kein Punkt/Leerzeichen am Ende
+    std::wstring base = lowerCase(clean.substr(0, clean.find(L'.')));
+    static const wchar_t* const reserved[] = {L"con", L"prn", L"aux", L"nul", L"com1", L"com2", L"com3", L"com4", L"com5", L"com6", L"com7",
+                                              L"com8", L"com9", L"lpt1", L"lpt2", L"lpt3", L"lpt4", L"lpt5", L"lpt6", L"lpt7", L"lpt8", L"lpt9"};
+    for (const wchar_t* r : reserved)
+        if (base == r) clean = L"_" + clean;
+    return clean.empty() ? std::wstring(L"Video") : clean;
+}
+
+// Pfad, den es noch nicht gibt (auch nicht unter den schon geplanten): "Name.mp4", "Name (2).mp4", …
+static std::wstring uniquePath(const std::wstring& path, const std::vector<std::wstring>& planned) {
+    std::wstring stem = path.substr(0, path.size() - 4), ext = path.substr(path.size() - 4);
+    for (int n = 1; n < 1000; ++n) {
+        std::wstring p = n == 1 ? path : stem + L" (" + std::to_wstring(n) + L")" + ext;
+        bool used = fileExists(p) || std::any_of(planned.begin(), planned.end(), [&](const std::wstring& q) { return samePath(p, q); });
+        if (!used) return p;
+    }
+    return path;
+}
+
 static bool makeJob(App& app, const MomentRef& ref, RecordJob& job, std::wstring& err) {
     const fd::Match* m = app.lib.find(ref.match);
     if (!m) {
@@ -210,12 +235,7 @@ static bool makeJob(App& app, const MomentRef& ref, RecordJob& job, std::wstring
     swprintf(folder, 160, L"%04u-%02u-%02u %ls %d-%d", st.wYear, st.wMonth, st.wDay, widen(fd::mapName(m->map)).c_str(), sa, sb);
     std::wstring name = L"R" + std::to_wstring(h->round) + L" " + widen(fd::highlightTitle(*h));
     if (!who.empty() && h->player != app.me) name += L" - " + who;
-    std::wstring clean;
-    for (wchar_t c : name) clean += (wcschr(L"<>:\"/\\|?*", c) || c < 32) ? L'_' : c;
-    for (wchar_t& c : clean)
-        if (c == L'·') c = L'-';
-    if (clean.size() > 90) clean.resize(90);
-    job.out = joinPath(joinPath(app.settings.effectiveVideoDir(), folder), clean + L".mp4");
+    job.out = joinPath(joinPath(app.settings.effectiveVideoDir(), safeName(folder, 120)), safeName(name, 90) + L".mp4");
     return true;
 }
 
@@ -235,9 +255,13 @@ void App::record(const std::vector<MomentRef>& moments) {
     if (moments.empty()) return;
     std::vector<RecordJob> jobs;
     std::wstring err;
+    std::vector<std::wstring> planned;
     for (const auto& m : moments) {
         RecordJob j;
-        if (makeJob(*this, m, j, err)) jobs.push_back(j);
+        if (!makeJob(*this, m, j, err)) continue;
+        j.out = uniquePath(j.out, planned);   // nie ein vorhandenes Video überschreiben
+        planned.push_back(j.out);
+        jobs.push_back(j);
     }
     if (jobs.empty()) {
         notify(err.empty() ? L"Nichts zum Aufnehmen" : err, true);

@@ -640,7 +640,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_DEMOS:
             app_.lib.onScanned(reinterpret_cast<ScanResult*>(lp));
             if (app_.settings.autoAnalyze && !app_.lib.demos.empty()) {
-                app_.lib.analyzeAll();
+                app_.lib.analyzeAll(false);   // fehlgeschlagene nicht bei jeder Ordneränderung erneut versuchen
                 SetTimer(hwnd_, kBusyTimer, 400, nullptr);
             }
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -704,6 +704,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_DESTROY:
             app_.cancelRecording();
+            releaseInstanceLock();
             PostQuitMessage(0);
             return 0;
     }

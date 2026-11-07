@@ -33,6 +33,7 @@ public:
     int width() const { return w_; }
     int height() const { return h_; }
     int fps() const { return fps_; }
+    bool hasAudio() const { return hasAudio_; }   // false, wenn der Ton-Encoder fehlte (Video ohne Ton)
 
 private:
     std::mutex mu_;
@@ -61,7 +62,7 @@ private:
     ID3D11Texture2D* staging_ = nullptr;
     RECT area_{}, outputRect_{};
     int w_ = 0, h_ = 0;
-    bool haveImage_ = false;
+    bool haveImage_ = false, sized_ = false;   // sized_: Größe steht seit dem ersten Öffnen fest
 };
 
 class ProcessAudio {

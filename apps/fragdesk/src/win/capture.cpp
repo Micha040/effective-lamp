@@ -112,11 +112,19 @@ bool Mp4Writer::open(const std::wstring& path, int width, int height, int fps, i
         return false;
     }
     mfStarted_ = true;
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        hasAudio_ = withAudio && attempt == 0;
+    // Versuche: Hardware-Encoder der Grafikkarte, dann der von Windows (z. B. wenn OBS oder ShadowPlay den
+    // Hardware-Encoder belegen) – jeweils erst mit, dann ohne Ton
+    struct Try {
+        bool hw, audio;
+    };
+    std::vector<Try> tries = {{true, withAudio}, {false, withAudio}};
+    if (withAudio) tries.insert(tries.end(), {{true, false}, {false, false}});
+    std::wstring lastErr;
+    for (const Try& t : tries) {
+        hasAudio_ = t.audio;
         IMFAttributes* attr = nullptr;
         MFCreateAttributes(&attr, 2);
-        if (attr) attr->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+        if (attr) attr->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, t.hw ? TRUE : FALSE);
         DeleteFileW(path.c_str());
         hr = MFCreateSinkWriterFromURL(path.c_str(), nullptr, attr, &writer_);
         release(attr);
@@ -129,18 +137,15 @@ bool Mp4Writer::open(const std::wstring& path, int width, int height, int fps, i
         if (SUCCEEDED(hr)) hr = writer_->BeginWriting();
         if (SUCCEEDED(hr)) {
             started_ = true;
+            if (!t.hw || t.audio != withAudio) logLine(L"MP4: %ls-Encoder%ls", t.hw ? L"Hardware" : L"Windows", t.audio ? L"" : L", ohne Ton");
             return true;
         }
         release(writer_);
         DeleteFileW(path.c_str());   // keine leere Datei zurücklassen
-        if (!e.empty()) {   // Bildteil gescheitert: ohne Ton hilft auch nicht
-            err = e;
-            return false;
-        }
-        if (!hasAudio_) break;
-        logLine(L"AAC nicht verfügbar (0x%08lX) – Video ohne Ton", static_cast<unsigned long>(hr));
+        lastErr = e.empty() ? hrText(L"Videoaufnahme kann nicht beginnen", hr) : e;
+        logLine(L"MP4-Versuch (Hardware %d, Ton %d) gescheitert: %ls", int(t.hw), int(t.audio), lastErr.c_str());
     }
-    err = hrText(L"Videoaufnahme kann nicht beginnen", hr);
+    err = lastErr;
     return false;
 }
 
@@ -272,13 +277,19 @@ bool ScreenCapture::reopen(std::wstring& err) {
     // Ausschnitt auf den Monitor begrenzen, gerade Maße für H.264
     RECT r;
     IntersectRect(&r, &area_, &outputRect_);
-    w_ = (r.right - r.left) & ~1;
-    h_ = (r.bottom - r.top) & ~1;
-    area_ = {r.left, r.top, r.left + w_, r.top + h_};
-    if (w_ < 64 || h_ < 64) {
+    int w = (r.right - r.left) & ~1, h = (r.bottom - r.top) & ~1;
+    if (w < 64 || h < 64) {
         err = L"CS2-Fenster liegt nicht sichtbar auf dem Bildschirm";
         return false;
     }
+    if (sized_ && (w != w_ || h != h_)) {   // nach einem Wechsel der Auflösung: das Video hat eine feste Größe
+        err = L"Die Bildgröße hat sich während der Aufnahme geändert (Auflösung oder Vollbild gewechselt)";
+        return false;
+    }
+    w_ = w;
+    h_ = h;
+    sized_ = true;
+    area_ = {r.left, r.top, r.left + w_, r.top + h_};
     D3D11_TEXTURE2D_DESC td = {};
     td.Width = UINT(w_);
     td.Height = UINT(h_);

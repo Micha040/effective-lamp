@@ -61,7 +61,7 @@ public:
 
     // Auswerten
     void analyze(const std::wstring& path);
-    void analyzeAll();
+    void analyzeAll(bool retryFailed = true);   // automatisch: nur neue Demos, sonst auch fehlgeschlagene noch einmal
     bool busy() const;
     int queued() const;
     void onEvent(AnalysisEvent* e);   // im UI-Thread

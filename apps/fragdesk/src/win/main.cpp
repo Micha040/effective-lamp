@@ -20,6 +20,8 @@ using namespace fdw;
 
 namespace {
 
+HANDLE g_instance = nullptr;   // "nur eine FragDesk"-Sperre
+
 Page pageFromName(const std::wstring& s) {
     if (s == L"matches") return Page::Matches;
     if (s == L"match") return Page::Match;
@@ -30,6 +32,15 @@ Page pageFromName(const std::wstring& s) {
 }
 
 }  // namespace
+
+// Beim Schließen des Fensters sofort freigeben: Das Beenden (z. B. CS2 nach einer abgebrochenen Aufnahme schließen)
+// kann noch ein paar Sekunden dauern, ein neuer Start soll trotzdem gleich ein Fenster bekommen
+void fdw::releaseInstanceLock() {
+    if (!g_instance) return;
+    ReleaseMutex(g_instance);
+    CloseHandle(g_instance);
+    g_instance = nullptr;
+}
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     int argc = 0;
@@ -61,9 +72,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     LocalFree(argv);
 
     // Nur eine Instanz: Demos an die laufende weiterreichen
-    HANDLE mutex = nullptr;
     if (opt.renderPath.empty()) {
-        mutex = CreateMutexW(nullptr, TRUE, L"Local\\FragDesk");
+        g_instance = CreateMutexW(nullptr, TRUE, L"Local\\FragDesk");
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
             HWND other = FindWindowW(L"FragDeskWindow", nullptr);
             if (other) {
@@ -86,6 +96,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     int rc = runApp(inst, opt);
     Gdiplus::GdiplusShutdown(token);
     CoUninitialize();
-    if (mutex) CloseHandle(mutex);
+    releaseInstanceLock();
     return rc;
 }

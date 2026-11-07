@@ -83,10 +83,15 @@ Einstellbar sind Ordner, Auflösung (720p / 1080p / 1440p), 30 oder 60 fps, Qual
 aus), Spielton und Sprachchat der Demo.
 
 Für Aufnahmen startet CS2 mit **eigenem Einstellungsordner** (`%LOCALAPPDATA%\FragDesk\cs2`): Fenstergröße,
-ausgeblendetes HUD und Co. landen nie in deinen echten CS2-Einstellungen. Passt die gewählte Auflösung nicht als
-Fenster auf den Monitor, nimmt FragDesk ein randloses Fenster in Monitorgröße.
+ausgeblendetes HUD und Co. landen nie in deinen echten CS2-Einstellungen. Zur Sicherheit merkt sich FragDesk vorher
+deine CS2-Einstellungsdateien und stellt sie danach wieder her, falls sich doch etwas geändert hat. Passt die
+gewählte Auflösung nicht als Fenster auf den Monitor, nimmt FragDesk ein randloses Fenster in Monitorgröße.
+Wird CS2 während der Aufnahme geschlossen, minimiert oder verschoben, bricht FragDesk ab, statt den Desktop
+aufzunehmen.
 
 **In CS2 ansehen** macht dasselbe ohne Aufnahme und mit deinen normalen Einstellungen; CS2 bleibt danach offen.
+Bevor du damit online spielst, starte CS2 einmal neu – dieses CS2 läuft noch mit der Konsolen-Schnittstelle, über
+die FragDesk es gesteuert hat.
 
 > **Hinweis zur ersten Version:** Das Ansehen und Aufnehmen steuert ein echtes CS2 und konnte bisher nur mit einer
 > nachgebauten CS2-Attrappe geprüft werden. Läuft etwas nicht rund, steht im Protokoll

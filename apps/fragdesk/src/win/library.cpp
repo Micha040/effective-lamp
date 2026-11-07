@@ -302,9 +302,9 @@ void Library::analyze(const std::wstring& path) {
     cv_.notify_one();
 }
 
-void Library::analyzeAll() {
+void Library::analyzeAll(bool retryFailed) {
     for (const auto& d : demos)
-        if (d.state == DemoFile::State::New || d.state == DemoFile::State::Failed) analyze(d.path);
+        if (d.state == DemoFile::State::New || (retryFailed && d.state == DemoFile::State::Failed)) analyze(d.path);
 }
 
 bool Library::busy() const {
@@ -487,9 +487,13 @@ void Library::startWatching() {
             DWORD r = WaitForMultipleObjects(DWORD(handles.size()), handles.data(), FALSE, INFINITE);
             if (r == WAIT_OBJECT_0 || r == WAIT_FAILED) break;
             size_t i = r - WAIT_OBJECT_0;
-            if (i < handles.size()) {
-                PostMessageW(hwnd, WM_APP_FOLDER, 0, 0);
-                FindNextChangeNotification(handles[i]);
+            if (i == 0 || i >= handles.size()) continue;
+            PostMessageW(hwnd, WM_APP_FOLDER, 0, 0);
+            // Downloads melden viele Änderungen hintereinander: kurz sammeln, die Oberfläche wartet ohnehin 1,5 s
+            if (WaitForSingleObject(stop, 250) == WAIT_OBJECT_0) break;
+            if (!FindNextChangeNotification(handles[i])) {   // Ordner gelöscht, Laufwerk weg: nicht weiter überwachen
+                FindCloseChangeNotification(handles[i]);
+                handles.erase(handles.begin() + std::ptrdiff_t(i));
             }
         }
         for (size_t i = 1; i < handles.size(); ++i) FindCloseChangeNotification(handles[i]);
