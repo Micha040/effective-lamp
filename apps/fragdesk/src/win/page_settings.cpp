@@ -8,6 +8,7 @@
 #include "app.h"
 #include "common.h"
 #include "mobile_host.h"
+#include "server_sync.h"
 
 namespace fdw {
 
@@ -32,11 +33,12 @@ struct Section {
         y += 10;
     }
     // Zeile mit Beschriftung links, Inhalt rechts; liefert das Rechteck für den Inhalt
-    RectF row(const std::wstring& label, const std::wstring& desc, float h = 56, float controlW = 300) {
+    RectF row(const std::wstring& label, const std::wstring& desc, float h = 56, float controlW = 300, Color descColor = Color(0, 0, 0, 0)) {
         c.line(x + 20, y, x + w - 20, y, alpha(c.th.border, 150), 1);
         float lw = w - 40 - controlW - 16;
         c.text(label, F::BodySemi, c.th.text, RectF(x + 20, y + (desc.empty() ? 0 : 9), lw, desc.empty() ? h : 22));
-        if (!desc.empty()) c.text(desc, F::Small, c.th.text3, RectF(x + 20, y + 30, lw, h - 32), Align::Left, false, true);
+        if (!desc.empty())
+            c.text(desc, F::Small, descColor.GetA() ? descColor : c.th.text3, RectF(x + 20, y + 30, lw, h - 32), Align::Left, false, true);
         RectF r(x + w - 20 - controlW, y, controlW, h);
         y += h;
         return r;
@@ -65,12 +67,228 @@ void drawQr(Canvas& c, const RectF& r, const std::string& text) {
         }
 }
 
+// Kopplung: QR-Code, Code, Restzeit und die Schritte (Höhe kPanelH)
+const float kPanelH = 236;
+
+void pairingPanel(Canvas& c, float x, float y, float cw, const std::string& url, const std::string& code, int64_t until,
+                  const std::wstring& noCamera) {
+    float py = y + 4, qs = 212;
+    if (!url.empty()) drawQr(c, RectF(x + 20, py, qs, qs), url);
+    float tx = x + 20 + qs + 28, tw = cw - 40 - qs - 28;
+    c.text(L"Code", F::Small, c.th.text2, RectF(tx, py, tw, 18));
+    c.text(widen(code.substr(0, 3) + " " + code.substr(3)), F::NumHuge, c.th.accentText, RectF(tx, py + 16, tw, 54));
+    int64_t left = std::max<int64_t>(0, until - int64_t(time(nullptr)));
+    wchar_t rest[64];
+    swprintf(rest, 64, L"Noch %lld:%02lld Minuten gültig", static_cast<long long>(left / 60), static_cast<long long>(left % 60));
+    c.text(rest, F::Small, c.th.text3, RectF(tx, py + 72, tw, 18));
+    const std::wstring steps =
+        L"1. QR-Code mit der iPhone-Kamera scannen – Safari öffnet FragDesk und verbindet sich.\n"
+        L"2. In Safari auf „Teilen“ › „Zum Home-Bildschirm“ tippen.\n"
+        L"3. FragDesk über das neue Symbol öffnen. Fragt es nach dem Code, gib ihn dort ein.\n" +
+        noCamera;
+    c.text(steps, F::Small, c.th.text2, RectF(tx, py + 100, tw, kPanelH - 104), Align::Left, false, true);
+}
+
+// „vor 2 min“ – wie lange ein Zeitpunkt her ist
+std::wstring agoText(int64_t t) {
+    if (t <= 0) return L"noch nie";
+    int64_t s = std::max<int64_t>(0, int64_t(time(nullptr)) - t);
+    if (s < 60) return L"gerade eben";
+    if (s < 3600) return L"vor " + std::to_wstring(s / 60) + L" min";
+    if (s < 86400) return L"vor " + std::to_wstring(s / 3600) + L" h";
+    return L"am " + dateText(t);
+}
+
+// Stand des Abgleichs: „41 von 41 Matches · 4 von 4 Videos · zuletzt vor 2 min“, Pause oder Fehler (col: Farbe dafür)
+std::wstring syncText(Canvas& c, const SyncStatus& st, const ServerSettings& srv, Color& col) {
+    col = c.th.text3;
+    std::wstring counts;
+    if (st.counted) {
+        counts = std::to_wstring(st.matchesDone) + L" von " + std::to_wstring(st.matchesTotal) + L" Matches · ";
+        counts += srv.videos ? std::to_wstring(st.clipsDone) + L" von " + std::to_wstring(st.clipsTotal) + L" Videos" : L"Videos hochladen aus";
+    }
+    std::wstring done = counts.empty() ? std::wstring() : L" Stand: " + counts + L".";
+    switch (st.state) {
+        case SyncStatus::AuthFailed:
+            col = c.th.danger;
+            return L"Der Server lässt dieses FragDesk nicht mehr rein (abgemeldet oder Konto gelöscht). Lass dir eine neue Einladung "
+                   L"schicken, kopiere sie und klicke „Neu verbinden“.";
+        case SyncStatus::PausedCs2: col = c.th.warning; return L"Pausiert – CS2 läuft. Danach geht es von selbst weiter." + done;
+        case SyncStatus::PausedRecording: col = c.th.warning; return L"Pausiert – FragDesk nimmt gerade auf." + done;
+        case SyncStatus::Full: col = c.th.danger; return st.error + L" Lösche Videos oder bitte den Admin um mehr Platz.";
+        case SyncStatus::Offline: {
+            col = c.th.danger;
+            int64_t s = std::max<int64_t>(0, st.retryAt - int64_t(time(nullptr)));
+            std::wstring when = s == 0 ? std::wstring(L"gleich") : s < 60 ? L"in " + std::to_wstring(s) + L" s" : L"in " + std::to_wstring((s + 59) / 60) + L" min";
+            return st.error + L" – neuer Versuch " + when + L".";
+        }
+        default: break;
+    }
+    if (st.state == SyncStatus::Running) {
+        col = c.th.text2;
+        return (counts.empty() ? std::wstring() : counts + L" · ") + (st.current.empty() ? std::wstring(L"lädt hoch …") : st.current);
+    }
+    if (!st.counted) return srv.lastSync ? L"Zuletzt abgeglichen " + agoText(srv.lastSync) : std::wstring(L"Wird gleich abgeglichen …");
+    return counts + L" · zuletzt " + agoText(srv.lastSync);
+}
+
+// Höhe einer Zeile, deren Beschreibung umbricht
+float rowHeight(Canvas& c, float cw, const std::wstring& desc, float controlW, float minH) {
+    return std::max(minH, 30 + c.textHeight(desc, F::Small, cw - 40 - controlW - 16) + 14);
+}
+
+// Modus „Eigener Server“: Zeilen unter „Verbindung“. sec == nullptr: nur die Höhe bestimmen.
+float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
+    ServerSync& sy = *app.sync;
+    ServerSettings& srv = app.settings.mobile.srv;
+    float h = 0;
+    if (srv.token.empty()) {   // noch nicht verbunden
+        const std::wstring join =
+            L"Du brauchst eine Einladung vom Admin deines FragDesk-Servers: Link kopieren (https://…/#invite=…), dann hier einfügen.";
+        float rh = rowHeight(c, cw, join, 220, 72);
+        if (sec) {
+            RectF r = sec->row(L"Mit Server verbinden", join, rh, 220);
+            bool busy = sy.connecting();
+            c.button(RectF(r.X + r.Width - 210, r.Y + (rh - 36) / 2, 210, 36), busy ? L"Verbindet …" : L"Einladung einfügen", "s-join",
+                     [&app] { app.sync->connectFromClipboard(); }, Btn::Primary, Icon::Plus, !busy, L"Kopiere vorher den Einladungslink");
+        }
+        h += rh;
+        const std::wstring how =
+            L"Ein kleiner Linux-Server reicht, z. B. ein VPS für ein paar Euro im Monat. Er hält Stats und Clips für dich und deine Freunde "
+            L"bereit – die Anleitung steht im README.";
+        float rh2 = rowHeight(c, cw, how, 170, 72);
+        if (sec) {
+            RectF r = sec->row(L"Eigenen Server einrichten", how, rh2, 170);
+            c.button(RectF(r.X + r.Width - 160, r.Y + (rh2 - 36) / 2, 160, 36), L"Anleitung", "s-howto",
+                     [] { openInShell(std::wstring(kRepoUrl) + L"/tree/main/apps/fragdesk#handy-app"); }, Btn::Secondary, Icon::External);
+        }
+        return h + rh2;
+    }
+
+    const SyncStatus& st = sy.status();
+    // Server und Konto
+    std::wstring who = L"Konto: " + (srv.user.empty() ? std::wstring(L"–") : widen(srv.user)) + (srv.admin ? L" · Admin" : L"");
+    if (sec) {
+        RectF r = sec->row(sy.serverLabel(), who, 64, 160);
+        c.button(RectF(r.X + r.Width - 140, r.Y + 14, 140, 36), L"Trennen", "s-leave", [&app] { app.sync->disconnect(); }, Btn::Ghost, Icon::Close,
+                 true, L"Abmelden und Adresse samt Schlüssel vergessen");
+    }
+    h += 64;
+    // Speicher (bis der Server antwortet: Stand vom letzten Abgleich)
+    int64_t usedB = st.used >= 0 ? st.used : srv.used, limitB = st.used >= 0 ? st.limit : srv.limit;
+    std::wstring used;
+    double share = 0;
+    if (usedB < 0) used = L"Noch unbekannt – kommt mit dem ersten Abgleich";
+    else if (limitB > 0) {
+        share = double(usedB) / double(limitB);
+        used = widen(fd::fmtBytes(double(usedB))) + L" von " + widen(fd::fmtBytes(double(limitB))) + L" belegt (" +
+               std::to_wstring(int(std::min(100.0, share * 100) + 0.5)) + L" %)";
+    } else used = widen(fd::fmtBytes(double(usedB))) + L" belegt · ohne Limit";
+    if (sec) {
+        RectF r = sec->row(L"Speicher auf dem Server", used, 64, 240);
+        if (usedB >= 0 && limitB > 0)
+            c.progress(RectF(r.X + r.Width - 220, r.Y + 28, 220, 8), share, share > 0.9 ? c.th.danger : share > 0.75 ? c.th.warning : c.th.accent);
+    }
+    h += 64;
+    // Stand
+    Color col;
+    std::wstring state = syncText(c, st, srv, col);
+    float rh = rowHeight(c, cw, state, 200, 72);
+    if (sec) {
+        RectF r = sec->row(L"Abgleich", state, rh, 200, col);
+        RectF b(r.X + r.Width - 190, r.Y + (rh - 36) / 2, 190, 36);
+        if (st.state == SyncStatus::AuthFailed)
+            c.button(b, sy.connecting() ? L"Verbindet …" : L"Neu verbinden", "s-rejoin", [&app] { app.sync->connectFromClipboard(); }, Btn::Primary,
+                     Icon::Plus, !sy.connecting(), L"Kopiere vorher den neuen Einladungslink");
+        else
+            c.button(b, L"Jetzt abgleichen", "s-now", [&app] { app.sync->request(0, true); }, Btn::Secondary, Icon::Refresh,
+                     st.state != SyncStatus::Running, L"Nie während CS2 läuft – dann geht es danach weiter");
+        if (app.hwnd && !app.renderMode) SetTimer(app.hwnd, kSyncViewTimer, 30000, nullptr);   // „vor … min“ frisch halten
+    }
+    h += rh;
+    // Videos
+    if (sec) {
+        RectF r = sec->row(L"Videos hochladen", L"Highlight-Videos in Stücken à 4 MB – ein unterbrochener Upload geht an der Stelle weiter.", 64, 60);
+        c.toggle(RectF(r.X + r.Width - 46, r.Y + 21, 44, 24), srv.videos, "t-svideos", [&app] {
+            app.settings.mobile.srv.videos = !app.settings.mobile.srv.videos;
+            app.saveSettings();
+            app.sync->request(0);
+            app.invalidate();
+        });
+    }
+    h += 64;
+    // Handy koppeln
+    std::string code = sy.pairingCode();
+    bool rejected = st.state == SyncStatus::AuthFailed;   // erst neu verbinden
+    if (sec) {
+        RectF r = sec->row(L"Handy verbinden",
+                           code.empty() ? L"Zeigt einen QR-Code: mit der iPhone-Kamera scannen, fertig. Das Handy liest dann vom Server." : L"", 64, 200);
+        if (code.empty())
+            c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), sy.pairingBusy() ? L"Code wird geholt …" : L"Handy verbinden", "s-pair",
+                     [&app] { app.sync->startPairing(); }, Btn::Primary, Icon::Plus, !sy.pairingBusy() && !rejected,
+                     rejected ? L"Erst neu verbinden" : L"");
+        else
+            c.button(RectF(r.X + r.Width - 140, r.Y + 14, 140, 36), L"Fertig", "s-pairend", [&app] {
+                app.sync->stopPairing();
+                app.invalidate();
+            }, Btn::Secondary);
+        if (!code.empty()) {
+            pairingPanel(c, x, sec->y, cw, sy.pairingUrl(), code, sy.pairingUntil(),
+                         L"Ohne Kamera: " + widen(sy.pairingBase()) + L" in Safari öffnen und den Code eingeben.");
+            sec->y += kPanelH;
+        }
+    }
+    h += 64 + (code.empty() ? 0 : kPanelH);
+    // Freunde einladen (nur Admins)
+    if (srv.admin) {
+        if (sec) {
+            RectF r = sec->row(L"Freund einladen", L"Erstellt einen Einladungslink (7 Tage gültig, nur einmal nutzbar) und kopiert ihn – per Messenger schicken.",
+                               64, 200);
+            c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), sy.inviteBusy() ? L"Wird erstellt …" : L"Freund einladen", "s-invite",
+                     [&app] { app.sync->invite(); }, Btn::Secondary, Icon::Users, !sy.inviteBusy() && !rejected, rejected ? L"Erst neu verbinden" : L"");
+        }
+        h += 64;
+    }
+    return h;
+}
+
 float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     MobileHost& mh = *app.mobile;
     MobileSettings& ms = app.settings.mobile;
+    const bool server = ms.server;
     const std::wstring sub =
-        L"Deine Stats und Clips auf dem Handy: FragDesk liefert dafür eine kleine Web-App aus, die du auf den Home-Bildschirm legst – "
-        L"nur an Handys, die du hier koppelst. Solange es aus ist, nimmt FragDesk keine Verbindungen an.";
+        server ? L"Deine Stats und Clips auf dem Handy – über deinen eigenen Server: FragDesk lädt neue Matches und Videos im Hintergrund hoch "
+                 L"(nie, solange CS2 läuft), das Handy liest sie von dort, auch wenn der PC aus ist. FragDesk selbst nimmt dann keine Verbindungen an."
+               : L"Deine Stats und Clips auf dem Handy: FragDesk liefert dafür eine kleine Web-App aus, die du auf den Home-Bildschirm legst – "
+                 L"nur an Handys, die du hier koppelst. Solange es aus ist, nimmt FragDesk keine Verbindungen an.";
+    const std::wstring modeDesc = server ? L"Das Handy liest vom Server – auch unterwegs und wenn der PC aus ist."
+                                         : L"Das Handy holt die Daten bei FragDesk – der PC muss dafür an sein.";
+    const std::vector<std::wstring> modes = {L"Direkt vom PC", L"Eigener Server"};
+    auto modeRow = [&](Section& sec) {
+        RectF r = sec.row(L"Verbindung", modeDesc, 64, 300);
+        float mw = c.chipRowWidth(modes);
+        c.chipRow(r.X + r.Width - mw, r.Y + 17, modes, server ? 1 : 0, "m-mode", [&app](int i) {
+            MobileSettings& m = app.settings.mobile;
+            if (m.server == (i == 1)) return;
+            m.server = i == 1;
+            app.mobile->stopPairing();
+            app.sync->stopPairing();
+            app.saveSettings();
+            app.mobile->apply();   // im Modus „Eigener Server“ lauscht FragDesk nicht
+            app.sync->apply();
+            app.invalidate();
+        });
+    };
+    if (server) {
+        float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
+        float h = 16 + 26 + subH + 10 + 64 + serverRows(c, app, x, cw, nullptr) + 14;
+        cardBehind(c, x, y, cw, h);
+        Section sec(c, x, y, cw, L"Handy-App", sub);
+        modeRow(sec);
+        serverRows(c, app, x, cw, &sec);
+        return sec.finish();
+    }
+
     std::wstring status;
     if (!ms.enabled) status = L"Aus";
     else if (!mh.error().empty()) status = L"Startet nicht: " + mh.error();
@@ -86,13 +304,13 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     for (const auto& a : addrs)
         if (a.label == L"Tailscale") ts = true;
 
-    const float panelH = 236;
     float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
-    float h = 16 + 26 + subH + 10 + 72;
-    if (on) h += 64 + 72 + 64 + (code.empty() ? 0 : panelH) + (devs.empty() ? 0 : 40 + devs.size() * 56.0f);
+    float h = 16 + 26 + subH + 10 + 64 + 72;
+    if (on) h += 64 + 72 + 64 + (code.empty() ? 0 : kPanelH) + (devs.empty() ? 0 : 40 + devs.size() * 56.0f);
     h += 14;
     cardBehind(c, x, y, cw, h);
     Section sec(c, x, y, cw, L"Handy-App", sub);
+    modeRow(sec);
 
     RectF r = sec.row(L"Handy-App erlauben", status, 72, 60);
     c.toggle(RectF(r.X + r.Width - 46, r.Y + 24, 44, 24), ms.enabled, "t-mobile", [&app] {
@@ -111,17 +329,7 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     // Eigene Adresse (z. B. die HTTPS-Adresse von „tailscale serve“) aus der Zwischenablage übernehmen
     if (ms.address.empty())
         c.button(RectF(r.X + r.Width - 200, r.Y + 14, 200, 36), L"Eigene einfügen", "m-addr", [&app] {
-            std::wstring text;
-            if (OpenClipboard(app.hwnd)) {
-                if (HANDLE hd = GetClipboardData(CF_UNICODETEXT))
-                    if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(hd))) {
-                        text = p;
-                        GlobalUnlock(hd);
-                    }
-                CloseClipboard();
-            }
-            while (!text.empty() && iswspace(text.back())) text.pop_back();
-            while (!text.empty() && iswspace(text.front())) text.erase(text.begin());
+            std::wstring text = clipboardText(app.hwnd);
             bool ok = (text.rfind(L"https://", 0) == 0 || text.rfind(L"http://", 0) == 0) && text.size() < 200 &&
                       text.find_first_of(L" \t\r\n\"<>") == std::wstring::npos;
             if (!ok) {
@@ -163,23 +371,9 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
             app.invalidate();
         }, Btn::Secondary);
     if (!code.empty()) {
-        float py = sec.y + 4, qs = 212;
         std::string url = addrs.empty() ? std::string() : narrow(addrs[0].url) + "?pair=" + code;
-        if (!url.empty()) drawQr(c, RectF(x + 20, py, qs, qs), url);
-        float tx = x + 20 + qs + 28, tw = cw - 40 - qs - 28;
-        c.text(L"Code", F::Small, c.th.text2, RectF(tx, py, tw, 18));
-        c.text(widen(code.substr(0, 3) + " " + code.substr(3)), F::NumHuge, c.th.accentText, RectF(tx, py + 16, tw, 54));
-        int64_t left = std::max<int64_t>(0, mh.pairingUntil() - int64_t(time(nullptr)));
-        wchar_t rest[64];
-        swprintf(rest, 64, L"Noch %lld:%02lld Minuten gültig", static_cast<long long>(left / 60), static_cast<long long>(left % 60));
-        c.text(rest, F::Small, c.th.text3, RectF(tx, py + 72, tw, 18));
-        const std::wstring steps =
-            L"1. QR-Code mit der iPhone-Kamera scannen – Safari öffnet FragDesk und verbindet sich.\n"
-            L"2. In Safari auf „Teilen“ › „Zum Home-Bildschirm“ tippen.\n"
-            L"3. FragDesk über das neue Symbol öffnen. Fragt es nach dem Code, gib ihn dort ein.\n"
-            L"Ohne Kamera: die Adresse oben in Safari öffnen und den Code eingeben.";
-        c.text(steps, F::Small, c.th.text2, RectF(tx, py + 100, tw, panelH - 104), Align::Left, false, true);
-        sec.y += panelH;
+        pairingPanel(c, x, sec.y, cw, url, code, mh.pairingUntil(), L"Ohne Kamera: die Adresse oben in Safari öffnen und den Code eingeben.");
+        sec.y += kPanelH;
     }
 
     // Gekoppelte Geräte
@@ -205,8 +399,11 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
 float drawSettings(Canvas& c, App& app, float w) {
     const float pad = 32;
     float x = pad, cw = std::min(w - pad * 2, 980.0f), y = 28;
-    y += pageTitle(c, x, y, cw, L"Einstellungen", L"Alles wird nur auf diesem PC gespeichert") + 14;
     Settings& s = app.settings;
+    bool toServer = s.mobile.server && !s.mobile.srv.token.empty();
+    y += pageTitle(c, x, y, cw, L"Einstellungen",
+                   toServer ? L"Gespeichert auf diesem PC – Matches und Videos zusätzlich auf deinem eigenen Server" : L"Alles wird nur auf diesem PC gespeichert") +
+         14;
 
     // ---- Spieler
     {

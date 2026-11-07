@@ -51,4 +51,8 @@ private:
 // QR-Code (Fehlerkorrektur M) als Zeilen von Modulen, true = dunkel; leer bei Fehler
 std::vector<std::vector<bool>> qrModules(const std::string& text);
 
+// Vorschaubild eines Videos (ein Bild nach 1 s, 480 px breit, JPEG). Liegt danach in %LOCALAPPDATA%\FragDesk\thumbs\<clipId>.jpg.
+// Aus jedem Thread; es entsteht immer nur eins zur Zeit. cachedOnly: nur nachsehen, ob es schon eins gibt (ohne Media Foundation).
+bool videoThumbnail(const std::wstring& video, const std::string& clipId, std::string& jpeg, bool cachedOnly = false);
+
 }  // namespace fdw

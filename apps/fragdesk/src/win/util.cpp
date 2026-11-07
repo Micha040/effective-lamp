@@ -7,7 +7,9 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
+#include <cwctype>
 #include <mutex>
 
 namespace fdw {
@@ -319,6 +321,38 @@ bool pickFiles(HWND owner, std::vector<std::wstring>& files) {
     }
     dlg->Release();
     return !files.empty();
+}
+
+std::wstring clipboardText(HWND owner) {
+    std::wstring text;
+    if (OpenClipboard(owner)) {
+        if (HANDLE hd = GetClipboardData(CF_UNICODETEXT))
+            if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(hd))) {
+                text.assign(p, wcsnlen(p, GlobalSize(hd) / sizeof(wchar_t)));
+                GlobalUnlock(hd);
+            }
+        CloseClipboard();
+    }
+    while (!text.empty() && iswspace(text.back())) text.pop_back();
+    size_t lead = 0;
+    while (lead < text.size() && iswspace(text[lead])) ++lead;
+    return text.substr(lead);
+}
+
+bool setClipboardText(HWND owner, const std::wstring& text) {
+    if (!OpenClipboard(owner)) return false;
+    bool ok = false;
+    EmptyClipboard();
+    if (HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t))) {
+        if (void* p = GlobalLock(g)) {
+            memcpy(p, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(g);
+            ok = SetClipboardData(CF_UNICODETEXT, g) != nullptr;
+        }
+        if (!ok) GlobalFree(g);   // gehört sonst der Zwischenablage
+    }
+    CloseClipboard();
+    return ok;
 }
 
 void logLine(const wchar_t* fmt, ...) {

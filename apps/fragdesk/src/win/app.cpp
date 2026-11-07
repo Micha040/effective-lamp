@@ -9,10 +9,11 @@
 #include "common.h"
 #include "mobile_host.h"
 #include "recorder.h"
+#include "server_sync.h"
 
 namespace fdw {
 
-App::App() : mobile(std::make_unique<MobileHost>(*this)) {}
+App::App() : mobile(std::make_unique<MobileHost>(*this)), sync(std::make_unique<ServerSync>(*this)) {}
 App::~App() = default;
 
 void App::invalidate() {
@@ -293,7 +294,10 @@ void App::watch(const MomentRef& ref) {
     if (!recorder) recorder = std::make_unique<Recorder>(hwnd);
     recordError.clear();
     if (!recorder->watch(steam, job, err)) notify(err, true);
-    else notify(L"CS2 startet und springt zu „" + job.title + L"“");
+    else {
+        sync->setRecording(true);   // kein Hochladen, solange CS2 für FragDesk läuft
+        notify(L"CS2 startet und springt zu „" + job.title + L"“");
+    }
 }
 
 void App::record(const std::vector<MomentRef>& moments) {
@@ -316,6 +320,7 @@ void App::record(const std::vector<MomentRef>& moments) {
     recordError.clear();
     if (!recorder->record(steam, settings.record, jobs, err)) notify(err, true);
     else {
+        sync->setRecording(true);   // Pause beim Hochladen, bis die Aufnahme fertig ist
         selected.clear();
         go(Page::Highlights);
     }
@@ -458,6 +463,7 @@ void App::chooseAccount(int x, int y) {
         settings.steamId = ids[cmd - 1];
         saveSettings();
         detectMe();
+        sync->request();   // neuer Spieler: dem Server melden
         invalidate();
     }
 }
@@ -475,6 +481,7 @@ void App::deleteMatch(const std::string& checksum) {
     }
     invalidateCareer();
     lib.scanAsync();
+    sync->request();   // auch auf dem eigenen Server löschen
     invalidate();
 }
 

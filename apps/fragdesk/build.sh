@@ -23,7 +23,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = app ]; then
   for f in src/core/*.cpp src/api/*.cpp src/third_party/*.cpp src/win/*.cpp; do OBJS="$OBJS $OUT/obj/$(basename "$f" .cpp).o"; done
   $CXX -municode -mwindows -static -static-libgcc -static-libstdc++ -s -o $OUT/FragDesk.exe $OBJS \
     -lgdiplus -ldwmapi -lshcore -lole32 -loleaut32 -luuid -lshlwapi -lshell32 -lcomctl32 -lcomdlg32 \
-    -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lwindowscodecs -liphlpapi -lbcrypt -lws2_32 -lgdi32 -luser32 -ladvapi32 -lwinmm
+    -ld3d11 -ldxgi -lmfplat -lmfreadwrite -lmfuuid -lwindowscodecs -liphlpapi -lbcrypt -lws2_32 -lwinhttp -lgdi32 -luser32 -ladvapi32 -lwinmm
   ls -la $OUT/FragDesk.exe
 fi
 
