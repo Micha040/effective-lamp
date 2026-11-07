@@ -106,6 +106,17 @@ public:
 
     bool saw(const char* text) const { return seen_.find(text) != std::string::npos; }
 
+    // "FATAL ERROR: …" in der Ausgabe (CS2 stürzt ab); liefert die Zeile
+    bool fatal(std::wstring& line) {
+        drain();
+        size_t at = seen_.find("FATAL ERROR", fatalScan_ > 16 ? fatalScan_ - 16 : 0);   // nur Neues durchsuchen (alle 0,25 s)
+        fatalScan_ = seen_.size();
+        if (at == std::string::npos) return false;
+        size_t end = seen_.find_first_of("\r\n", at);
+        line = widen(seen_.substr(at, std::min<size_t>(end == std::string::npos ? std::string::npos : end - at, 300)));
+        return true;
+    }
+
     // Letzte Zeilen der Ausgabe ins Protokoll (bei Fehlern)
     void logTail(size_t lines) {
         drain();
@@ -124,7 +135,12 @@ public:
             return;
         }
         logLine(L"Letzte Ausgabe von CS2:");
-        for (auto it = out.rbegin(); it != out.rend(); ++it) logLine(L"  CS2 | %ls", widen(it->substr(0, 400)).c_str());
+        const std::string* prev = nullptr;   // Konsole und console.log liefern oft dieselbe Zeile: nur einmal
+        for (auto it = out.rbegin(); it != out.rend(); ++it) {
+            if (prev && *prev == *it) continue;
+            logLine(L"  CS2 | %ls", widen(it->substr(0, 400)).c_str());
+            prev = &*it;
+        }
     }
 
     // console.log mitlesen (nur was ab jetzt dazukommt)
@@ -233,6 +249,7 @@ private:
     std::atomic<bool> run_{false};
     std::mutex mu_;
     std::string buf_, seen_;
+    size_t fatalScan_ = 0;   // bis hierhin ist seen_ schon nach "FATAL ERROR" durchsucht
     std::vector<Log> logs_;
 };
 
@@ -251,6 +268,48 @@ std::vector<HWND> processWindows(DWORD pid) {
         },
         reinterpret_cast<LPARAM>(&ctx));
     return ctx.list;
+}
+
+// Fehlermeldung von CS2 (etwa "FATAL ERROR: CopyNewEntity: …" bei Demos, die CS2 selbst nicht abspielen kann): ein
+// Dialogfenster (#32770) des Prozesses. Den Text liefert WM_GETTEXT mit Zeitlimit – das Spiel steht an der Stelle.
+bool errorDialog(DWORD pid, std::wstring& text) {
+    for (HWND h : processWindows(pid)) {
+        wchar_t cls[16] = {};
+        if (!GetClassNameW(h, cls, 16) || wcscmp(cls, L"#32770") != 0) continue;
+        std::wstring best;
+        EnumChildWindows(
+            h,
+            [](HWND c, LPARAM lp) -> BOOL {
+                wchar_t k[16] = {}, buf[512] = {};
+                DWORD_PTR n = 0;
+                if (GetClassNameW(c, k, 16) && _wcsicmp(k, L"Static") == 0 &&
+                    SendMessageTimeoutW(c, WM_GETTEXT, 512, reinterpret_cast<LPARAM>(buf), SMTO_ABORTIFHUNG | SMTO_BLOCK, 300, &n) && n > 0) {
+                    auto* b = reinterpret_cast<std::wstring*>(lp);
+                    if (wcslen(buf) > b->size()) *b = buf;
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&best));
+        if (best.empty()) {
+            wchar_t title[128] = {};
+            GetWindowTextW(h, title, 128);
+            best = title;
+        }
+        text = best;
+        return true;
+    }
+    return false;
+}
+
+// "FATAL ERROR: CopyNewEntity: invalid class index …" -> "CopyNewEntity" (für die kurze Meldung)
+std::wstring crashLabel(std::wstring text) {
+    for (const wchar_t* p : {L"FATAL ERROR:", L"FATAL ERROR"})
+        if (text.rfind(p, 0) == 0) text.erase(0, wcslen(p));
+    while (!text.empty() && iswspace(text.front())) text.erase(0, 1);
+    size_t colon = text.find(L':');
+    if (colon != std::wstring::npos && colon > 0) text.resize(colon);
+    if (text.size() > 40) text = text.substr(0, 39) + L"…";
+    return text.empty() ? L"Fehlermeldung" : text;
 }
 
 // Innenbereich eines Fensters in Bildschirmkoordinaten
@@ -541,8 +600,9 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
     WSAStartup(MAKEWORD(2, 2), &wsa);
     if (recordVideo) timeBeginPeriod(1);   // genaue Wartezeiten zwischen den Bildern (nur während der Aufnahme)
     const std::wstring cs2Exe = steam.cs2Exe();
-    int done = 0, total = int(jobs.size());
+    int done = 0, total = int(jobs.size()), clips = 0;
     std::wstring failure;
+    std::vector<std::wstring> crashes;   // Demos, bei denen CS2 abgestürzt ist (dann geht es mit der nächsten Demo weiter)
     bool minimized = false;
     ConfigGuard guard;
     if (recordVideo) guard.snapshot(steam.steamDir);
@@ -624,10 +684,31 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
         Console con;
         con.addLog(joinPath(steam.csgoDir(), L"console.log"));
         if (recordVideo) con.addLog(joinPath(cs2SandboxDir(), L"console.log"));
-        // Ende: Aufnahme-CS2 beenden (bei Abbruch nicht lange warten), beim Ansehen bleibt CS2 offen
+        // Absturz von CS2 erkennen: Fehlerfenster oder "FATAL ERROR" in der Ausgabe
+        std::wstring crash;
+        auto crashed = [&]() -> bool {
+            if (!crash.empty()) return true;
+            std::wstring text;
+            if (!errorDialog(pid, text) && !con.fatal(text)) return false;
+            crash = text.empty() ? L"Fehlermeldung ohne Text" : text;
+            logLine(L"CS2 meldet einen Fehler: %ls", crash.c_str());
+            con.logTail(25);
+            return true;
+        };
+        // warten und dabei auf Abstürze achten; false = CS2 abgestürzt oder abgebrochen
+        auto pause = [&](int ms) -> bool {
+            auto t0 = Clock::now();
+            for (;;) {
+                if (cancel_ || crashed()) return false;
+                double left = ms - secondsSince(t0) * 1000;
+                if (left <= 0) return true;
+                Sleep(DWORD(std::min(250.0, left)));
+            }
+        };
+        // Ende: Aufnahme-CS2 beenden (bei Abbruch nicht lange warten, nach einem Absturz gar nicht), beim Ansehen bleibt CS2 offen
         auto finish = [&](bool quit) {
             if (quit) {
-                bool sent = con.send("quit");
+                bool sent = crash.empty() && con.send("quit");
                 if (WaitForSingleObject(proc, sent ? (cancel_ ? 5000 : 20000) : 0) != WAIT_OBJECT_0) {
                     TerminateProcess(proc, 0);
                     WaitForSingleObject(proc, 5000);
@@ -677,7 +758,7 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
                 loaded = true;
                 break;
             }
-            if (WaitForSingleObject(proc, 0) == WAIT_OBJECT_0) break;
+            if (WaitForSingleObject(proc, 0) == WAIT_OBJECT_0 || crashed()) break;
             if (retried || !con.saw("UI_STATE_MAINMENU") || con.saw("UI_STATE_LOADINGSCREEN")) continue;
             if (idleMenu == Clock::time_point{}) idleMenu = Clock::now();
             else if (secondsSince(idleMenu) > 20) {
@@ -686,10 +767,18 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
                 con.send("playdemo \"" + narrow(asciiPath(playPath)) + "\"");
             }
         }
+        // Manche Demos bringen CS2 direkt nach dem Laden zum Absturz (Fehler in CS2): dann mit der nächsten Demo weitermachen
+        if (loaded) pause(3000);
         bool exited = WaitForSingleObject(proc, 0) == WAIT_OBJECT_0;
         if (cancel_) {
             finish(recordVideo);
             break;
+        }
+        if (crashed()) {
+            crashes.push_back(crash);
+            done += int(group.size());
+            finish(recordVideo);
+            continue;
         }
         if (!loaded) logLine(L"Kein UI_STATE_INGAME von CS2 (%ls)", exited ? L"CS2 beendet" : L"Zeit abgelaufen");
         if (!loaded && (exited || recordVideo)) {   // beim Ansehen trotzdem weitermachen: CS2 ist ja zu sehen
@@ -698,7 +787,6 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             finish(recordVideo);
             break;
         }
-        Sleep(3000);
         con.send("demo_pause");
 
         if (!recordVideo) {
@@ -706,11 +794,13 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             const RecordJob* job = group.front();
             double tr = job->tickrate > 0 ? job->tickrate : 64;
             con.send("demo_gototick " + std::to_string(std::max(96, firstTick(*job) - int(2 * tr))));
-            Sleep(3500);
-            con.send("spec_mode 1");
-            con.send("spec_player " + std::to_string(job->slot));
-            Sleep(300);
-            con.send("demo_resume");
+            if (pause(3500)) {
+                con.send("spec_mode 1");
+                con.send("spec_player " + std::to_string(job->slot));
+                pause(300);
+                con.send("demo_resume");
+            }
+            if (!crash.empty()) crashes.push_back(crash);   // CS2 zeigt die Meldung selbst und schließt sich nach "OK"
             done = 1;
             finish(false);
             continue;
@@ -731,8 +821,9 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
         RECT area = {};
         for (int i = 0; i < 40 && !gameArea(pid, gameWin, area); ++i) Sleep(250);
 
+        const int doneBefore = done;
         for (RecordJob* job : group) {
-            if (cancel_ || !failure.empty()) break;
+            if (cancel_ || !failure.empty() || !crash.empty()) break;
             ++done;
             double tr = job->tickrate > 0 ? job->tickrate : 64;
             setStatus(L"Moment " + std::to_wstring(done) + L" von " + std::to_wstring(total) + L": „" + job->title + L"“ – bitte den PC nicht benutzen");
@@ -770,16 +861,16 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             std::vector<uint8_t> img;
             std::vector<int16_t> pcm;
             for (const auto& seg : job->segments) {
-                if (cancel_ || !failure.empty()) break;
+                if (cancel_ || !failure.empty() || !crash.empty()) break;
                 // anspringen (1,5 s Vorlauf zum Einschwingen der Kamera), Spieler wählen, abspielen
                 con.send("demo_pause");
                 con.send("demo_gototick " + std::to_string(std::max(96, seg.first - int(1.5 * tr))));
-                Sleep(3500);
+                if (!pause(3500)) break;
                 con.send("spec_mode 1");
                 con.send("spec_player " + std::to_string(job->slot));
-                Sleep(300);
+                if (!pause(300)) break;
                 con.send("demo_resume");
-                Sleep(1500);
+                if (!pause(1500)) break;
                 con.send("spec_player " + std::to_string(job->slot));
                 const double length = std::max(0.5, (seg.second - seg.first) / tr);
                 const int64_t segVideoFrames = int64_t(std::ceil(length / frameDur - 1e-9));
@@ -805,6 +896,7 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
                     if (t - lastCheck >= 0.25) {
                         lastCheck = t;
                         RECT now;
+                        if (crashed()) break;   // Fehlermeldung von CS2 statt Spielbild
                         if (WaitForSingleObject(proc, 0) == WAIT_OBJECT_0) failure = L"CS2 wurde während der Aufnahme beendet";
                         else if (!IsWindow(gameWin) || IsIconic(gameWin) || !clientArea(gameWin, now) || !EqualRect(&now, &area))
                             failure = L"Das CS2-Fenster wurde minimiert, verschoben oder geschlossen – Aufnahme abgebrochen";
@@ -849,6 +941,7 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
                         lastSpec = t;
                     }
                 }
+                if (!crash.empty()) break;
                 con.send("demo_pause");
                 if (withAudio && failure.empty()) {   // Rest und Stille bis zum Ende des Abschnitts
                     audio.take(pcm);
@@ -865,11 +958,13 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             audio.stop();
             setStatus(L"Video wird gespeichert …");
             bool ok = mp4.close();
-            if (cancel_ || !failure.empty() || !ok || frames == 0) {
+            if (cancel_ || !failure.empty() || !crash.empty() || !ok || frames == 0) {
                 DeleteFileW(job->out.c_str());
-                if (failure.empty() && !cancel_) failure = frames == 0 ? L"Kein Bild aufgenommen" : L"Video konnte nicht gespeichert werden";
+                if (failure.empty() && crash.empty() && !cancel_)
+                    failure = frames == 0 ? L"Kein Bild aufgenommen" : L"Video konnte nicht gespeichert werden";
                 break;
             }
+            ++clips;
             auto* e = new RecordEvent();
             e->kind = RecordEvent::ClipDone;
             e->job = *job;
@@ -877,6 +972,10 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             post(e);
         }
 
+        if (!crash.empty()) {   // übrige Momente dieser Demo überspringen, weiter mit der nächsten Demo
+            crashes.push_back(crash);
+            done = doneBefore + int(group.size());
+        }
         setStatus(L"CS2 wird beendet …");
         finish(true);
     }
@@ -893,6 +992,17 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
     } else if (cancel_) {
         e->kind = RecordEvent::Finished;
         e->text = recordVideo ? L"Aufnahme abgebrochen" : L"Abgebrochen";
+    } else if (!crashes.empty()) {
+        // z. B. "FATAL ERROR: CopyNewEntity: invalid class index (221), out of range 0" – CS2 kann manche Demos selbst nicht abspielen
+        std::wstring label = crashLabel(crashes.front());
+        e->kind = RecordEvent::Failed;
+        if (recordVideo && clips > 0)
+            e->text = std::to_wstring(clips) + (clips == 1 ? L" Video fertig" : L" Videos fertig") + L" – bei " +
+                      (crashes.size() == 1 ? std::wstring(L"einer Demo") : std::to_wstring(crashes.size()) + L" Demos") +
+                      L" ist CS2 abgestürzt (" + label + L"), Details in fragdesk.log";
+        else
+            e->text = L"CS2 ist mit dieser Demo abgestürzt (" + label + L") – ein Fehler in CS2 selbst, Details in fragdesk.log";
+        logLine(L"Abgestürzt: %d Demo(s), %d Video(s) fertig", int(crashes.size()), clips);
     } else {
         e->kind = RecordEvent::Finished;
         e->text = recordVideo ? (total == 1 ? L"Video fertig" : std::to_wstring(total) + L" Videos fertig")

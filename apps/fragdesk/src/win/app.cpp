@@ -247,6 +247,7 @@ void App::watch(const MomentRef& ref) {
         return;
     }
     if (!recorder) recorder = std::make_unique<Recorder>(hwnd);
+    recordError.clear();
     if (!recorder->watch(steam, job, err)) notify(err, true);
     else notify(L"CS2 startet und springt zu „" + job.title + L"“");
 }
@@ -268,6 +269,7 @@ void App::record(const std::vector<MomentRef>& moments) {
         return;
     }
     if (!recorder) recorder = std::make_unique<Recorder>(hwnd);
+    recordError.clear();
     if (!recorder->record(steam, settings.record, jobs, err)) notify(err, true);
     else {
         selected.clear();

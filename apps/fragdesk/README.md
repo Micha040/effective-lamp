@@ -96,12 +96,17 @@ gewählte Auflösung nicht als Fenster auf den Monitor, nimmt FragDesk ein randl
 Wird CS2 während der Aufnahme geschlossen, minimiert oder verschoben, bricht FragDesk ab, statt den Desktop
 aufzunehmen.
 
+**Manche Demos kann CS2 selbst nicht abspielen** – vor allem von Community-Servern wie FACEIT: CS2 stürzt dann
+direkt nach dem Laden mit `FATAL ERROR: CopyNewEntity: invalid class index … out of range 0` ab
+([ValveSoftware/csgo-osx-linux#4543](https://github.com/ValveSoftware/csgo-osx-linux/issues/4543)). FragDesk erkennt
+die Fehlermeldung, verwirft den angefangenen Clip, beendet CS2 und macht mit der nächsten Demo weiter; unter
+**Momente** steht dann, was passiert ist. Die Statistiken dieser Demo sind davon nicht betroffen.
+
 **In CS2 ansehen** macht dasselbe ohne Aufnahme und mit deinen normalen Einstellungen; CS2 bleibt danach offen.
 Bevor du damit online spielst, starte CS2 einmal normal neu – dieses CS2 läuft noch im Workshop-Tools-Modus mit der
 Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 
-> **Hinweis:** Das Ansehen und Aufnehmen steuert ein echtes CS2 und ist bisher nur mit einer nachgebauten
-> CS2-Attrappe geprüft. Läuft etwas nicht rund, steht im Protokoll `%LOCALAPPDATA%\FragDesk\fragdesk.log`
+> **Hinweis:** Läuft etwas nicht rund, steht im Protokoll `%LOCALAPPDATA%\FragDesk\fragdesk.log`
 > (Einstellungen › „Datenordner öffnen“), was FragDesk an CS2 geschickt hat und was CS2 zuletzt ausgegeben hat.
 
 ## Anti-Cheat und Sicherheit

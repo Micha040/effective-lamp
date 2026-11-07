@@ -26,6 +26,21 @@ float recordingCard(Canvas& c, App& app, float x, float y, float w) {
     return 64 + 16;
 }
 
+// Warum die letzte Aufnahme gescheitert ist – bleibt stehen, bis es weggeklickt wird (der Hinweis unten rechts ist schnell weg)
+float errorCard(Canvas& c, App& app, float x, float y, float w) {
+    if (app.recording() || app.recordError.empty()) return 0;
+    float tw = w - 68 - 130;
+    float th = c.textHeight(app.recordError, F::Small, tw) + 2;
+    RectF r(x, y, w, std::max(64.0f, 12 + 22 + 4 + th + 14));
+    c.round(r, 12, alpha(c.th.danger, c.th.dark ? 22 : 30));
+    c.roundStroke(r, 12, alpha(c.th.danger, 140), 1);
+    c.icon(Icon::Warning, RectF(r.X + 18, r.Y + 14, 20, 20), c.th.danger, 1.7f);
+    c.text(L"Letzte Aufnahme fehlgeschlagen", F::BodySemi, c.th.text, RectF(r.X + 50, r.Y + 12, tw, 22));
+    c.text(app.recordError, F::Small, c.th.text2, RectF(r.X + 50, r.Y + 38, tw, th), Align::Left, false, true);
+    c.button(RectF(r.X + w - 128, r.Y + 15, 112, 34), L"Schließen", "rec-error-close", [&app] { app.recordError.clear(); }, Btn::Secondary);
+    return r.Height + 16;
+}
+
 // Ohne die Workshop Tools lässt sich CS2 unter Windows nicht von außen steuern: einmalige Anleitung
 float toolsCard(Canvas& c, App& app, float x, float y, float w) {
     if (app.recording() || app.steam.cs2Exe().empty() || app.tools() != Tools::Missing) return 0;
@@ -215,6 +230,7 @@ float drawHighlights(Canvas& c, App& app, float w) {
     float x = pad, cw = w - pad * 2, y = 28;
     y += pageTitle(c, x, y, cw, L"Momente", L"Erkannte Highlights ansehen und als Video aufnehmen") + 12;
     y += recordingCard(c, app, x, y, cw);
+    y += errorCard(c, app, x, y, cw);
     y += toolsCard(c, app, x, y, cw);
     y += c.tabs(x, y, cw, {L"Vorschläge", L"Videos (" + std::to_wstring(app.clips.size()) + L")"}, app.highlightsTab, "htab", [&app](int i) {
         app.highlightsTab = i;

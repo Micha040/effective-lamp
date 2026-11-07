@@ -692,7 +692,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 }
                 case RecordEvent::Finished: app_.notify(e->text); break;
-                case RecordEvent::Failed: app_.notify(e->text, true); break;
+                case RecordEvent::Failed:
+                    app_.recordError = e->text;   // bleibt unter "Momente" stehen, bis es weggeklickt wird
+                    app_.notify(e->text, true);
+                    break;
             }
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;

@@ -99,6 +99,7 @@ public:
     std::wstring momentBlocker(const fd::Match& m);
     bool demoAvailable(const fd::Match& m);   // Demo-Datei noch da? (kurz zwischengespeichert)
     Tools tools();                            // CS2 Workshop Tools installiert? (kurz zwischengespeichert)
+    std::wstring recordError;                 // Grund, warum die letzte Aufnahme scheiterte (bis zum Wegklicken)
     std::wstring recordBlocker();             // Grund gegen Ansehen/Aufnehmen unabhängig vom Match (leer = es geht)
 
     // Fenster

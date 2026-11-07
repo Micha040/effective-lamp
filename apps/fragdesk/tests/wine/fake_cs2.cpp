@@ -8,6 +8,8 @@
 // -noassetbrowser erscheint dann zusätzlich ein großes Fenster "Asset Browser". Mit -condebug landet die Ausgabe
 // auch in game\csgo\console.log. FAKECS2_IGNORE_PLAYDEMO=1: +playdemo beim Start wird übergangen (CS2 bleibt im
 // Hauptmenü, bis "playdemo" über die Konsole kommt). FAKECS2_NO_CONSOLE=1: nie eine Konsole (wie ohne Workshop Tools).
+// FAKECS2_CRASH=load|seek: Absturz wie bei manchen FACEIT-Demos – Meldung "FATAL ERROR: CopyNewEntity: …" kurz nach dem
+// Laden bzw. beim ersten demo_gototick (Fenster "Error", danach Ende des Prozesses).
 //
 // Das Protokoll landet in der Datei aus der Umgebungsvariable FAKECS2_LOG (sonst fake_cs2.log im Arbeitsordner):
 //   ARGS <Befehlszeile> / ENV USRLOCALCSGO=<Wert> / CMD <Befehl> / QUIT / KEINE KONSOLE …
@@ -26,6 +28,7 @@ static std::wstring g_log, g_conlog;
 static SOCKET g_client = INVALID_SOCKET;
 static std::mutex g_mu;
 static bool g_demoStarted = false;
+static std::wstring g_crash;   // FAKECS2_CRASH
 
 static void logLine(const std::wstring& text) {
     FILE* f = _wfopen(g_log.c_str(), L"a, ccs=UTF-8");
@@ -51,6 +54,14 @@ static void out(const std::string& text) {
     if (g_client != INVALID_SOCKET) send(g_client, text.data(), int(text.size()), 0);
 }
 
+static void crash() {
+    logLine(L"ABSTURZ");
+    std::thread([] {
+        MessageBoxW(nullptr, L"FATAL ERROR: CopyNewEntity: invalid class index (221), out of range 0", L"Error", MB_OK | MB_ICONERROR);
+        ExitProcess(1);
+    }).detach();
+}
+
 static void playDemo() {
     {
         std::lock_guard<std::mutex> lock(g_mu);
@@ -62,6 +73,10 @@ static void playDemo() {
         out("ChangeGameUIState: CSGO_GAME_UI_STATE_MAINMENU -> CSGO_GAME_UI_STATE_LOADINGSCREEN\n");
         Sleep(1500);
         out("ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\n");
+        if (g_crash == L"load") {
+            Sleep(800);
+            crash();
+        }
     }).detach();
 }
 
@@ -104,6 +119,7 @@ static void console(int port) {
             logLine(L"CMD " + w);
             out("] " + line + "\n");
             if (line.rfind("playdemo ", 0) == 0) playDemo();
+            if (line.rfind("demo_gototick ", 0) == 0 && g_crash == L"seek") crash();
             if (line == "quit") {
                 logLine(L"QUIT");
                 ExitProcess(0);
@@ -186,6 +202,7 @@ int wmain(int argc, wchar_t** argv) {
     if (port && tools) std::thread(console, port).detach();
     else if (port) logLine(L"KEINE KONSOLE (ohne -tools öffnet CS2 unter Windows keine netcon-Konsole)");
     bool ignorePlaydemo = env(L"FAKECS2_IGNORE_PLAYDEMO") == L"1";
+    g_crash = env(L"FAKECS2_CRASH");
     std::thread([playdemo, ignorePlaydemo, port, tools] {
         Sleep(1200);
         out("ChangeGameUIState: CSGO_GAME_UI_STATE_INVALID -> CSGO_GAME_UI_STATE_MAINMENU\n");
