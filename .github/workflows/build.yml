@@ -39,14 +39,28 @@ jobs:
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
 
+      - name: Go einrichten (für fdanalyze von FragDesk)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+
       - name: Tests (Linux)
         run: |
           sh launcher/tests/run.sh
           sh apps/deskcats/tests/run.sh
           sh apps/snowdesk/tests/run.sh
+          sh apps/fragdesk/tests/run.sh
+          pwsh -NoProfile -File apps/fragdesk/tools/ps_check.ps1 -SetupPath apps/fragdesk/setup/Setup.ps1
 
       - name: Bauen
         run: sh tools/build-all.sh
+
+      - name: Tests (Analyzer von FragDesk)
+        working-directory: apps/fragdesk/analyzer
+        run: |
+          go vet ./...
+          go test ./...
 
       - name: Pakete schnüren
         run: |

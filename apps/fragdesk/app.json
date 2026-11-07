@@ -1,0 +1,57 @@
+{
+  "id": "fragdesk",
+  "order": 5,
+  "name": "FragDesk",
+  "version": "1.0.0",
+  "versionCheck": [
+    {
+      "file": "setup/Setup.ps1",
+      "pattern": "\\$AppVersion\\s*=\\s*'([^']+)'"
+    },
+    {
+      "file": "src/win/common.h",
+      "pattern": "kVersionA = \"([^\"]+)\""
+    },
+    {
+      "file": "res/fragdesk.rc",
+      "pattern": "VALUE \"ProductVersion\", \"([0-9.]+)\\.0\""
+    },
+    {
+      "file": "analyzer/main.go",
+      "pattern": "version\\s*=\\s*\"([^\"]+)\""
+    }
+  ],
+  "tagline": "CS2-Stats und Highlights aus deinen Demos",
+  "description": "Wertet deine CS2-Demos lokal aus: über 150 Kennzahlen, Premier-Verlauf und deine besten Momente als Video.",
+  "requires": "für Videos: Steam und CS2",
+  "color": "#F97316",
+  "process": "FragDesk.exe",
+  "installDir": "%LOCALAPPDATA%\\Programs\\FragDesk",
+  "detect": {
+    "uninstallKey": "FragDesk",
+    "exe": "%LOCALAPPDATA%\\Programs\\FragDesk\\FragDesk.exe"
+  },
+  "install": {
+    "script": "Setup.cmd"
+  },
+  "uninstall": {
+    "script": "Uninstall.cmd"
+  },
+  "open": {
+    "exe": "%LOCALAPPDATA%\\Programs\\FragDesk\\FragDesk.exe",
+    "label": "Öffnen",
+    "wait": false
+  },
+  "package": {
+    "folder": "FragDesk",
+    "files": {
+      "FragDesk.exe": "build/FragDesk.exe",
+      "fdanalyze.exe": "build/fdanalyze.exe",
+      "THIRD-PARTY-NOTICES.txt": "build/THIRD-PARTY-NOTICES.txt",
+      "Setup.cmd": "setup/Setup.cmd",
+      "Setup.ps1": "setup/Setup.ps1",
+      "Uninstall.cmd": "setup/Uninstall.cmd",
+      "README.md": "README.md"
+    }
+  }
+}

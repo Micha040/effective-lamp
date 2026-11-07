@@ -1,0 +1,94 @@
+// FragDesk – Einstellungen (siehe settings.h)
+#include "settings.h"
+
+#include <cstdio>
+
+#include "../core/json.h"
+#include "common.h"
+
+namespace fdw {
+
+std::string jsonQuote(const std::string& s) {
+    std::string o = "\"";
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"': o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n"; break;
+            case '\r': o += "\\r"; break;
+            case '\t': o += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char b[8];
+                    std::snprintf(b, sizeof b, "\\u%04x", c);
+                    o += b;
+                } else o += char(c);
+        }
+    }
+    return o + "\"";
+}
+
+static std::wstring settingsPath() { return joinPath(dataDir(), L"settings.json"); }
+
+bool Settings::load() {
+    std::string text;
+    if (!readFile(settingsPath(), text, 1u << 20)) return false;
+    json::Value v;
+    if (!json::parse(text, v) || !v.isObject()) return false;
+    steamId = v.getString("steamId");
+    cs2Dir = widen(v.getString("cs2Dir"));
+    videoDir = widen(v.getString("videoDir"));
+    watchReplays = v.getBool("watchReplays", true);
+    watchDownloads = v.getBool("watchDownloads", true);
+    autoAnalyze = v.getBool("autoAnalyze", false);
+    theme = v.getString("theme");
+    folders.clear();
+    for (const auto& f : v["folders"].arr)
+        if (f.isString() && !f.str.empty()) folders.push_back(widen(f.str));
+    ignored.clear();
+    for (const auto& f : v["ignored"].arr)
+        if (f.isString()) ignored.push_back(f.str);
+    const json::Value& r = v["record"];
+    if (r.isObject()) {
+        int h = int(r.getNumber("height", 1080));
+        record.height = h == 720 || h == 1440 ? h : 1080;
+        record.fps = int(r.getNumber("fps", 60)) == 30 ? 30 : 60;
+        int q = int(r.getNumber("quality", 2));
+        record.quality = q < 1 ? 1 : q > 3 ? 3 : q;
+        record.onlyKillfeed = r.getBool("onlyKillfeed", true);
+        record.voices = r.getBool("voices", false);
+        record.sound = r.getBool("sound", true);
+    }
+    return true;
+}
+
+bool Settings::save() const {
+    std::string o = "{\n";
+    o += "  \"steamId\": " + jsonQuote(steamId) + ",\n";
+    o += "  \"cs2Dir\": " + jsonQuote(narrow(cs2Dir)) + ",\n";
+    o += "  \"videoDir\": " + jsonQuote(narrow(videoDir)) + ",\n";
+    o += std::string("  \"watchReplays\": ") + (watchReplays ? "true" : "false") + ",\n";
+    o += std::string("  \"watchDownloads\": ") + (watchDownloads ? "true" : "false") + ",\n";
+    o += std::string("  \"autoAnalyze\": ") + (autoAnalyze ? "true" : "false") + ",\n";
+    o += "  \"theme\": " + jsonQuote(theme) + ",\n";
+    o += "  \"folders\": [";
+    for (size_t i = 0; i < folders.size(); ++i) o += (i ? ", " : "") + jsonQuote(narrow(folders[i]));
+    o += "],\n  \"ignored\": [";
+    for (size_t i = 0; i < ignored.size(); ++i) o += (i ? ",\n    " : "\n    ") + jsonQuote(ignored[i]);
+    o += ignored.empty() ? "],\n" : "\n  ],\n";
+    char b[256];
+    std::snprintf(b, sizeof b, "  \"record\": {\"height\": %d, \"fps\": %d, \"quality\": %d, \"onlyKillfeed\": %s, \"voices\": %s, \"sound\": %s}\n",
+                  record.height, record.fps, record.quality, record.onlyKillfeed ? "true" : "false", record.voices ? "true" : "false",
+                  record.sound ? "true" : "false");
+    o += b;
+    o += "}\n";
+    createDirs(dataDir());
+    return writeFileAtomic(settingsPath(), o);
+}
+
+std::wstring Settings::effectiveVideoDir() const {
+    if (!videoDir.empty()) return videoDir;
+    return joinPath(videosDir(), L"FragDesk");
+}
+
+}  // namespace fdw

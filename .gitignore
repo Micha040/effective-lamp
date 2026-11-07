@@ -6,6 +6,10 @@ dist/
 *.exe
 *.dll
 
+# Lokale Go-Moduldatei (z. B. mit replace-Zeilen für eine Umgebung ohne Modul-Proxy)
+go.local.mod
+go.local.sum
+
 # Test- und Werkzeugausgaben
 out/
 tests/out/

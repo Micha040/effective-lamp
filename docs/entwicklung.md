@@ -7,10 +7,14 @@ Getestet wurde unter Ubuntu 24.04.
 sudo apt-get install g++ python3 g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64
 ```
 
+Für FragDesk braucht es zusätzlich **Go** (Version laut `apps/fragdesk/analyzer/go.mod`): Daraus entsteht
+`fdanalyze.exe`, das die Demos liest. Beim ersten Bauen holt `go mod tidy` die Module samt Prüfsummen
+(abgeglichen mit sum.golang.org).
+
 ## Bauen
 
 ```sh
-sh tools/build-all.sh                  # DeskCats, SnowDesk und den Launcher (je build/ im Projektordner)
+sh tools/build-all.sh                  # DeskCats, SnowDesk, FragDesk und den Launcher (je build/ im Projektordner)
 python3 tools/package.py --tag v1.0.0  # ZIPs, EfficientLamp.exe, catalog.json und SHA256SUMS.txt nach dist/
 ```
 
@@ -28,7 +32,22 @@ sh launcher/tests/run.sh             # JSON, SHA-256, ZIP/Inflate, Katalog-Prüf
 sh launcher/tests/run.sh dist/catalog.json   # zusätzlich den erzeugten Katalog prüfen
 sh apps/deskcats/tests/run.sh        # Katzen: Dauertest mit drei Monitoren, sechs Startwerte
 sh apps/snowdesk/tests/run.sh        # Schnee-Simulation und "Echtes Wetter"
+sh apps/fragdesk/tests/run.sh        # FragDesk: Kennzahlen-Formeln, Karriere, Formatierung, JSON-Modell
+(cd apps/fragdesk/analyzer && go test ./...)   # Analyzer; mit FRAGDESK_DEMOS=<Ordner> auch gegen echte Demos
 ```
+
+FragDesk zeichnet jede Seite auf Wunsch ohne Fenster als Bild (auch unter Wine) – praktisch zum Prüfen der Oberfläche:
+
+```sh
+python3 apps/fragdesk/tests/make_testdata.py /tmp/fd <fdanalyze-Ausgaben …>   # Testspieler aus echten Demos
+FragDesk.exe --data Z:\tmp\fd --me 76561190000000001 --render seite.png --page stats --tab 10
+```
+
+Für das Ansehen und Aufnehmen gibt es in `apps/fragdesk/tests/wine/` zwei kleine Hilfsprogramme (mit MinGW bauen):
+`fake_cs2.cpp` spielt CS2 nach (Fenster, Konsole über `-netconport`, protokolliert jeden Befehl in `FAKECS2_LOG`;
+als `steam.exe --idle` gestartet gilt Steam als laufend) – damit lässt sich der ganze Ablauf unter Wine prüfen.
+`mp4_test.cpp` schreibt ein Testvideo über denselben MP4-Weg wie die Aufnahme (braucht echtes Windows; Wine hat
+keinen H.264-Encoder).
 
 Die Setup-Skripte von DeskCats und SnowDesk lassen sich mit PowerShell 7 auch unter Linux durchspielen
 (Windows-Befehle und Registry sind nachgebildet – inklusive der Eigenheit, dass `New-Item -Force` einen vorhandenen
@@ -37,6 +56,7 @@ Registry-Schlüssel samt Inhalt neu anlegt):
 ```sh
 pwsh apps/deskcats/tools/ps_check.ps1 -SetupPath apps/deskcats/setup/Setup.ps1
 pwsh apps/snowdesk/tools/ps_check.ps1 -SetupPath apps/snowdesk/setup/Setup.ps1
+pwsh apps/fragdesk/tools/ps_check.ps1 -SetupPath apps/fragdesk/setup/Setup.ps1
 ```
 
 Der Launcher lässt sich unter Windows (oder Wine) ohne GitHub ausprobieren:

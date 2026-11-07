@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BRAND = ROOT / 'brand'
-APPS = ['deskcats', 'snowdesk', 'triggerswitch', 'wavemutesync']
+APPS = ['deskcats', 'snowdesk', 'triggerswitch', 'wavemutesync', 'fragdesk']
 
 
 def svg_png(svg, size):
