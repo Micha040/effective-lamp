@@ -1,0 +1,124 @@
+/* FragDesk Handy-App – ein Match: Kopf, „Werte von …“, Rundenleiste, Tabellen, Trefferbild. Farben aus app.css. */
+:root { --m-win: rgba(74, 222, 128, .18); --m-loss: rgba(248, 113, 113, .18); }
+:root.light { --m-win: rgba(21, 163, 74, .235); --m-loss: rgba(220, 38, 38, .235); }
+
+/* ---- Kopf: Map, Modus und Datum, Ergebnis -------------------------------------------------------------------- */
+.m-head { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 3px; margin: 2px 0 12px; }
+.m-bar { grid-column: 1; grid-row: 1 / span 2; border-radius: 3px; }
+.m-map {
+  grid-column: 2; grid-row: 1; margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.m-score { grid-column: 3; grid-row: 1; font-size: 30px; font-weight: 750; letter-spacing: -.01em; line-height: 1.15; text-align: right; white-space: nowrap; }
+.m-meta { grid-column: 2; grid-row: 2; color: var(--text2); font-size: 13.5px; }
+.m-meta.wide { grid-column: 2 / span 2; }
+.m-res { grid-column: 3; grid-row: 2; justify-self: end; align-self: start; }
+.m-share { color: var(--text3); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
+.m-headskel { height: 64px; }
+
+/* „Werte von …“: Knopf mit unsichtbarem Auswahlmenü darüber (auf dem iPhone das Rad) */
+.m-focus {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: 0 0 12px; padding: 7px 12px 7px 10px;
+  border-radius: 16px; background: var(--btn); color: var(--text); font-size: 13.5px; font-weight: 600;
+}
+.m-focus:active { background: var(--btn-hover); }
+.m-focus:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.m-focus span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-focus svg { width: 16px; height: 16px; flex: none; color: var(--text2); }
+.m-focus .m-chev { width: 13px; height: 13px; }
+.m-focus select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; font-size: 16px; -webkit-appearance: none; appearance: none; }
+
+/* ---- Rundenleiste: je Hälfte eine Zeile, eine Verlängerung (2 × 3 Runden) zusammen ------------------------------- */
+.m-strip { display: flex; flex-direction: column; gap: 8px; }
+.m-line { display: flex; gap: 3px; }
+.m-gap { flex: 0 0 4px; }
+.m-rd {
+  flex: 0 0 calc((100% - 33px) / 12); min-width: 0; padding: 0; border: 0; background: none; color: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.m-box { position: relative; width: 100%; height: 42px; border-radius: 5px; overflow: hidden; padding-top: 7px; }
+.m-box.w { background: var(--m-win); }
+.m-box.l { background: var(--m-loss); }
+.m-box::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--ct); opacity: .78; }
+.m-box.st::after { background: var(--t); }
+.m-rd:active .m-box { filter: brightness(1.35); }
+.m-dr { display: flex; justify-content: center; gap: 2px; }
+.m-dr + .m-dr { margin-top: 2px; }
+.m-dr i { width: 5px; height: 5px; border-radius: 50%; background: var(--text); }
+.m-box svg { position: absolute; left: 50%; transform: translateX(-50%); }
+.m-box .m-cw { width: 12px; height: 12px; bottom: 8px; color: var(--accent); }
+.m-box .m-x { width: 10px; height: 10px; bottom: 9px; color: var(--text2); opacity: .8; }
+.m-n { font-size: 10px; line-height: 1; color: var(--text3); }
+
+/* ---- Tabellen (in .card): Ausrichtung, Sortieren, Schatten an der festen Spalte und am rechten Rand ---------------- */
+.m-tw { position: relative; margin: 0 -16px; }
+.m-tw > .tbl { margin: 0; }
+.m-tw .tbl th.l, .m-tw .tbl td.l { text-align: left; }
+.m-tw .tbl th.c, .m-tw .tbl td.c { text-align: center; }
+.m-tw .tbl th.r, .m-tw .tbl td.r { text-align: right; }
+.m-tw td { vertical-align: middle; }
+.m-tw th.tap { cursor: pointer; }
+.m-tw th.on { color: var(--text); }
+.m-tw th.m-tipped { text-decoration: underline dotted; text-underline-offset: 3px; }
+.m-tw .m-arr { width: 10px; height: 10px; margin-left: 2px; vertical-align: -1px; }
+.m-tw th.up .m-arr { transform: rotate(180deg); }
+.m-tw td:first-child { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.m-tw td:first-child .m-2 > *, .m-tw td:first-child > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.m-tw.sx th:first-child, .m-tw.sx td:first-child { box-shadow: 1px 0 0 var(--border); }
+.m-tw tr.m-win td:first-child { box-shadow: inset 3px 0 0 var(--success); }
+.m-tw tr.m-loss td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.m-tw.sx tr.m-win td:first-child { box-shadow: inset 3px 0 0 var(--success), 1px 0 0 var(--border); }
+.m-tw.sx tr.m-loss td:first-child { box-shadow: inset 3px 0 0 var(--danger), 1px 0 0 var(--border); }
+.m-tw.sx tr.me td:first-child { box-shadow: inset 3px 0 0 var(--accent), 1px 0 0 var(--border); }
+.m-tw::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 28px; pointer-events: none; opacity: 0; transition: opacity .2s;
+  background: linear-gradient(to right, transparent, var(--card));
+}
+.m-tw.more::after { opacity: 1; }
+.m-tw tr.tap { cursor: pointer; }
+.m-tw tr.tap:active td { background: var(--hover); }
+.m-2 small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--text3); }
+.m-ic { display: flex; align-items: center; gap: 7px; }
+.m-ic svg { width: 16px; height: 16px; flex: none; }
+.m-ic svg:not([class]) { color: var(--text2); }
+.m-b { font-weight: 650; }
+.m-sm { font-size: 12px; }
+.m-dim { color: var(--text2); }
+.m-t { color: var(--t); }
+.m-ct { color: var(--ct); }
+.m-acc { color: var(--accent-text); }
+
+/* Scoreboard: Kopf je Team */
+.m-th { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.m-ts { font-size: 30px; font-weight: 750; line-height: 1; min-width: 38px; }
+.m-th .h { min-width: 0; }
+.m-th b { display: block; font-size: 16px; font-weight: 650; }
+.m-th small { display: block; margin-top: 2px; font-size: 12px; color: var(--text3); }
+
+/* Hinweise unter Tabellen, Erklärungen */
+.m-gl { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 12px 0 0; color: var(--text3); font-size: 12.5px; font-weight: 600; }
+.m-gl svg { width: 15px; height: 15px; }
+.m-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; margin: -2px 4px 12px; color: var(--text3); font-size: 12.5px; }
+.m-foot .m-gl { padding-top: 6px; }
+.m-hint { margin: 2px 4px 12px; color: var(--text3); font-size: 12.5px; }
+.m-none { padding: 10px 0 2px; color: var(--text2); font-size: 14px; }
+.m-gloss { margin: 4px 0 0; }
+.m-gloss div { padding: 9px 0; border-top: 1px solid var(--border); }
+.m-gloss dt { font-size: 14px; font-weight: 650; }
+.m-gloss dd { margin: 2px 0 0; color: var(--text2); font-size: 14px; }
+.m-tips { margin: 2px 0 16px; }
+.m-tip { padding: 9px 0; border-top: 1px solid var(--border); font-size: 14.5px; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.m-tip small { display: block; margin-bottom: 2px; color: var(--text3); font-size: 12px; font-weight: 600; }
+
+/* Trefferbild und „Gestorben durch“ */
+.m-fig { display: block; width: 100%; max-width: 280px; height: auto; margin: 2px auto 0; }
+.m-fig .m-zone { fill: var(--track); }
+.m-fig .m-on { fill: var(--accent); }
+.m-fig .m-lead { stroke: var(--text3); stroke-opacity: .5; stroke-width: 1; }
+.m-fig .m-zn { fill: var(--text2); font-size: 12px; }
+.m-fig .m-zv { fill: var(--text); font-size: 13px; font-weight: 650; }
+.m-deaths .fill { background: var(--danger); }
+
+/* Momente: Titel dürfen zweizeilig sein; ohne Video gibt es nichts zum Antippen */
+.m-moms .row .main b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.row.m-static:active { background: transparent; }
