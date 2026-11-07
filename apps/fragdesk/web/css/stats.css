@@ -61,7 +61,6 @@
 /* ---- Verlauf ------------------------------------------------------------------------------------------------------ */
 .st-chart .chart { height: auto; }   /* so hoch wie gezeichnet (lineChart: height) */
 .st-chartempty { color: var(--text3); font-size: 13px; text-align: center; padding: 30px 12px 34px; }
-.st-avg { fill: none; stroke: var(--text); stroke-opacity: .55; stroke-width: 1.6; stroke-dasharray: 3 3; pointer-events: none; }
 
 /* ---- Treffer nach Körperzonen ------------------------------------------------------------------------------------- */
 .st-figure { display: block; width: 100%; max-width: 330px; height: auto; margin: 0 auto 4px; }

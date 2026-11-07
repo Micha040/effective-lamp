@@ -4,7 +4,7 @@
 import {h, icon, card, chips, statTile, bars, tabs, sheet, emptyState, notice, skeleton, stars, toast, useCss} from '../ui.js';
 import {openPlayer} from './player.js';
 import * as api from '../api.js';
-import {store} from '../app.js';
+import {store, replaceRoute} from '../app.js';
 
 const TABS = ['Übersicht', 'Scoreboard', 'Runden', 'Waffen', 'Duelle', 'Utility', 'Momente'];   // Nummern wie in FragDesk
 const PER_PLAYER = [true, false, true, true, true, false, false];   // Bereiche mit „Werte von …“
@@ -80,7 +80,7 @@ function draw(ctx, nav, d) {
 function top(nav, hd) {
   return [
     hd ? header(hd) : h('div', {class: 'skel m-headskel'}),
-    tabs(TABS, nav.tab, i => { if (i !== nav.tab) location.hash = href(nav.id, i, nav.player); }),
+    tabs(TABS, nav.tab, i => { if (i !== nav.tab) replaceRoute(href(nav.id, i, nav.player)); }),
   ];
 }
 
@@ -100,7 +100,7 @@ function focusSel(nav, d) {
   for (const p of d.players) sel.append(h('option', {value: p.id, selected: p.id === d.focus.id}, p.label));
   sel.addEventListener('change', () => {
     const p = d.players.find(x => x.id === sel.value);
-    location.hash = href(nav.id, nav.tab, p && p.me ? '' : sel.value);
+    replaceRoute(href(nav.id, nav.tab, p && p.me ? '' : sel.value));
   });
   return h('label', {class: 'm-focus'}, icon('users'), h('span', null, d.focus.label), icon('down', 'm-chev'), sel);
 }

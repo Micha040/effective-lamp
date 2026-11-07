@@ -3,7 +3,7 @@ import {h, icon, chips, tabs, emptyState, skeleton, notice, stars} from '../ui.j
 import {filterBar, filterQuery} from '../filters.js';
 import {openPlayer} from './player.js';
 import * as api from '../api.js';
-import {store} from '../app.js';
+import {store, replaceRoute} from '../app.js';
 
 export async function render(ctx) {
   ctx.title('Momente');
@@ -20,7 +20,7 @@ export async function render(ctx) {
 
 function draw(ctx, d, tab, who) {
   const out = [h('h1', {class: 'page-title'}, 'Momente'), h('div', {class: 'page-sub'}, d.sub)];
-  out.push(tabs(['Vorschläge', `Videos (${d.videos.items.length})`], tab, i => { location.hash = i ? '#/moments/1' : '#/moments'; }));
+  out.push(tabs(['Vorschläge', `Videos (${d.videos.items.length})`], tab, i => { if (i !== tab) replaceRoute(i ? '#/moments/1' : '#/moments'); }));
   if (d.blocked) out.push(notice('warn', 'Videos gerade nicht verfügbar', d.blocked));
   if (tab === 0) {
     out.push(filterBar(ctx, {period: false}));

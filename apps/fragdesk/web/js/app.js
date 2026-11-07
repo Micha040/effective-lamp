@@ -77,6 +77,14 @@ function buildShell() {
   shell = {top, tt, left, right, main, tabbar};
 }
 
+// Adresse ersetzen statt eine neue anzulegen – für Reiter und Auswahl innerhalb einer Seite, damit „Zurück“ zur
+// vorigen Seite führt und nicht durch jeden Reiter
+export function replaceRoute(hash) {
+  history.replaceState(null, '', hash);
+  if (visited.length) visited[visited.length - 1] = location.hash;
+  render();
+}
+
 export function goBack() {
   if (visited.length > 1) history.back();
   else location.hash = '#/';

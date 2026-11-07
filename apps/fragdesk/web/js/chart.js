@@ -14,7 +14,8 @@ function niceStep(raw) {
   return 10 * p;
 }
 
-// points: [{y, label, color, tip, href}] – opts: {height, fmtY, bands: [{from, color}], area, minY, maxY, refY, color}
+// points: [{y, label, color, tip, href}] – opts: {height, fmtY, bands: [{from, color}], area, minY, maxY, refY, color,
+// avg: n = gestrichelter Schnitt der letzten n Werte}
 export function lineChart(points, opts = {}) {
   const wrap = h('div', {class: 'chartwrap'});
   const tip = h('div', {class: 'chart-tip hidden'});
@@ -67,6 +68,16 @@ export function lineChart(points, opts = {}) {
       svg.append(s('path', {d: a, fill: opts.color || 'var(--accent)', 'fill-opacity': '0.12'}));
     }
     svg.append(s('path', {d, fill: 'none', stroke: opts.color || 'var(--text2)', 'stroke-width': '2', 'stroke-linejoin': 'round'}));
+    // gestrichelter Schnitt der letzten opts.avg Werte (wie movingAvg in FragDesk)
+    if (opts.avg && valid.length >= opts.avg) {
+      const n = opts.avg;
+      const da = valid.map(([, i], k) => {
+        const w = valid.slice(Math.max(0, k + 1 - n), k + 1);
+        const v = w.reduce((a, [q]) => a + q.y, 0) / w.length;
+        return (k ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1);
+      }).join(' ');
+      svg.append(s('path', {d: da, fill: 'none', stroke: 'var(--text3)', 'stroke-width': '1.5', 'stroke-dasharray': '4 3', 'stroke-linejoin': 'round'}));
+    }
     const dots = [];
     for (const [p, i] of valid) {
       const c = s('circle', {cx: x(i), cy: y(p.y), r: points.length > 40 ? 2.2 : 3.2, fill: p.color || opts.color || 'var(--accent)'});

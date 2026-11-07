@@ -4,7 +4,7 @@ import {h, icon, card, tabs, bars, sheet, notice, emptyState, skeleton, toneClas
 import {lineChart} from '../chart.js';
 import {filterBar, filterQuery} from '../filters.js';
 import * as api from '../api.js';
-import {store} from '../app.js';
+import {store, replaceRoute} from '../app.js';
 
 // Tabs mit den Nummern aus FragDesk; die Heatmaps (11) fehlen noch
 const TABS = ['Allgemein', 'Waffen', 'Maps', 'Eröffnung & Trades', 'Clutches', 'Utility', 'Zielen', 'Besondere Kills', 'Schaden & Zeit',
@@ -23,7 +23,7 @@ export async function render(ctx) {
     h('div', {class: 'page-sub'}, d ? d.sub : ' '),
     filterBar(ctx),
   ];
-  const tabBar = () => tabs(TABS, tab, i => { if (i !== tab) location.hash = '#/stats/' + i; });
+  const tabBar = () => tabs(TABS, tab, i => { if (i !== tab) replaceRoute('#/stats/' + i); });
   const show = d => ctx.main.replaceChildren(...head(d), ...(d.empty ? [emptyState(d.empty, 'stats')] : [tabBar(), ...body(ctx, d)]));
   const old = api.cached(path);
   if (old && !ctx.fresh) show(old);
@@ -154,8 +154,7 @@ function chartCard(b, matches) {
   if (!pts.length) content = h('div', {class: 'st-chartempty'}, b.empty || 'Noch keine Daten');
   else {
     content = lineChart(pts, {fmtY, bands: b.bands, refY: b.ref, area: b.area, color: b.area ? 'var(--accent)' : undefined,
-      height: b.id === 'premier' ? 180 : 170});
-    if (b.avg) addAverage(content, pts.map(p => p.y), b.avg);
+      height: b.id === 'premier' ? 180 : 170, avg: b.avg || 0});
   }
   return card({title: b.title, sub: b.sub, class: 'st-chart'}, content);
 }
@@ -166,29 +165,6 @@ function svg(tag, attrs, text) {
   for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
   if (text != null) el.textContent = text;
   return el;
-}
-
-// Gestrichelter Schnitt der letzten n Matches (movingAvg in FragDesk). lineChart zeichnet nur eine Linie: der Schnitt
-// kommt nach jedem Zeichnen dazu und richtet sich nach den Punkten des Diagramms (ein Punkt je Wert, Achse linear).
-function addAverage(wrap, ys, n) {
-  if (ys.length < n) return;
-  const avg = ys.map((_, i) => {
-    const w = ys.slice(Math.max(0, i + 1 - n), i + 1);
-    return w.reduce((a, v) => a + v, 0) / w.length;
-  });
-  let lo = 0, hi = 0;
-  ys.forEach((v, i) => { if (v < ys[lo]) lo = i; if (v > ys[hi]) hi = i; });
-  const draw = () => {
-    const chart = wrap.querySelector('svg');
-    if (!chart || chart.querySelector('.st-avg')) return;
-    const dots = [...chart.querySelectorAll('circle')].filter(c => c.getAttribute('fill') !== 'none');
-    if (dots.length !== ys.length) return;
-    const cx = i => Number(dots[i].getAttribute('cx')), cy = i => Number(dots[i].getAttribute('cy'));
-    const k = ys[hi] > ys[lo] ? (cy(hi) - cy(lo)) / (ys[hi] - ys[lo]) : 0;
-    const d = avg.map((v, i) => (i ? 'L' : 'M') + cx(i).toFixed(1) + ' ' + (cy(lo) + k * (v - ys[lo])).toFixed(1)).join(' ');
-    chart.insertBefore(svg('path', {d, class: 'st-avg'}), dots[0]);
-  };
-  new MutationObserver(draw).observe(wrap, {childList: true});
 }
 
 // ---- Treffer nach Körperzonen (wie hitFigure in FragDesk): Figur 100 × 200, je Zone von der Spur zum Akzent ----------
