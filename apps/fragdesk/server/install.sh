@@ -301,6 +301,8 @@ Type=simple
 User=fragdesk
 Group=fragdesk
 EnvironmentFile=/etc/default/fragdesk
+# glibc: wenige Speicher-Arenen – nach großen Heatmaps gibt der Server den Speicher wieder ganz her
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=$BIN_PATH serve --data $DATA_PATH --listen 127.0.0.1:$PORT --url \${FRAGDESK_URL}
 Restart=on-failure
 RestartSec=5
