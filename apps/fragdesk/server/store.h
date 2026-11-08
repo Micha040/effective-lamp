@@ -4,7 +4,8 @@
 //   server.json                 Konten (Admin, Limit), offene Einladungen (nur SHA-256 des Codes), Einstellungen
 //   local.key                   Schlüssel für die Befehle invite/users (sprechen über 127.0.0.1 mit dem Server)
 //   users/<id>/account.json     Profil (name, steamId), Konto-Tokens (FragDesk) und Geräte (Handys), nur als SHA-256
-//   users/<id>/matches/         <Prüfsumme>.json und .heat – genau wie in FragDesk
+//   users/<id>/matches/         <Prüfsumme>.json, .heat und .replay (2D-Ansicht) – genau wie in FragDesk; .noreplay:
+//                               FragDesk meldet, dass es für dieses Match keine 2D-Daten geben kann (Grund als JSON)
 //   users/<id>/clips/           <clipId>.mp4, .jpg, .part (unfertig) und clips.json (Titel, Match, Moment …)
 // Jedes Konto hat seinen eigenen Ordner; gegenseitiges Anschauen lässt sich später über server.json nachrüsten.
 //
@@ -28,6 +29,7 @@ namespace fdsrv {
 constexpr int64_t kGiB = int64_t(1024) * 1024 * 1024;
 constexpr int64_t kDefaultLimit = 15 * kGiB;     // eingeladene Konten; Admins: 0 = unbegrenzt
 constexpr int64_t kMaxMatchFile = 4 << 20;        // .json und .heat
+constexpr int64_t kMaxReplayFile = 32 << 20;      // .replay (ein Match hat 0,5–3 MB)
 constexpr int64_t kMaxChunk = 8 << 20;            // ein Stück eines Videos
 constexpr int64_t kMaxThumb = 1 << 20;
 constexpr int64_t kMaxClip = 4 * kGiB;            // ein Video insgesamt
@@ -52,8 +54,12 @@ struct ClipRec {
 };
 
 struct MatchRec {
-    int64_t json = -1, heat = -1;
+    int64_t json = -1, heat = -1, replay = -1, noreplay = -1;   // Größen in Bytes, -1 = fehlt
 };
+
+// Dateien eines Matches (Endung: .json, .heat, .replay, .noreplay)
+enum class MatchPart { Json, Heat, Replay, NoReplay };
+const char* matchExt(MatchPart part);
 
 struct TokenRec {
     std::string hash, client;
@@ -179,7 +185,9 @@ public:
     std::string userDir(const std::string& id) const;
     std::string matchPath(const std::string& id, const std::string& checksum, const char* ext) const;
     std::string clipPath(const std::string& id, const std::string& clipId, const char* ext) const;
-    Fail putMatchFile(const UserPtr& u, const std::string& checksum, bool heat, const std::string& body);
+    // Replay/NoReplay nur, wenn das Match schon da ist (404); ein Replay ersetzt die Markierung NoReplay, eine
+    // Markierung neben einem Replay wird nicht gespeichert
+    Fail putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body);
     Fail deleteMatch(const UserPtr& u, const std::string& checksum);
     Fail appendClip(const UserPtr& u, const std::string& clipId, int64_t offset, int64_t total, const std::string& body, int64_t& size);
     Fail putThumb(const UserPtr& u, const std::string& clipId, const std::string& jpeg);

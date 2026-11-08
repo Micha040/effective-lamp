@@ -2,14 +2,14 @@
 """fragdesk-server – Ende-zu-Ende-Test über HTTP mit dem fertigen Programm.
 
 Startet den Server auf einem freien Port (7451–7459, oder FD_TEST_PORT) und spielt den ganzen Ablauf durch:
-Einladung über die Befehlszeile, Registrieren, Matches und Videos hochladen (in Stücken, fortsetzen, 409),
+Einladung über die Befehlszeile, Registrieren, Matches, 2D-Daten und Videos hochladen (in Stücken, fortsetzen, 409),
 Kontingent (507), Handy koppeln, Ansichten nur mit den Daten des eigenen Kontos, zwei Konten getrennt,
 Admin (Einladen, Limit, Entfernen), Grenzen gegen Raten, Abmelden, Neustart mit allen Daten.
 
   python3 tests/server_e2e.py --bin build/fragdesk-server-linux-x64 --data <Testdaten> --tmp <leerer Ordner>
   python3 tests/server_e2e.py --make-data <Ordner>   künstliche Testdaten (matches/, clips.json, videos/) erzeugen
 
-Testdaten wie bei tests/mobile_dev.cpp: matches/*.json (+ .heat), clips.json mit path/title/match/highlight/map/
+Testdaten wie bei tests/mobile_dev.cpp: matches/*.json (+ .heat, .replay), clips.json mit path/title/match/highlight/map/
 created/seconds, daneben je ein .jpg zum .mp4, settings.json mit der eigenen SteamID.
 """
 import argparse
@@ -23,6 +23,7 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -100,6 +101,27 @@ def synth_match(i, rnd):
                       'scoreA': score_a, 'scoreB': score_b, 'winner': winner},
             'teams': [{'letter': 'A', 'name': 'Team A', 'score': score_a, 'startSide': 'CT'}, {'letter': 'B', 'name': 'Team B', 'score': score_b, 'startSide': 'T'}],
             'rounds': rounds, 'players': players, 'kills': kills, 'clutches': [], 'highlights': highlights}
+
+
+def synth_replay(map_name='de_mirage'):
+    """Kleine, gültige 2D-Daten (FDRP, Aufbau in src/core/replay.h): Runde 1 der künstlichen Matches, zwei Spieler, ein Kill."""
+    def s(t):
+        return struct.pack('<H', len(t.encode())) + t.encode()
+    b = b'FDRP' + struct.pack('<HHfH', 1, 0, 64.0, 8) + s(map_name)
+    b += struct.pack('<H', 2) + struct.pack('<Q', int(ME)) + s('Testspieler') + struct.pack('<Q', int(FRIEND)) + s('Freund')
+    b += struct.pack('<H', 2) + s('') + s('AK-47')
+    frames = b''
+    ticks = list(range(3000, 5801, 8))
+    for i, t in enumerate(ticks):
+        frames += struct.pack('<iBB', t, 0, 2 if t < 4000 else 1)
+        frames += struct.pack('<BhhhBBBB', 0, 100 + i, 200, 0, 64, 100, 1, 1)          # CT
+        if t < 4000:
+            frames += struct.pack('<BhhhBBBB', 1, -300, 400 - i, 0, 192, 100, 1, 0)    # T, stirbt bei Tick 4000
+    b += struct.pack('<II', len(ticks), len(frames)) + frames
+    b += struct.pack('<II', 0, 0)                                                     # Flugbahnen, Wirkungen
+    b += struct.pack('<I', 1) + struct.pack('<iBBBBBhhhhhh', 4000, 0, 1, 255, 1, 1, 100, 200, 0, -300, 280, 0)   # Kill, Kopfschuss
+    b += struct.pack('<II', 0, 0)                                                     # Schüsse, Bombe
+    return b + b'END!'
 
 
 def make_data(out):
@@ -231,7 +253,8 @@ def load_data(data):
     matches = {}
     for p in sorted((data / 'matches').glob('*.json')):
         m = json.loads(p.read_text(encoding='utf-8'))
-        matches[m['checksum']] = {'json': p.read_bytes(), 'heat': p.with_suffix('.heat').read_bytes() if p.with_suffix('.heat').exists() else None}
+        matches[m['checksum']] = {'json': p.read_bytes(), 'heat': p.with_suffix('.heat').read_bytes() if p.with_suffix('.heat').exists() else None,
+                                  'replay': p.with_suffix('.replay').read_bytes() if p.with_suffix('.replay').exists() else None}
     clips = []
     for c in json.loads((data / 'clips.json').read_text(encoding='utf-8')):
         mp4 = pathlib.Path(c['path'])
@@ -357,6 +380,25 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(len(st['matches']) == len(names) and heat_ok and st['matches'][first]['json'] == len(matches[first]['json']), 'sync/state: Matches')
     used = sum(len(m['json']) + len(m['heat'] or b'') for m in matches.values())
     check(st['quota']['used'] == used and st['quota']['limit'] == 0, f'sync/state: belegt {st["quota"]["used"]} = {used}')
+    check(all(st['matches'][c]['replay'] == 0 and 'noreplay' not in st['matches'][c] for c in names), 'sync/state: noch keine 2D-Daten')
+
+    # 2D-Daten (.replay): ganz geprüft, nur zu Matches auf dem Server; Markierung „keine 2D-Daten möglich“
+    rp_name = next((c for c in names if matches[c]['replay']), names[0])
+    rp = matches[rp_name]['replay'] or synth_replay()
+    no_name = next(c for c in names if c != rp_name)
+    check(A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=b'GIF89a' + b'x' * 100).status == 400, 'keine 2D-Daten: 400')
+    check(A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=rp[:-10]).status == 400, 'abgeschnittene 2D-Daten: 400')
+    check(A.req('PUT', '/api/v1/sync/match/nichtda/replay', body=rp).status == 404, '2D-Daten ohne Match: 404')
+    r = A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=b'FDRP' + b'x' * (32 * MB))
+    check(r.status in (0, 413), f'2D-Daten über 32 MB: abgelehnt ({r.status})')
+    r = A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=rp)
+    check(r.status == 200 and r.json()['size'] == len(rp), f'2D-Daten hochladen ({r.status})')
+    check(A.req('PUT', f'/api/v1/sync/match/{no_name}/noreplay', body={'reason': 'egal'}).status == 400, 'Markierung: Grund geprüft')
+    check(A.req('PUT', f'/api/v1/sync/match/{no_name}/noreplay', body={'reason': 'demo'}).status == 200, 'Markierung: Demo nicht mehr da')
+    st = A.get('/api/v1/sync/state').json()
+    used += len(rp) + len(b'{"reason":"demo"}\n')
+    check(st['matches'][rp_name]['replay'] == len(rp) and st['matches'][no_name].get('noreplay') is True and st['quota']['used'] == used,
+          f'sync/state: 2D-Daten und Markierung ({st["matches"][rp_name]}, belegt {st["quota"]["used"]} = {used})')
 
     # Videos in Stücken: Fortsetzen, 409, fertig, Vorschaubild
     v0 = clips[0]
@@ -408,6 +450,20 @@ def flow(srv, anon, port, matches, clips, data_dir):
         check(PA.get(f'/api/v1/match/{first}?tab={tab}').status == 200, f'match Tab {tab}')
     for tab in range(11):
         check(PA.get(f'/api/v1/stats?tab={tab}').status == 200, f'stats Tab {tab}')
+    # 2D-Ansicht übers Handy: Runde aus der hochgeladenen Datei; ohne Datei ein Hinweis, warum
+    r = PA.get(f'/api/v1/replay/{rp_name}?round=1')
+    d = r.json() or {}
+    radar = d.get('radar') or {}
+    check(r.status == 200 and d.get('round', {}).get('n') == 1 and d.get('frames') and d.get('tracks') and radar.get('image', '').startswith('/media/radar/'),
+          f'replay: Runde 1 ({r.status} {str(d)[:160]})')
+    check(PA.get(radar.get('image', '/x')).status == 200, 'replay: Radarbild')
+    other = next(c for c in names if c not in (rp_name, no_name))
+    d = PA.get(f'/api/v1/replay/{other}?round=1').json() or {}
+    check(d.get('missing', {}).get('title') == '2D-Ansicht noch nicht da' and d['missing'].get('button'), f'replay ohne Datei: Hinweis ({d})')
+    d = PA.get(f'/api/v1/replay/{no_name}?round=1').json() or {}
+    check('nicht mehr da' in d.get('missing', {}).get('text', '') and not d['missing'].get('button'), f'replay mit Markierung: Demo weg ({d})')
+    check(PA.get('/api/v1/replay/nichtda?round=1').status == 404 and PA.get('/api/v1/replay/..%2F..%2Fx').status == 404, 'replay: fremdes Match 404')
+    check(Client(port).get(f'/api/v1/replay/{rp_name}').status == 401, 'replay nur gekoppelt')
     mo = PA.get('/api/v1/moments').json()
     vids = {v['id'] for v in mo['videos']['items']}
     check(vids == {v['id'] for v in clips} and mo['blocked'] == '', 'moments: eigene Videos, nie blockiert')
@@ -567,6 +623,12 @@ def flow(srv, anon, port, matches, clips, data_dir):
     # Löschen
     check(A.req('DELETE', f'/api/v1/sync/match/{first}').status == 200, 'Match löschen')
     check(PA.get('/api/v1/info').json()['matches'] == len(names) - 1 and PA.get(f'/api/v1/match/{first}?tab=0').status == 404, 'gelöscht: weg')
+    # samt 2D-Daten und Markierung (Löschen geht auch zweimal)
+    check(A.req('DELETE', f'/api/v1/sync/match/{rp_name}').status == 200 and A.req('DELETE', f'/api/v1/sync/match/{no_name}').status == 200,
+          'Matches mit 2D-Daten und Markierung löschen')
+    gone = [q.name for q in (pathlib.Path(data_dir) / 'users' / str(ja['user']['id']) / 'matches').iterdir()
+            if q.name.startswith((rp_name + '.', no_name + '.'))]
+    check(not gone, f'gelöscht: alle Dateien weg ({gone})')
     check(A.req('DELETE', f"/api/v1/sync/clip/{v0['id']}").status == 200, 'Video löschen')
     check(PA.get(f"/media/clip/{v0['id']}.mp4").status == 404 and v0['id'] not in A.get('/api/v1/sync/state').json()['clips'], 'Video weg')
     check(A.req('POST', '/api/v1/account/logout').status == 200 and A.get('/api/v1/sync/state').status == 401, 'Admin meldet FragDesk ab')

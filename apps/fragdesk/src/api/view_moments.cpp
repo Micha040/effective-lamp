@@ -58,7 +58,9 @@ void viewMoments(ViewCtx& c, Response& res) {
                             " s · " + relativeDay(matchEpoch(*mo.m)))
             .ki("stars", std::max(1, std::min(5, mo.h->score / 40 + 1)))
             .kv("mapColor", hexColor(fd::mapColor(mo.m->map)))
-            .kb("clutch", mo.h->clutch > 0);
+            .kb("clutch", mo.h->clutch > 0)
+            .ki("round", mo.h->round)   // 2D-Ansicht an dieser Stelle
+            .ki("tick", momentTick(*mo.h, mo.m->tickrate));
         auto it = clipOf.find(mo.m->checksum + "/" + mo.h->id);
         if (it != clipOf.end()) j.kv("clip", it->second->id);
         else j.key("clip").null();

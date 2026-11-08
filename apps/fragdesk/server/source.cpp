@@ -52,7 +52,7 @@ public:
     int generation() override { return gen; }
     std::vector<fdapi::ClipInfo> clips() override { return store.clipInfos(user); }
     std::string matchFile(const std::string& checksum, const std::string& ext) override {
-        if (!byChecksum.count(checksum) || (ext != "heat" && ext != "replay")) return std::string();   // auch Schutz vor fremden Pfaden
+        if (!byChecksum.count(checksum) || (ext != "heat" && ext != "replay" && ext != "noreplay")) return std::string();   // auch Schutz vor fremden Pfaden
         std::string path = store.matchPath(user->id, checksum, ("." + ext).c_str());
         return fileSize(path) > 0 ? path : std::string();
     }

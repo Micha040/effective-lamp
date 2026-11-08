@@ -144,7 +144,7 @@ func TestExtrasFixtures(t *testing.T) {
 		if len(matches) == 0 {
 			continue
 		}
-		out, err := analyzeFile(matches[0], t.TempDir(), func(string) {})
+		out, err := analyzeFile(matches[0], t.TempDir(), "", func(string) {})
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}

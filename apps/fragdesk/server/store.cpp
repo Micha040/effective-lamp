@@ -78,6 +78,30 @@ std::string cleanText(const std::string& s, size_t maxBytes) {
 
 std::string quotaText(int64_t used, int64_t limit) { return fd::fmtBytes(double(used)) + " von " + fd::fmtBytes(double(limit)); }
 
+const char* matchExt(MatchPart part) {
+    switch (part) {
+        case MatchPart::Json: return ".json";
+        case MatchPart::Heat: return ".heat";
+        case MatchPart::Replay: return ".replay";
+        case MatchPart::NoReplay: return ".noreplay";
+    }
+    return ".json";
+}
+
+namespace {
+
+int64_t& slotOf(MatchRec& r, MatchPart part) {
+    switch (part) {
+        case MatchPart::Heat: return r.heat;
+        case MatchPart::Replay: return r.replay;
+        case MatchPart::NoReplay: return r.noreplay;
+        case MatchPart::Json: break;
+    }
+    return r.json;
+}
+
+}  // namespace
+
 // ---- Laden ------------------------------------------------------------------------------------------------------
 bool Store::open(const std::string& dataDir, std::string& err) {
     dir_ = dataDir;
@@ -215,10 +239,13 @@ void Store::scanFiles(const UserPtr& u) {
             removeFile(path);
             continue;
         }
-        bool json = endsWith(n, ".json"), heat = endsWith(n, ".heat");
-        std::string c = n.substr(0, n.size() - 5);
-        if ((!json && !heat) || !validChecksum(c)) continue;
-        (json ? u->matches[c].json : u->matches[c].heat) = fileSize(path);
+        for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay}) {
+            std::string ext = matchExt(part);
+            if (!endsWith(n, ext)) continue;
+            std::string c = n.substr(0, n.size() - ext.size());
+            if (validChecksum(c)) slotOf(u->matches[c], part) = fileSize(path);
+            break;
+        }
     }
     for (const std::string& n : listDir(cdir)) {
         std::string path = joinPath(cdir, n);
@@ -254,7 +281,10 @@ void Store::scanFiles(const UserPtr& u) {
 
 void Store::recount(const UserPtr& u) {
     int64_t sum = 0;
-    for (const auto& kv : u->matches) sum += std::max<int64_t>(0, kv.second.json) + std::max<int64_t>(0, kv.second.heat);
+    for (const auto& kv : u->matches) {
+        const MatchRec& m = kv.second;
+        sum += std::max<int64_t>(0, m.json) + std::max<int64_t>(0, m.heat) + std::max<int64_t>(0, m.replay) + std::max<int64_t>(0, m.noreplay);
+    }
     for (const auto& kv : u->clips)
         sum += std::max<int64_t>(0, kv.second.mp4) + std::max<int64_t>(0, kv.second.part) + std::max<int64_t>(0, kv.second.thumb);
     u->used = sum;
@@ -760,25 +790,33 @@ Fail Store::checkSpace(const User& u, int64_t grow) const {
     return Fail();
 }
 
-Fail Store::putMatchFile(const UserPtr& u, const std::string& checksum, bool heat, const std::string& body) {
+Fail Store::putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body) {
     std::lock_guard<std::mutex> fl(u->fileMu);
+    bool extra = part == MatchPart::Replay || part == MatchPart::NoReplay;
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (!alive(u)) return Fail::make(401, kGone);
         auto it = u->matches.find(checksum);
+        if (extra && (it == u->matches.end() || it->second.json < 0)) return Fail::make(404, "Das Match ist (noch) nicht auf dem Server.");
+        if (part == MatchPart::NoReplay && it->second.replay >= 0) return Fail();   // die 2D-Daten sind schon da: nichts zu merken
         if (it == u->matches.end() && u->matches.size() >= kMaxMatches)
             return Fail::make(507, "Auf dem Server liegen schon " + std::to_string(kMaxMatches) + " Matches – mehr geht pro Konto nicht.");
-        int64_t old = it == u->matches.end() ? -1 : heat ? it->second.heat : it->second.json;
+        int64_t old = it == u->matches.end() ? -1 : slotOf(it->second, part);
         Fail f = checkSpace(*u, int64_t(body.size()) - std::max<int64_t>(0, old));
         if (!f.ok()) return f;
     }
-    if (!writeAtomic(matchPath(u->id, checksum, heat ? ".heat" : ".json"), body))
+    if (!writeAtomic(matchPath(u->id, checksum, matchExt(part)), body))
         return Fail::make(500, "Speichern auf dem Server ging schief: " + lastError());
+    bool dropMarker = part == MatchPart::Replay && removeFile(matchPath(u->id, checksum, matchExt(MatchPart::NoReplay)));
     std::lock_guard<std::mutex> lk(mu_);
     MatchRec& rec = u->matches[checksum];
-    int64_t& slot = heat ? rec.heat : rec.json;
+    int64_t& slot = slotOf(rec, part);
     u->used += int64_t(body.size()) - std::max<int64_t>(0, slot);
     slot = int64_t(body.size());
+    if (dropMarker && rec.noreplay >= 0) {   // jetzt gibt es 2D-Daten: die Markierung gilt nicht mehr
+        u->used -= rec.noreplay;
+        rec.noreplay = -1;
+    }
     return Fail();
 }
 
@@ -788,8 +826,9 @@ Fail Store::deleteMatch(const UserPtr& u, const std::string& checksum) {
         std::lock_guard<std::mutex> lk(mu_);
         if (!alive(u)) return Fail::make(401, kGone);
     }
-    bool ok = removeFile(matchPath(u->id, checksum, ".json")) && removeFile(matchPath(u->id, checksum, ".heat"));
-    removeFile(matchPath(u->id, checksum, ".replay"));   // gibt es auf dem Server (noch) nicht – sicher ist sicher
+    bool ok = true;
+    for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay})
+        ok = removeFile(matchPath(u->id, checksum, matchExt(part))) && ok;
     std::lock_guard<std::mutex> lk(mu_);
     u->matches.erase(checksum);
     recount(u);

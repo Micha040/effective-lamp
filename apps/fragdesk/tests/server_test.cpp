@@ -126,10 +126,22 @@ int main(int argc, char** argv) {
     CHECK(readFile(testMatches + "/" + names[0], m1) && readFile(testMatches + "/" + names[1], m2) && json::parse(m1, j1) && json::parse(m2, j2));
     const std::string c1 = j1.getString("checksum"), c2 = j2.getString("checksum");
     CHECK(validChecksum(c1) && validChecksum(c2) && c1 != c2);
-    CHECK(store.putMatchFile(a, c1, false, m1).ok() && store.putMatchFile(a, c2, false, m2).ok());
-    CHECK(store.putMatchFile(a, c2, true, "FDHM1234").ok());
+    CHECK(store.putMatchFile(a, c1, MatchPart::Json, m1).ok() && store.putMatchFile(a, c2, MatchPart::Json, m2).ok());
+    CHECK(store.putMatchFile(a, c2, MatchPart::Heat, "FDHM1234").ok());
     CHECK(store.used(a) == int64_t(m1.size() + m2.size() + 8) && store.matchFiles(a).size() == 2);
-    CHECK(store.putMatchFile(a, c1, false, m1).ok() && store.used(a) == int64_t(m1.size() + m2.size() + 8));   // ersetzen zählt nicht doppelt
+    CHECK(store.putMatchFile(a, c1, MatchPart::Json, m1).ok() && store.used(a) == int64_t(m1.size() + m2.size() + 8));   // ersetzen zählt nicht doppelt
+    // 2D-Daten: nur zu einem Match auf dem Server; sie ersetzen die Markierung „keine 2D-Daten möglich“
+    const std::string marker = "{\"reason\":\"demo\"}", rp = "FDRP" + std::string(100, 'r');
+    CHECK(store.putMatchFile(a, "nichtda", MatchPart::Replay, rp).status == 404 && store.putMatchFile(a, "nichtda", MatchPart::NoReplay, marker).status == 404);
+    int64_t before = store.used(a);
+    CHECK(store.putMatchFile(a, c2, MatchPart::NoReplay, marker).ok() && store.matchFiles(a)[c2].noreplay == int64_t(marker.size()));
+    CHECK(store.used(a) == before + int64_t(marker.size()));
+    CHECK(store.putMatchFile(a, c2, MatchPart::Replay, rp).ok());
+    MatchRec r2 = store.matchFiles(a)[c2];
+    CHECK(r2.replay == int64_t(rp.size()) && r2.noreplay < 0 && fileSize(store.matchPath(a->id, c2, ".noreplay")) < 0);
+    CHECK(store.used(a) == before + int64_t(rp.size()));
+    CHECK(store.putMatchFile(a, c2, MatchPart::NoReplay, marker).ok() && store.matchFiles(a)[c2].noreplay < 0);   // neben 2D-Daten: nichts
+    CHECK(store.used(a) == before + int64_t(rp.size()));
     std::string clip = mp4(300000);
     int64_t size = 0;
     const std::string cid = "00112233aabbccdd";
@@ -156,9 +168,10 @@ int main(int argc, char** argv) {
     CHECK(store.setLimit(b->id, 1 << 20).ok());
     f = store.appendClip(b, cid, 0, 2 << 20, clip.substr(0, 1000), size);
     CHECK(f.status == 507 && f.error.find("Dein Speicher auf dem Server ist voll") == 0);
-    CHECK(store.putMatchFile(b, c1, false, m1).ok());
+    CHECK(store.putMatchFile(b, c1, MatchPart::Json, m1).ok());
     std::string big(1 << 20, 'x');
-    CHECK(store.putMatchFile(b, "big", true, big).status == 507);
+    CHECK(store.putMatchFile(b, "big", MatchPart::Heat, big).status == 507);
+    CHECK(store.putMatchFile(b, c1, MatchPart::Replay, "FDRP" + big).status == 507);
     store.minFree = int64_t(1) << 62;   // Platte „voll“
     CHECK(store.putThumb(b, cid, "\xFF\xD8\xFF\xE0").status == 507);
     store.minFree = 0;
@@ -198,7 +211,17 @@ int main(int argc, char** argv) {
     views.with(a, [&](fdapi::Source& s) { detailA = s.detail(c2, d) && !d.kills.empty(); });
     views.with(b, [&](fdapi::Source& s) { detailB = s.detail(c2, d) || s.detail("../../x", d); });   // c2 hat nur A
     CHECK(detailA && !detailB);
+    std::string replayA, markerA, replayB, otherA;
+    views.with(a, [&](fdapi::Source& s) {
+        replayA = s.matchFile(c2, "replay");
+        markerA = s.matchFile(c2, "noreplay");
+        otherA = s.matchFile(c2, "json");   // nur heat, replay, noreplay
+    });
+    views.with(b, [&](fdapi::Source& s) { replayB = s.matchFile(c2, "replay"); });
+    CHECK(replayA == store.matchPath(a->id, c2, ".replay") && markerA.empty() && otherA.empty() && replayB.empty());
+    CHECK(store.putMatchFile(a, c1, MatchPart::Replay, rp).ok() && fileSize(store.matchPath(a->id, c1, ".replay")) > 0);
     CHECK(store.deleteMatch(a, c1).ok());
+    CHECK(fileSize(store.matchPath(a->id, c1, ".replay")) < 0 && fileSize(store.matchPath(a->id, c1, ".json")) < 0);   // samt 2D-Daten
     views.matchChanged(a, c1);
     views.with(a, [&](fdapi::Source& s) {
         na = s.matches().size();
@@ -219,6 +242,7 @@ int main(int argc, char** argv) {
     CHECK(again.open(data, err));
     UserPtr a2 = again.byAccountToken(tokenA);
     CHECK(a2 && again.info(a2).matches == 1 && again.info(a2).clips == 1 && again.used(a2) == store.used(a));
+    CHECK(again.matchFiles(a2)[c2].replay == int64_t(rp.size()));   // 2D-Daten auch nach dem Neustart gezählt
     CHECK(again.users().size() == 1 && again.info(a2).devices.size() == 1);
 
     // Größengrenze vor dem Lesen: große Körper nur mit gültigem Konto-Token
@@ -231,6 +255,8 @@ int main(int argc, char** argv) {
     CHECK(app.bodyLimit(head) == kMaxChunk);
     head.path = "/api/v1/sync/match/x/json";
     CHECK(app.bodyLimit(head) == kMaxMatchFile);
+    head.path = "/api/v1/sync/match/x/replay";
+    CHECK(app.bodyLimit(head) == kMaxReplayFile);
     head.method = "POST";
     CHECK(app.bodyLimit(head) == 64 * 1024);
 

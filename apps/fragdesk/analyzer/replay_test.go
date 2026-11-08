@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -167,7 +168,33 @@ func TestReplayHelpers(t *testing.T) {
 	}
 }
 
-// Mit echten Demos (FRAGDESK_DEMOS): vollständige Datei, sinnvolle Inhalte, Kills passen zur Auswertung
+// Ein Fehler in einem Handler der 2D-Daten stoppt nur die 2D-Daten (im gemeinsamen Durchgang mit Heatmap und Zielen)
+func TestReplayGuard(t *testing.T) {
+	rb := newReplayBuilder(nil)
+	calls := 0
+	h := on(rb, func(n int) {
+		calls++
+		if n == 2 {
+			var m map[string]int
+			m["x"] = 1 // Panik
+		}
+	})
+	h(1)
+	h(2) // darf nicht durchschlagen
+	h(3) // nach dem Fehler: nichts mehr
+	if calls != 2 || errorCode(rb.broken) != "CORRUPT" {
+		t.Fatalf("calls %d, broken %v", calls, rb.broken)
+	}
+	if err := rb.finish(nil, filepath.Join(t.TempDir(), "x.replay")); errorCode(err) != "CORRUPT" {
+		t.Fatalf("finish nach Fehler: %v", err)
+	}
+	if err := newReplayBuilder(nil).finish(nil, filepath.Join(t.TempDir(), "x.replay")); errorCode(err) != "EMPTY" {
+		t.Fatalf("finish ohne Frames: %v", err)
+	}
+}
+
+// Mit echten Demos (FRAGDESK_DEMOS): vollständige Datei, sinnvolle Inhalte, Kills passen zur Auswertung; beim Auswerten
+// mit -replay (gemeinsamer Durchgang) entsteht genau dieselbe Datei wie mit -replay allein
 func TestReplayFixtures(t *testing.T) {
 	root := os.Getenv("FRAGDESK_DEMOS")
 	if root == "" {
@@ -189,11 +216,19 @@ func TestReplayFixtures(t *testing.T) {
 			t.Errorf("%s: Karte %s, Tickrate %v, %d Frames, %d Spieler, %d Kills, %d Effekte, %d Flugbahnen, max %d",
 				file, d.mapName, d.tickrate, d.frames, len(d.players), len(d.kills), len(d.effects), len(d.tracks), d.maxAbs)
 		}
-		// Kills müssen zu den Kills der Auswertung passen (gleiche Ticks)
-		out, err := analyzeFile(matches[0], t.TempDir(), func(string) {})
+		// Auswertung mit 2D-Daten im selben Lauf: dieselbe Datei, keine Warnung
+		combined := filepath.Join(t.TempDir(), "y.replay")
+		out, err := analyzeFile(matches[0], t.TempDir(), combined, func(string) {})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if b2, err := os.ReadFile(combined); err != nil || string(b2) != string(b) {
+			t.Errorf("%s: 2D-Daten aus der Auswertung weichen ab (%d statt %d Bytes, %v)", file, len(b2), len(b), err)
+		}
+		if len(out.Warnings) != 0 || len(out.heat) == 0 {
+			t.Errorf("%s: Warnungen %v, %d Bytes Heatmap", file, out.Warnings, len(out.heat))
+		}
+		// Kills müssen zu den Kills der Auswertung passen (gleiche Ticks)
 		ticks := map[int32]bool{}
 		for _, k := range d.kills {
 			ticks[k.tick] = true
@@ -218,5 +253,32 @@ func TestReplayFixtures(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %d KB, %d Frames, %d Flugbahnen, %d Effekte", file, len(b)/1024, d.frames, len(d.tracks), len(d.effects))
+	}
+}
+
+// Gehen die 2D-Daten beim Auswerten schief (hier: Ziel nicht beschreibbar), bleibt die Auswertung samt Heatmap gültig
+func TestReplayFailureKeepsAnalysis(t *testing.T) {
+	root := os.Getenv("FRAGDESK_DEMOS")
+	if root == "" {
+		t.Skip("FRAGDESK_DEMOS nicht gesetzt")
+	}
+	matches, _ := filepath.Glob(filepath.Join(root, "*", "valve-de_mirage-472514809.dem"))
+	if len(matches) == 0 {
+		t.Skip("valve-de_mirage-472514809.dem fehlt")
+	}
+	blocker := filepath.Join(t.TempDir(), "datei")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(blocker, "unter", "x.replay") // Ordner unter einer Datei: lässt sich nicht anlegen
+	out, err := analyzeFile(matches[0], t.TempDir(), target, func(string) {})
+	if err != nil {
+		t.Fatalf("Auswertung soll trotzdem gehen: %v", err)
+	}
+	if len(out.Kills) == 0 || len(out.heat) == 0 || len(out.Warnings) != 1 || !strings.HasPrefix(out.Warnings[0], "2D-Daten: WRITE") {
+		t.Fatalf("%d Kills, %d Bytes Heatmap, Warnungen %q", len(out.Kills), len(out.heat), out.Warnings)
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Fatal("2D-Daten dürfen nicht da sein")
 	}
 }

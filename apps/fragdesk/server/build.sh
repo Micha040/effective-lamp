@@ -12,7 +12,7 @@ export FD_CXX="${CXX:-g++}" FD_OUT=$OUT
 export FD_FLAGS="-std=c++17 -O2 -Wall -Wextra -pthread -Iserver -DFD_SERVER_VERSION=\"$VERSION\""
 SRCS="src/core/json.cpp src/core/model.cpp src/core/stats.cpp src/core/format.cpp src/core/radar.cpp src/core/heat.cpp
   src/core/replay.cpp src/api/http.cpp src/api/mobile.cpp src/api/view_common.cpp src/api/view_match.cpp src/api/view_matches.cpp
-  src/api/view_moments.cpp src/api/view_overview.cpp src/api/view_stats.cpp server/sha256.cpp server/files.cpp server/store.cpp
+  src/api/view_moments.cpp src/api/view_overview.cpp src/api/view_stats.cpp src/api/view_replay.cpp server/sha256.cpp server/files.cpp server/store.cpp
   server/source.cpp server/app.cpp server/main.cpp $OUT/web_assets.cpp"
 # parallel übersetzen; Objektnamen mit Ordner, damit gleiche Dateinamen nicht kollidieren
 # shellcheck disable=SC2016   # wird erst in sh -c ausgewertet

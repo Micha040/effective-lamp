@@ -27,6 +27,14 @@ void viewMatches(ViewCtx& c, Response& res);    // GET /api/v1/matches
 void viewMatch(ViewCtx& c, Response& res, const std::string& checksum);   // GET /api/v1/match/<Prüfsumme>?player=
 void viewStats(ViewCtx& c, Response& res);      // GET /api/v1/stats?mode=&period=&map=&tab=
 void viewMoments(ViewCtx& c, Response& res);    // GET /api/v1/moments
+// GET /api/v1/replay/<Prüfsumme>?round=&retry= – eigener Ablauf ohne ViewCtx: holt im Thread der Daten nur Pfade und
+// Runden, liest die .replay-Datei im Thread der Anfrage (view_replay.cpp)
+void viewReplay(Host& host, const Request& req, Response& res, const std::string& checksum);
+// Zuletzt gelesene 2D-Daten freigeben, wenn so lange niemand danach gefragt hat; true = freigegeben
+bool dropIdleReplay(int64_t idleSeconds);
+// Moment in der 2D-Ansicht: Tick für #/replay/<Prüfsumme>?round=&tick= (die App beginnt 2 s davor – so steht sie am
+// Anfang des Ausschnitts, wie das Video); 0 = unbekannt
+int momentTick(const fd::HighlightInfo& h, double tickrate);
 
 // ---- Gemeinsame Helfer ------------------------------------------------------------------------------------------
 std::string hexColor(uint32_t rgb);   // 0xRRGGBB -> "#rrggbb"

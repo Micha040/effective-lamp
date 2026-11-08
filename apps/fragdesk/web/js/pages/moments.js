@@ -3,7 +3,7 @@ import {h, icon, chips, tabs, emptyState, skeleton, notice, stars} from '../ui.j
 import {filterBar, filterQuery} from '../filters.js';
 import {openPlayer} from './player.js';
 import * as api from '../api.js';
-import {store, replaceRoute} from '../app.js';
+import {store, replaceRoute, replayHref} from '../app.js';
 
 export async function render(ctx) {
   ctx.title('Momente');
@@ -28,13 +28,19 @@ function draw(ctx, d, tab, who) {
     const s = d.suggestions;
     if (s.empty) out.push(emptyState(s.empty, 'spark'));
     else {
+      // mit Video: abspielen (daneben die 2D-Ansicht); ohne: die 2D-Ansicht genau an dieser Stelle
       out.push(h('section', {class: 'card flush'}, h('div', {class: 'list'}, s.items.map(m => {
-        const row = h('a', {class: 'row', href: m.clip ? null : '#/match/' + m.match + '/6'},
+        const to = replayHref(m.match, m.round, m.tick);
+        const kids = [
           h('span', {class: 'lead', style: {boxShadow: `inset 3px 0 0 ${m.mapColor}`}}, icon(m.clip ? 'play' : m.clutch ? 'star' : 'spark')),
           h('div', {class: 'main'}, h('b', null, m.title), h('small', null, m.meta)),
-          h('div', {class: 'side'}, stars(m.stars), m.clip ? h('small', null, 'Video') : null));
-        if (m.clip) row.addEventListener('click', () => openPlayer({id: m.clip, title: m.title, sub: m.meta, match: m.match}));
-        return row;
+          h('div', {class: 'side'}, stars(m.stars), h('small', null, m.clip ? 'Video' : '2D-Ansicht')),
+        ];
+        if (!m.clip) return h('a', {class: 'row', href: to}, kids);
+        const play = h('button', {class: 'row', type: 'button', style: {flex: '1', minWidth: '0', paddingRight: '4px'}}, kids);
+        play.addEventListener('click', () => openPlayer({id: m.clip, title: m.title, sub: m.meta, match: m.match}));
+        return h('div', {class: 'row', style: {padding: '0 8px 0 0'}}, play,
+          h('a', {class: 'iconbtn', href: to, 'aria-label': 'In der 2D-Ansicht ansehen', title: '2D-Ansicht'}, icon('map')));
       }))));
       if (s.more) out.push(h('div', {class: 'muted', style: {textAlign: 'center', fontSize: '13px'}}, s.more));
     }

@@ -4,7 +4,7 @@
 import {h, icon, card, chips, statTile, bars, tabs, sheet, emptyState, notice, skeleton, stars, toast, useCss} from '../ui.js';
 import {openPlayer} from './player.js';
 import * as api from '../api.js';
-import {store, replaceRoute} from '../app.js';
+import {store, replaceRoute, replayHref} from '../app.js';
 
 const TABS = ['Übersicht', 'Scoreboard', 'Runden', 'Waffen', 'Duelle', 'Utility', 'Momente'];   // Nummern wie in FragDesk
 const PER_PLAYER = [true, false, true, true, true, false, false];   // Bereiche mit „Werte von …“
@@ -79,19 +79,22 @@ function draw(ctx, nav, d) {
 
 function top(nav, hd) {
   return [
-    hd ? header(hd) : h('div', {class: 'skel m-headskel'}),
+    hd ? header(hd, nav.id) : h('div', {class: 'skel m-headskel'}),
     tabs(TABS, nav.tab, i => { if (i !== nav.tab) replaceRoute(href(nav.id, i, nav.player)); }),
   ];
 }
 
-function header(hd) {
+function header(hd, id) {
   const pill = {win: 'good', loss: 'bad'}[hd.result] || 'neutral';
   return h('div', {class: 'm-head'},
     h('span', {class: 'm-bar', style: {background: hd.mapColor}}),
     h('h1', {class: 'm-map'}, hd.map),
     h('div', {class: 'm-score' + (hd.result ? ' ' + hd.result : '')}, hd.score),
     h('div', {class: 'm-meta' + (hd.resultText ? '' : ' wide')}, hd.meta, hd.share ? h('div', {class: 'm-share'}, hd.share) : null),
-    hd.resultText ? h('span', {class: 'pill m-res ' + pill}, hd.resultText) : null);
+    hd.resultText ? h('span', {class: 'pill m-res ' + pill}, hd.resultText) : null,
+    // wie in FragDesk oben im Match: jede Runde von oben zum Abspielen
+    h('a', {class: 'btn', href: replayHref(id), style: {gridColumn: '2 / span 2', justifySelf: 'start', marginTop: '8px', minHeight: '38px', padding: '8px 14px', fontSize: '14px'}},
+      icon('map'), '2D-Ansicht'));
 }
 
 // „Werte von …“ wie in FragDesk; die Wahl steht in der Adresse (?player=), der eigene Spieler ohne
@@ -203,7 +206,9 @@ function playerSheet(nav, t, r) {
 // ---- Runden, Waffen, Duelle, Utility --------------------------------------------------------------------------------
 function roundsTab(ctx, nav, d) {
   const t = d.rounds.table;
-  return [card(null, table(t), glossary(t))];
+  // Runde antippen: 2D-Ansicht dieser Runde (wie in FragDesk); die Nummer steht als Sortierwert in der ersten Zelle
+  const open = r => { const n = r.c[0] && r.c[0].s; if (n) location.hash = replayHref(nav.id, n); };
+  return [card(null, table(t, {onRow: open, anyRow: true}), glossary(t)), h('p', {class: 'm-hint'}, 'Tippe auf eine Runde, um sie in der 2D-Ansicht anzusehen.')];
 }
 
 function weaponsTab(ctx, nav, d) {
@@ -286,21 +291,25 @@ function momentsTab(ctx, nav, d) {
   if (!items.length) out.push(emptyState(who ? mo.emptyAll : mo.emptyMine, 'film'));
   else out.push(h('section', {class: 'card flush'}, h('div', {class: 'list m-moms'}, items.map(m => momentItem(nav, m, who === 1)))));
   out.push(h('p', {class: 'm-hint'},
-    '„In CS2 ansehen“ und „Aufnehmen“ gehen in FragDesk am PC. Aufgenommene Videos spielst du hier ab und speicherst sie aufs Handy.'));
+    '„In CS2 ansehen“ und „Aufnehmen“ gehen in FragDesk am PC. Aufgenommene Videos spielst du hier ab und speicherst sie aufs Handy; '
+    + 'jeden Moment siehst du hier auch in der 2D-Ansicht.'));
   return out;
 }
 
+// Moment: mit Video spielt der Eintrag es ab (daneben die 2D-Ansicht), ohne öffnet er die 2D-Ansicht an dieser Stelle
 function momentItem(nav, m, all) {
   const meta = all && m.who ? m.who + ' · ' + m.meta : m.meta;
+  const to = replayHref(nav.id, m.round, m.tick);
   const kids = [
     h('span', {class: 'lead'}, icon(m.clip ? 'play' : m.clutch ? 'star' : 'spark')),
     h('div', {class: 'main'}, h('b', null, m.title), h('small', null, meta)),
-    h('div', {class: 'side'}, stars(m.stars), m.clip ? h('small', null, 'Video') : null),
+    h('div', {class: 'side'}, stars(m.stars), h('small', null, m.clip ? 'Video' : '2D-Ansicht')),
   ];
-  if (!m.clip) return h('div', {class: 'row m-static'}, kids);
-  const row = h('button', {class: 'row', type: 'button'}, kids);
-  row.addEventListener('click', () => openPlayer({id: m.clip, title: m.title, sub: meta, match: nav.id}));
-  return row;
+  if (!m.clip) return h('a', {class: 'row', href: to}, kids, icon('chev', 'chev'));
+  const play = h('button', {class: 'row', type: 'button', style: {flex: '1', minWidth: '0', paddingRight: '4px'}}, kids);
+  play.addEventListener('click', () => openPlayer({id: m.clip, title: m.title, sub: meta, match: nav.id}));
+  return h('div', {class: 'row', style: {padding: '0 8px 0 0'}}, play,
+    h('a', {class: 'iconbtn', href: to, 'aria-label': 'In der 2D-Ansicht ansehen', title: '2D-Ansicht'}, icon('map')));
 }
 
 const PAGES = [overviewTab, scoreboardTab, roundsTab, weaponsTab, duelsTab, utilityTab, momentsTab];
@@ -343,7 +352,7 @@ function thead(t, st) {
 }
 
 function tableRow(t, r, opts) {
-  const tap = !!(r.player && opts.onRow);
+  const tap = !!(opts.onRow && (r.player || opts.anyRow));
   const cls = [r.hl ? 'me' : '', r.bar ? 'm-' + r.bar : '', tap ? 'tap' : ''].filter(Boolean).join(' ');
   const tr = h('tr', {class: cls || null}, r.c.map((c, i) => tableCell(c, t.cols[i] || {})));
   if (tap) tr.addEventListener('click', () => opts.onRow(r));

@@ -3,7 +3,8 @@
 const CACHE = 'fragdesk-1.4.0';
 const SHELL = ['./', 'index.html', 'app.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'js/app.js', 'js/api.js', 'js/ui.js',
   'js/chart.js', 'js/filters.js', 'js/radar.js', 'js/pages/pair.js', 'js/pages/overview.js', 'js/pages/matches.js', 'js/pages/match.js', 'js/pages/stats.js',
-  'js/pages/moments.js', 'js/pages/settings.js', 'js/pages/player.js', 'js/pages/admin.js', 'js/pages/invite.js', 'css/match.css', 'css/stats.css'];
+  'js/pages/moments.js', 'js/pages/settings.js', 'js/pages/player.js', 'js/pages/admin.js', 'js/pages/invite.js', 'css/match.css', 'css/stats.css',
+  'js/pages/replay.js', 'css/replay.css'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
@@ -18,6 +19,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/media/')) return;
   if (url.pathname === '/api/v1/session' || url.pathname === '/api/v1/pair') return;   // Anmeldung nie aus dem Speicher
+  if (url.pathname.startsWith('/api/v1/replay/')) return;   // 2D-Ansicht: 30–300 KB je Runde – nicht alle Runden speichern
   e.respondWith((async () => {
     try {
       const res = await fetch(req);

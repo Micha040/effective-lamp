@@ -1,9 +1,10 @@
 // fdanalyze wertet eine CS2-Demo für FragDesk aus (Teil von efficient lamp).
 //
-//	fdanalyze -demo <Datei> -out <Datei.json> [-temp <Ordner>] [-pretty]
-//	        (schreibt daneben <Datei>.heat mit den Heatmap-Daten, siehe extras.go)
+//	fdanalyze -demo <Datei> -out <Datei.json> [-replay <Datei.replay>] [-temp <Ordner>] [-pretty]
+//	        (schreibt daneben <Datei>.heat mit den Heatmap-Daten, siehe extras.go; mit -replay im selben Lauf auch die
+//	        Daten der 2D-Ansicht – fehlen die am Ende, ist die Auswertung trotzdem gültig, Hinweis unter "warnings")
 //	fdanalyze -demo <Datei> -unpack <Datei.dem> [-temp <Ordner>]   (nur entpacken, z. B. zum Abspielen in CS2)
-//	fdanalyze -demo <Datei> -replay <Datei.replay> [-temp <Ordner>]   (Daten für die 2D-Ansicht, siehe replay.go)
+//	fdanalyze -demo <Datei> -replay <Datei.replay> [-temp <Ordner>]   (nur die Daten für die 2D-Ansicht, siehe replay.go)
 //	fdanalyze -version
 //
 // Fortschritt und Ergebnis stehen zeilenweise auf der Standardausgabe:
@@ -56,7 +57,7 @@ func main() {
 		stdout.Flush()
 		return
 	}
-	if *demo != "" && *replayTo != "" {
+	if *demo != "" && *replayTo != "" && *outPath == "" { // nur 2D-Daten
 		stdout := bufio.NewWriter(os.Stdout)
 		if err := replayFile(*demo, *replayTo, *tempDir); err != nil {
 			fmt.Fprintf(stdout, "ERROR %s %s\n", errorCode(err), strings.ReplaceAll(err.Error(), "\n", " "))
@@ -84,7 +85,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	out, err := analyzeFile(*demo, *tempDir, step)
+	out, err := analyzeFile(*demo, *tempDir, *replayTo, step)
 	if err != nil {
 		fail(err)
 	}
