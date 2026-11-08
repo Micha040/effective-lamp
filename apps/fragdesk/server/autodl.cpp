@@ -114,6 +114,18 @@ bool validRefreshToken(const std::string& s) {
     return true;
 }
 
+bool validDemoUrl(const std::string& s) {
+    size_t start = s.compare(0, 7, "http://") == 0 ? 7 : s.compare(0, 8, "https://") == 0 ? 8 : 0;
+    if (!start || s.size() > 512 || s.size() <= start) return false;
+    for (unsigned char ch : s)
+        if (ch <= 0x20 || ch >= 0x7f || ch == '"' || ch == '<' || ch == '>' || ch == '\\' || ch == '`' || ch == '{' || ch == '}' || ch == '|' ||
+            ch == '^')
+            return false;
+    size_t end = s.find_first_of("/?#", start);
+    std::string host = s.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    return !host.empty() && host.find('@') == std::string::npos;   // keine Zugangsdaten in der Adresse
+}
+
 bool validSteamName(const std::string& s) {
     if (s.empty() || s.size() > 64) return false;
     for (unsigned char ch : s)

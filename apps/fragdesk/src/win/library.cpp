@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
+#include "../api/jsonw.h"
+#include "../core/json.h"
 #include "common.h"
 #include "replay_maker.h"
 
@@ -104,12 +107,46 @@ void Library::setFolders(const std::vector<std::pair<std::wstring, std::wstring>
         if (!f.first.empty()) folders_.push_back(f);
 }
 
-std::wstring Library::matchFile(const std::string& checksum) {
+static std::wstring safeStem(const std::string& checksum) {
     std::wstring safe;
     for (char c : checksum)
         if (std::isalnum((unsigned char)c) || c == '-' || c == '_') safe += wchar_t(c);
     if (safe.empty()) safe = L"unbenannt";
-    return joinPath(matchesDir(), safe + L".json");
+    return safe;
+}
+
+std::wstring Library::matchFile(const std::string& checksum) { return joinPath(matchesDir(), safeStem(checksum) + L".json"); }
+std::wstring Library::pulledFile(const std::string& checksum) { return joinPath(matchesDir(), safeStem(checksum) + L".src"); }
+
+// matches\<Prüfsumme>.src: {"from":"server","fetched":…,"url":…,"matchtime":…,"until":…,"shareCode":…,"demo":…,"gone":…}
+bool Library::writePulled(const std::string& checksum, const PulledInfo& p) {
+    fdapi::JsonW j;
+    j.obj()
+        .kv("from", "server")
+        .kb("fetched", p.fetched)
+        .kv("url", p.url)
+        .ki("matchtime", p.matchtime)
+        .ki("until", p.until)
+        .kv("shareCode", p.shareCode)
+        .kv("demo", narrow(p.demo))
+        .kb("gone", p.gone)
+        .end();
+    createDirs(matchesDir());
+    return writeFileAtomic(pulledFile(checksum), j.take() + "\n");
+}
+
+bool Library::readPulled(const std::wstring& path, PulledInfo& p) {
+    std::string text;
+    json::Value v;
+    if (!readFile(path, text, 64 * 1024) || !json::parse(text, v) || !v.isObject() || v.getString("from") != "server") return false;
+    p.fetched = v.getBool("fetched");
+    p.url = v.getString("url");
+    p.shareCode = v.getString("shareCode");
+    p.matchtime = std::max<int64_t>(0, int64_t(v.getNumber("matchtime")));
+    p.until = std::max<int64_t>(0, int64_t(v.getNumber("until")));
+    p.demo = widen(v.getString("demo"));
+    p.gone = v.getBool("gone");
+    return true;
 }
 
 // ---- Laden ----------------------------------------------------------------------------------------------------
@@ -122,7 +159,7 @@ static LibraryLoad* loadAll() {
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::wstring name = fd.cFileName;
-        if (name.rfind(L"tmp-", 0) == 0) continue;
+        if (name.rfind(L"tmp-", 0) == 0 || !endsWithI(name, L".json")) continue;
         std::string text, err;
         auto m = std::make_unique<fd::Match>();
         if (readFile(joinPath(dir, name), text, 64u << 20) && fd::parseMatch(text, *m, err, false)) r->matches.push_back(std::move(m));
@@ -132,6 +169,31 @@ static LibraryLoad* loadAll() {
         }
     } while (FindNextFileW(f, &fd));
     FindClose(f);
+    // vom eigenen Server geholt: Markierungen (.src) dazu, eine von Valve geladene Demo gleich eintragen
+    std::map<std::string, fd::Match*> byChecksum;
+    for (auto& m : r->matches) byChecksum[m->checksum] = m.get();
+    f = FindFirstFileW(joinPath(dir, L"*.src").c_str(), &fd);
+    if (f != INVALID_HANDLE_VALUE) {
+        do {
+            std::wstring name = fd.cFileName;
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !endsWithI(name, L".src")) continue;
+            std::string cs = narrow(name.substr(0, name.size() - 4));
+            auto it = byChecksum.find(cs);
+            PulledInfo p;
+            if (it == byChecksum.end() || !Library::readPulled(joinPath(dir, name), p)) {
+                // ohne Auswertung (Abgleich unterbrochen) oder unlesbar: der nächste Abgleich holt das Match neu
+                DeleteFileW(joinPath(dir, name).c_str());
+                continue;
+            }
+            if (!p.demo.empty() && fileExists(p.demo)) {
+                it->second->demoPath = narrow(p.demo);
+                it->second->demoSize = fileSize(p.demo);
+            } else p.demo.clear();   // im Explorer gelöscht: wieder ohne Demo
+            if (it->second->shareCode.empty()) it->second->shareCode = p.shareCode;
+            r->pulled[cs] = p;
+        } while (FindNextFileW(f, &fd));
+        FindClose(f);
+    }
     return r;
 }
 
@@ -145,10 +207,120 @@ void Library::loadNow() { onLoaded(loadAll()); }
 void Library::onLoaded(LibraryLoad* r) {
     std::unique_ptr<LibraryLoad> own(r);
     matches = std::move(r->matches);
+    pulled_ = std::move(r->pulled);
     sortMatches();
     loaded_ = true;
     ++generation;
-    logLine(L"Bibliothek: %zu Matches geladen, %d nicht lesbar", matches.size(), r->failed);
+    logLine(L"Bibliothek: %zu Matches geladen (%zu vom Server geholt), %d nicht lesbar", matches.size(), pulled_.size(), r->failed);
+}
+
+// ---- Vom eigenen Server geholt --------------------------------------------------------------------------------
+const PulledInfo* Library::pulled(const std::string& checksum) const {
+    auto it = pulled_.find(checksum);
+    return it == pulled_.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Library::pulledChecksums() const {
+    std::vector<std::string> out;
+    for (const auto& kv : pulled_) out.push_back(kv.first);
+    return out;
+}
+
+void Library::applyLink(fd::Match& m) const {
+    auto it = pulled_.find(m.checksum);
+    if (it == pulled_.end()) return;
+    if (m.shareCode.empty()) m.shareCode = it->second.shareCode;   // mit diesem Freigabecode hat der Server es gefunden
+    if (it->second.demo.empty()) return;
+    m.demoPath = narrow(it->second.demo);
+    m.demoSize = std::max<int64_t>(0, fileSize(it->second.demo));
+}
+
+void Library::addPulled(std::vector<PulledMatch>& batch) {
+    if (batch.empty()) return;
+    for (PulledMatch& pm : batch) {
+        if (!pm.match) continue;
+        const std::string cs = pm.match->checksum;
+        auto it = pulled_.find(cs);
+        PulledInfo next = pm.info;
+        if (it != pulled_.end()) {   // schon einmal geholt: geladene Demo bleibt; Quelle neu schreiben, falls geändert
+            next.demo = it->second.demo;
+            next.gone = it->second.gone && next.url == it->second.url;
+            const PulledInfo& old = it->second;
+            if (old.url != next.url || old.matchtime != next.matchtime || old.until != next.until || old.fetched != next.fetched ||
+                old.shareCode != next.shareCode)
+                writePulled(cs, next);
+        }
+        pulled_[cs] = next;
+        applyLink(*pm.match);
+        bool replaced = false;
+        for (auto& old : matches)
+            if (old->checksum == cs) {
+                old = std::move(pm.match);
+                replaced = true;
+                break;
+            }
+        if (!replaced) matches.push_back(std::move(pm.match));
+    }
+    sortMatches();
+    ++generation;
+}
+
+void Library::linkDemo(const std::string& checksum, const std::wstring& demo) {
+    auto it = pulled_.find(checksum);
+    if (it == pulled_.end()) return;
+    it->second.demo = demo;
+    it->second.gone = false;
+    writePulled(checksum, it->second);
+    for (auto& m : matches)
+        if (m->checksum == checksum) applyLink(*m);
+    ++generation;
+}
+
+std::wstring Library::downloadName(const std::string& url, const std::string& checksum) {
+    auto digits = [](const std::string& s) { return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; }); };
+    std::string host, path;
+    size_t scheme = url.find("://");
+    if (scheme != std::string::npos) {
+        size_t slash = url.find('/', scheme + 3);
+        host = url.substr(scheme + 3, slash == std::string::npos ? std::string::npos : slash - scheme - 3);
+        path = slash == std::string::npos ? std::string() : url.substr(slash);
+        size_t q = path.find_first_of("?#");
+        if (q != std::string::npos) path.resize(q);
+    }
+    std::string ext = ".dem.bz2";
+    for (const char* e : {".dem.bz2", ".dem.gz", ".dem.zst", ".dem"})
+        if (path.size() > strlen(e) && path.compare(path.size() - strlen(e), strlen(e), e) == 0) {
+            ext = e;
+            break;
+        }
+    std::string region;   // replay183.valve.net → 183
+    if (host.compare(0, 6, "replay") == 0) {
+        size_t n = 6;
+        while (n < host.size() && host[n] >= '0' && host[n] <= '9') ++n;
+        region = host.substr(6, n - 6);
+    }
+    // …/730/<a>_<b>.dem.bz2
+    std::string name;
+    if (path.size() > ext.size()) {
+        std::string stem = path.substr(0, path.size() - ext.size());
+        size_t s2 = stem.rfind('/');
+        size_t s1 = s2 == std::string::npos || s2 == 0 ? std::string::npos : stem.rfind('/', s2 - 1);
+        if (s1 != std::string::npos) {
+            std::string app = stem.substr(s1 + 1, s2 - s1 - 1), file = stem.substr(s2 + 1);
+            size_t us = file.find('_');
+            if (digits(app) && us != std::string::npos && digits(file.substr(0, us)) && digits(file.substr(us + 1)))
+                name = "match" + app + "_" + file + (region.empty() ? "" : "_" + region) + ext;
+        }
+    }
+    if (name.empty()) name = "match730_" + narrow(safeStem(checksum)) + ext;
+    return widen(name);
+}
+
+void Library::markDemoGone(const std::string& checksum) {
+    auto it = pulled_.find(checksum);
+    if (it == pulled_.end() || it->second.gone) return;
+    it->second.gone = true;
+    writePulled(checksum, it->second);
 }
 
 void Library::sortMatches() {
@@ -171,6 +343,7 @@ bool Library::loadDetail(const std::string& checksum, fd::Match& out, std::wstri
         err = L"Auswertung nicht lesbar: " + widen(perr);
         return false;
     }
+    applyLink(out);   // vom Server geholt, Demo von Valve geladen: die liegt hier
     return true;
 }
 
@@ -178,6 +351,8 @@ bool Library::remove(const std::string& checksum) {
     DeleteFileW(matchFile(checksum).c_str());
     DeleteFileW(joinPath(matchesDir(), widen(checksum) + L".replay").c_str());   // 2D-Daten
     DeleteFileW(joinPath(matchesDir(), widen(checksum) + L".heat").c_str());     // Heatmap
+    DeleteFileW(pulledFile(checksum).c_str());                                    // Markierung „vom Server“
+    pulled_.erase(checksum);
     auto it = std::find_if(matches.begin(), matches.end(), [&](const auto& m) { return m->checksum == checksum; });
     if (it == matches.end()) return false;
     matches.erase(it);
@@ -240,6 +415,24 @@ void Library::scanAsync() {
 
 void Library::onScanned(ScanResult* r) {
     std::unique_ptr<ScanResult> own(r);
+    // Von Valve geladen (demosDir): gehört eine Demo zu einem geholten Match ohne Demo, gleich verbinden (z. B. wenn
+    // FragDesk nach dem Laden beendet wurde, bevor es sie eintragen konnte)
+    if (!pulled_.empty()) {
+        std::map<std::wstring, std::string> expect;   // erwarteter Dateiname -> Prüfsumme
+        for (const auto& kv : pulled_)
+            if (!kv.second.url.empty() && (kv.second.demo.empty() || !fileExists(kv.second.demo)))
+                expect[lowerCase(downloadName(kv.second.url, kv.first))] = kv.first;
+        std::wstring mine = demosDir();
+        for (const auto& f : r->files) {
+            if (expect.empty()) break;
+            if (!samePath(parentDir(f.path), mine)) continue;
+            auto it = expect.find(lowerCase(fileName(f.path)));
+            if (it == expect.end()) continue;
+            logLine(L"Bibliothek: %ls gehört zu %hs (vom Server geholt)", f.path.c_str(), it->second.c_str());
+            linkDemo(it->second, f.path);
+            expect.erase(it);
+        }
+    }
     auto known = knownList(matches);
     std::vector<DemoFile> next;
     for (auto& f : r->files) {
@@ -348,7 +541,17 @@ void Library::onEvent(AnalysisEvent* e) {
         }
         break;
     }
-    if (e->kind == AnalysisEvent::Done && e->match) insertMatch(std::move(e->match));
+    if (e->kind == AnalysisEvent::Done && e->match) {
+        // hier ausgewertet: ab jetzt ein eigenes Match (der Abgleich lädt es hoch). Eine von Valve geladene Kopie, die
+        // nicht die ausgewertete Demo ist, braucht es dann nicht mehr.
+        auto it = pulled_.find(e->match->checksum);
+        if (it != pulled_.end()) {
+            if (!it->second.demo.empty() && !samePath(it->second.demo, widen(e->match->demoPath))) DeleteFileW(it->second.demo.c_str());
+            DeleteFileW(pulledFile(it->first).c_str());
+            pulled_.erase(it);
+        }
+        insertMatch(std::move(e->match));
+    }
 }
 
 void Library::worker() {
@@ -472,6 +675,7 @@ void Library::worker() {
                 if (withReplay && fileExists(replayTmp) && !MoveFileExW(replayTmp.c_str(), replayFile(m->checksum).c_str(), MOVEFILE_REPLACE_EXISTING))
                     logLine(L"2D-Daten nicht übernommen: %ls", replayTmp.c_str());
                 if (MoveFileExW(out.c_str(), final.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                    DeleteFileW(pulledFile(m->checksum).c_str());   // hier ausgewertet: nicht mehr „vom Server“
                     logLine(L"Ausgewertet: %ls -> %ls", path.c_str(), final.c_str());
                     send(AnalysisEvent::Done, L"", std::move(m));
                 } else failText = analysisErrorText("WRITE");

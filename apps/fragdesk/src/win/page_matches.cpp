@@ -42,12 +42,12 @@ float demosCard(Canvas& c, App& app, float x, float y, float w) {
         uint32_t id = hashId("demo:" + key);
         if (c.hot(id)) c.round(rr, 8, c.th.hover);
         c.region(rr, id, nullptr, L"", false);   // vor den Knöpfen: die späteren Flächen liegen oben
-        Icon ic = d.origin == L"CS2" ? Icon::Film : d.origin == L"Downloads" ? Icon::Download : Icon::Folder;
+        Icon ic = d.origin == L"CS2" ? Icon::Film : d.origin == L"Downloads" || d.origin == L"Valve" ? Icon::Download : Icon::Folder;
         c.circle(rr.X + 26, rr.Y + rowH / 2, 16, c.th.btn);
         c.icon(ic, RectF(rr.X + 17, rr.Y + rowH / 2 - 9, 18, 18), c.th.text2, 1.6f);
         float tx = rr.X + 54, tw = rr.Width - 54 - 230;
         bool faceit = fileName(d.path).rfind(L"1-", 0) == 0;
-        std::wstring origin = d.origin == L"CS2" ? L"CS2 (Premier/Wettkampf)" : faceit ? L"FACEIT" : d.origin;
+        std::wstring origin = d.origin == L"CS2" ? L"CS2 (Premier/Wettkampf)" : faceit ? L"FACEIT" : d.origin == L"Valve" ? L"Von Valve geladen" : d.origin;
         c.text(fileName(d.path), F::BodySemi, c.th.text, RectF(tx, rr.Y + 8, tw, 22));
         c.text(origin + L" · " + W(fd::fmtBytes(double(d.size))) + L" · " + relativeDay(d.mtime), F::Tiny, c.th.text3,
                RectF(tx, rr.Y + 30, tw, 16));
@@ -95,6 +95,7 @@ float drawMatches(Canvas& c, App& app, float w) {
     const float pad = 32;
     float x = pad, cw = w - pad * 2, y = 28;
     std::wstring sub = std::to_wstring(app.lib.matches.size()) + (app.lib.matches.size() == 1 ? L" Match ausgewertet" : L" Matches ausgewertet");
+    if (app.lib.pulledCount() > 0) sub += L" · " + std::to_wstring(app.lib.pulledCount()) + L" davon vom Server";
     if (!app.lib.demos.empty()) sub += L" · " + std::to_wstring(app.lib.demos.size()) + L" neue Demos";
     float th = pageTitle(c, x, y, cw - 360, L"Matches", sub);
     float b1 = c.buttonWidth(L"Demos hinzufügen", Icon::Plus), b2 = 40;
@@ -154,6 +155,10 @@ float drawMatches(Canvas& c, App& app, float w) {
         map.dot = rgb(fd::mapColor(m.map));
         map.font = F::BodySemi;
         map.sub = W(fd::sourceName(m.source)) + L" · " + W(fd::fmtDuration(m.duration));
+        if (const PulledInfo* pi = app.lib.pulled(m.checksum)) {   // kleiner Hinweis: kam vom eigenen Server
+            map.sub += L" · vom Server";
+            map.tip = pi->fetched ? L"Vom Server geholt – dein Server hat das Match selbst bei Valve geladen." : L"Vom Server geholt.";
+        }
         row.cells.push_back(map);
         row.cells.push_back(Cell(W(fd::modeName(m.mode))));
         std::wstring score;

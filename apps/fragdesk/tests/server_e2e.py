@@ -508,6 +508,16 @@ def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
     job = H.job()
     check(job.get('login') is None and job.get('bot') == {'refreshToken': BOT_TOKEN, 'apiKey': BOT_KEY.upper()}, 'Auftrag: Bot fertig, keine Anmeldung mehr')
     check(H.post('login', {'state': 'need-code', 'codeType': 'app'}).status == 409, 'nach der Anmeldung keine Zwischenstände mehr')
+    # dasselbe aus FragDesk am PC mit dem Konto-Token (Admins dürfen beides)
+    r = A.get('/api/v1/admin/steam')
+    sa, sp = r.json() or {}, PA.get('/api/v1/admin/steam').json() or {}
+    check(r.status == 200 and sa.get('bot') == sp.get('bot') and sa.get('apiKeySet') is True and sa.get('login') == sp.get('login'),
+          f'admin/steam mit Konto-Token ({r.status})')
+    r = A.req('PUT', '/api/v1/admin/steam/apikey', body={'key': BOT_KEY})
+    check(r.status == 200 and r.json()['apiKeySet'] is True, 'API-Schlüssel mit Konto-Token')
+    check(A.req('POST', '/api/v1/admin/steam/code', body={'code': GUARD}).status == 409, 'Code ohne offene Anmeldung (Konto-Token): 409')
+    check(B.req('PUT', '/api/v1/admin/steam/apikey', body={'key': BOT_KEY}).status == 403 and B.req('DELETE', '/api/v1/admin/steam').status == 403,
+          'Steam-Bot mit Konto-Token nur für Admins')
 
     # Handy: bereit; „Jetzt prüfen“ weckt den Helfer (höchstens alle 30 s)
     d = PA.get('/api/v1/me/autodl').json()
@@ -518,6 +528,22 @@ def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
     check(r.status == 200 and stamp() > before and r.json()['status'].startswith('Prüft gleich'), f'Jetzt prüfen weckt den Helfer ({r.body[:150]!r})')
     before = stamp()
     check(PA.req('POST', '/api/v1/me/autodl/check').status == 200 and stamp() == before, 'Jetzt prüfen: nicht öfter als alle 30 s')
+    # FragDesk am PC (Konto-Token): dieselben Anfragen und Antworten wie die Handy-App
+    da, dp = A.get('/api/v1/account/autodl'), PA.get('/api/v1/me/autodl')
+    check(da.status == 200 and da.json() == dp.json() and AUTH.encode() not in da.body, f'account/autodl = me/autodl ({da.status} {da.body[:120]!r})')
+    check(PA.get('/api/v1/account/autodl').status == 401 and anon.get('/api/v1/account/autodl').status == 401, 'account/autodl nur mit Konto-Token')
+    check(A.req('PUT', '/api/v1/account/autodl', body={'enabled': False}, fd=False).status == 403, 'account/autodl: X-FragDesk nötig')
+    r = A.req('PUT', '/api/v1/account/autodl', body={'authCode': 'ABCD-EFGH-12AB'})
+    check(r.status == 400 and 'Authentifizierungscode' in (r.json() or {}).get('error', ''), f'account/autodl: Code geprüft ({r.body[:100]!r})')
+    d = A.req('PUT', '/api/v1/account/autodl', body={'enabled': False}).json() or {}
+    check(d.get('enabled') is False and d.get('authCodeMasked') == MASK and PA.get('/api/v1/me/autodl').json()['enabled'] is False,
+          'account/autodl: aus – auch in der Handy-App')
+    check(A.req('POST', '/api/v1/account/autodl/check').status == 409, 'account/autodl/check: aus → 409')
+    d = A.req('PUT', '/api/v1/account/autodl', body={'enabled': True}).json() or {}
+    check(d.get('enabled') is True and d.get('knownCode') == SHARE, 'account/autodl: wieder an')
+    r = A.req('POST', '/api/v1/account/autodl/check')
+    check(r.status == 200 and (r.json() or {}).get('status'), f'account/autodl/check ({r.status})')
+    check(A.get('/api/v1/account/autodl/nichts').status == 404 and A.req('PATCH', '/api/v1/account/autodl').status == 405, 'account/autodl: sonst nichts')
 
     # Ein Lauf: echte Auswertung hochladen – erscheint sofort beim richtigen Konto
     check(H.post('run', {'phase': 'start', 'text': ''}).status == 200 and H.post('run', {'phase': 'mitte'}).status == 400, 'run start (phase geprüft)')
@@ -540,6 +566,39 @@ def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
           'Freund sieht das Match nicht')
     sync = A.get('/api/v1/sync/state').json()['matches'].get(checksum, {})
     check(sync.get('json') == len(files['json']) and (not files.get('replay') or sync.get('replay') == len(files['replay'])), f'sync/state: FragDesk sieht es ({sync})')
+    # Demo-Quelle (meldet der Helfer nach dem Import): FragDesk sieht, dass der Server das Match selbst geholt hat und woher
+    url, mt = 'http://replay183.valve.net/730/003717052436717584506_1418282143.dem.bz2', int(time.time()) - 7200
+    check('fetched' not in sync and 'src' not in sync, 'vor der Quelle: nicht als geholt markiert')
+    check(H.req('PUT', f'{a_id}/match/nichtda/source', body={'url': url, 'matchtime': mt}).status == 404, 'Quelle ohne Match: 404')
+    check(H.req('PUT', f'{a_id}/match/{checksum}/source', body={'url': 'ftp://x/y.dem.bz2', 'matchtime': mt}).status == 400, 'Quelle: Adresse geprüft')
+    check(H.req('PUT', f'{a_id}/match/{checksum}/source', body={'url': url, 'shareCode': 'CSGO-kaputt'}).status == 400, 'Quelle: Freigabecode geprüft')
+    check(H.req('GET', f'{a_id}/match/{checksum}/source').status == 405, 'Quelle: nur PUT')
+    r = H.req('PUT', f'{a_id}/match/{checksum}/source', body={'url': url, 'matchtime': mt * 1000, 'shareCode': SHARE2})   # Millisekunden
+    check(r.status == 200 and r.json() == {'ok': True, 'until': mt + 30 * 86400}, f'Quelle gespeichert ({r.body[:100]!r})')
+    st = A.get('/api/v1/sync/state').json()
+    sync = st['matches'].get(checksum, {})
+    check(sync.get('fetched') is True and sync.get('src') == {'url': url, 'matchtime': mt, 'until': mt + 30 * 86400, 'shareCode': SHARE2},
+          f'sync/state: fetched und src ({sync})')
+    check(not any('fetched' in v for k, v in st['matches'].items() if k != checksum) and st.get('download') is True, 'nur dieses Match ist geholt; download')
+    src_file = pathlib.Path(data_dir) / 'users' / a_id / 'matches' / (checksum + '.src')
+    check(src_file.exists() and json.loads(src_file.read_text())['shareCode'] == SHARE2 and os.stat(src_file).st_mode & 0o777 == 0o600, '.src auf der Platte')
+    # FragDesk holt, was ihm fehlt: nur aus dem eigenen Konto, ETag
+    r = A.get(f'/api/v1/sync/match/{checksum}/json')
+    check(r.status == 200 and r.body == files['json'] and (r.header('Content-Type') or '').startswith('application/json') and r.header('ETag'),
+          f'Match abholen: json ({r.status})')
+    check(A.get(f'/api/v1/sync/match/{checksum}/json', headers={'If-None-Match': r.header('ETag') or 'x'}).status == 304, 'Match abholen: 304 mit ETag')
+    for what in ('heat', 'replay'):
+        if files.get(what):
+            r = A.get(f'/api/v1/sync/match/{checksum}/{what}')
+            check(r.status == 200 and r.body == files[what] and r.header('Content-Type') == 'application/octet-stream', f'Match abholen: {what}')
+    check(A.req('HEAD', f'/api/v1/sync/match/{checksum}/json').status == 200, 'Match abholen: HEAD')
+    check(B.get(f'/api/v1/sync/match/{checksum}/json').status == 404, 'Match abholen: fremdes Konto 404')
+    check(anon.get(f'/api/v1/sync/match/{checksum}/json').status == 401 and PA.get(f'/api/v1/sync/match/{checksum}/json').status == 401,
+          'Match abholen nur mit Konto-Token')
+    check(A.get(f'/api/v1/sync/match/{checksum}/noreplay').status == 404 and A.get(f'/api/v1/sync/match/{checksum}/src').status == 404,
+          'Match abholen: nur json, heat, replay')
+    check(A.get('/api/v1/sync/match/..%2F..%2Fserver/json').status in (400, 404) and A.get('/api/v1/sync/match/nichtda/json').status == 404
+          and A.get('/api/v1/sync/match/a.b/json').status == 400, 'Match abholen: Pfade geprüft')
     # dieselben Prüfungen wie beim Hochladen aus FragDesk
     check(H.req('PUT', f'{a_id}/match/{checksum}/json', body=b'{"schema": 99}').status == 400, 'Helfer: kaputtes Match 400')
     check(H.req('PUT', f'{a_id}/match/andere/json', body=files['json']).status == 400, 'Helfer: Prüfsumme muss passen')
@@ -617,6 +676,12 @@ def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
     check([x['id'] for x in H.job()['accounts']] == [a_id], 'ausgeschaltet: nicht mehr im Auftrag')
     check(H.post(f'{b_id}/state', {'knownCode': SHARE, 'lastCheck': 1}).status == 403, 'ausgeschaltet: state 403')
     check(FRIEND_AUTH not in (pathlib.Path(data_dir) / 'users' / b_id / 'account.json').read_text(), 'Code auch auf der Platte gelöscht')
+    # dasselbe aus FragDesk am PC (Konto-Token): ein- und wieder ausschalten
+    d = B.req('PUT', '/api/v1/account/autodl', body={'authCode': FRIEND_AUTH.lower(), 'knownCode': SHARE, 'enabled': True}).json() or {}
+    check(d.get('enabled') is True and d.get('steamId') == FRIEND and d.get('authCodeMasked', '').endswith('ABCD'), f'Freund schaltet in FragDesk ein ({d})')
+    d = B.req('DELETE', '/api/v1/account/autodl').json() or {}
+    check(d.get('enabled') is False and d['authCodeMasked'] == '' and d['knownCode'] == '' and [x['id'] for x in H.job()['accounts']] == [a_id],
+          'Freund schaltet in FragDesk aus: Codes weg')
     # Schalter aus und wieder an behält die Codes
     d = PA.req('PUT', '/api/v1/me/autodl', body={'enabled': False}).json()
     check(d['enabled'] is False and d['authCodeMasked'] == MASK and d['status'].startswith('Ausgeschaltet'), 'Schalter aus: Codes bleiben')
@@ -658,6 +723,8 @@ def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
 
     # aufräumen, damit der Rest des Ablaufs mit den bisherigen Zahlen weiterläuft (die Einstellung bleibt für den Neustart)
     check(A.req('DELETE', f'/api/v1/sync/match/{checksum}').status == 200, 'automatisch geladenes Match wieder gelöscht')
+    left = [q.name for q in src_file.parent.iterdir() if q.name.startswith(checksum + '.')]
+    check(not left and checksum not in A.get('/api/v1/sync/state').json()['matches'], f'samt Demo-Quelle (.src) gelöscht ({left})')
 
 
 def autodl_after_restart(srv, port, PA, data_dir):

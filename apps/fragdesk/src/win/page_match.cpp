@@ -1,10 +1,13 @@
 // FragDesk – Seite eines Matches: Übersicht, Scoreboard, Runden, Waffen, Duelle, Utility, Momente
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
+#include "demo_fetch.h"
+#include "net.h"
 
 namespace fdw {
 
@@ -746,6 +749,67 @@ float tabMoments(Canvas& c, App& app, const fd::Match& m, float x, float y, floa
 
 }  // namespace
 
+// ---- Vom Server geholt, Demo nicht hier ---------------------------------------------------------------------------
+// Ruhiger Hinweis über den Bereichen: Stats, Heatmap und 2D-Ansicht gehen auch so; nur Ansehen, Aufnehmen und Neu
+// auswerten brauchen die Demo. Solange Valve sie aufhebt: „Demo von Valve laden“ (mit Fortschritt und Abbrechen).
+float pulledNote(Canvas& c, App& app, const fd::Match& m, float x, float y, float w) {
+    const PulledInfo* p = app.lib.pulled(m.checksum);
+    if (!p || app.demoAvailable(m)) return 0;
+    const DemoFetchState& fs = app.demoFetch->state();
+    bool mine = fs.checksum == m.checksum && fs.state != DemoFetchState::Idle;
+    int64_t until = demoUntil(*p, m), now = int64_t(time(nullptr));
+    WebUrl url;
+    bool expired = p->gone || (until > 0 && now > until);
+    bool canLoad = !expired && !p->url.empty() && parseDemoUrl(p->url, url);
+    auto mb = [](int64_t b) { return W(fd::fmtBytes(double(std::max<int64_t>(0, b)))); };
+    std::wstring sub;
+    Color subCol = c.th.text2;
+    bool running = mine && (fs.state == DemoFetchState::Running || fs.state == DemoFetchState::Paused);
+    double share = mine && fs.total > 0 ? double(fs.done) / double(fs.total) : 0;
+    if (running && fs.state == DemoFetchState::Paused) {
+        sub = L"Pausiert – CS2 läuft. Danach geht es von selbst an derselben Stelle weiter" + (fs.done > 0 ? L" (" + mb(fs.done) + L" geladen)." : L".");
+        subCol = c.th.warning;
+    } else if (running) {
+        sub = L"Wird von Valve geladen … " + (fs.total > 0 ? std::to_wstring(int(share * 100)) + L" % · " + mb(fs.done) + L" von " + mb(fs.total)
+                                                         : mb(fs.done)) + L" – im Hintergrund, nie während CS2 läuft.";
+    } else if (mine && fs.state == DemoFetchState::Failed && !expired) {
+        sub = fs.error;
+        subCol = c.th.danger;
+    } else if (expired) {
+        sub = L"Valve hat die Demo nicht mehr (Valve hebt Demos nur etwa einen Monat auf). Stats, Heatmap und 2D-Ansicht gehen trotzdem – nur "
+              L"Ansehen und Aufnehmen in CS2 nicht.";
+    } else if (canLoad) {
+        sub = std::wstring(p->fetched ? L"Dein Server hat dieses Match selbst bei Valve geladen. " : L"Dieses Match kam von deinem Server. ") +
+              L"Zum Ansehen und Aufnehmen in CS2 lädt FragDesk die Demo bei Valve (meist 50–200 MB)" +
+              (until > 0 ? L" – Valve hebt sie noch bis " + dateText(until) + L" auf." : L".");
+    } else {
+        sub = L"Dieses Match kam von deinem Server. Zum Ansehen und Aufnehmen in CS2 braucht FragDesk die Demo – etwa in CS2 unter „Deine "
+              L"Matches“ herunterladen, dann findet FragDesk sie von selbst.";
+    }
+    float bw = 0;
+    if (running) bw = 170;
+    else if (canLoad) bw = c.buttonWidth(L"Demo von Valve laden", Icon::Download) + 4;
+    float tw = w - 70 - (bw > 0 ? bw + 24 : 0);
+    float h = std::max(66.0f, 34 + c.textHeight(sub, F::Small, tw) + 14);
+    RectF r(x, y, w, h);
+    c.round(r, 12, c.th.dark ? c.th.card2 : c.th.card);
+    c.roundStroke(r, 12, c.th.border, 1);
+    c.icon(running ? Icon::Download : Icon::Info, RectF(x + 16, y + 20, 22, 22), c.th.text2, 1.7f);
+    c.text(L"Demo nicht auf diesem PC", F::BodySemi, c.th.text, RectF(x + 50, y + 11, tw, 22));
+    c.text(sub, F::Small, subCol, RectF(x + 50, y + 33, tw, h - 40), Align::Left, false, true);
+    std::string cs = m.checksum;
+    if (running) {
+        float bx = x + w - bw - 16;
+        c.progress(RectF(bx, y + h / 2 - 16, bw, 6), share, fs.state == DemoFetchState::Paused ? c.th.warning : c.th.accent);
+        c.button(RectF(bx, y + h / 2 - 2, bw, 32), L"Abbrechen", "dfetch-stop", [&app] { app.demoFetch->cancel(); }, Btn::Ghost, Icon::Close);
+    } else if (canLoad) {
+        bool other = app.demoFetch->busy();
+        c.button(RectF(x + w - bw - 16, y + (h - 36) / 2, bw, 36), L"Demo von Valve laden", "dfetch", [&app, cs] { app.demoFetch->start(cs); },
+                 Btn::Primary, Icon::Download, !other, other ? L"Es lädt gerade eine andere Demo – eine nach der anderen" : L"");
+    }
+    return h + 16;
+}
+
 // ---- Heatmap --------------------------------------------------------------------------------------------------
 float tabHeatmap(Canvas& c, App& app, const fd::Match& m, float x, float y, float w) {
     float y0 = y;
@@ -809,8 +873,9 @@ float drawMatch(Canvas& c, App& app, float w) {
                  L"Jede Runde von oben: wo alle stehen, wohin sie schauen, Smokes, Mollys, Flashes und Kills");
         bx += b0 + 8;
         float b1 = c.buttonWidth(L"Demo im Ordner zeigen", Icon::Folder);
-        c.button(RectF(bx, y, b1, 34), L"Demo im Ordner zeigen", "mshow", [demo] { showInExplorer(demo); }, Btn::Secondary, Icon::Folder,
-                 fileExists(demo), fileExists(demo) ? L"" : L"Die Demo-Datei ist nicht mehr da");
+        bool have = app.demoAvailable(m);
+        c.button(RectF(bx, y, b1, 34), L"Demo im Ordner zeigen", "mshow", [demo] { showInExplorer(demo); }, Btn::Secondary, Icon::Folder, have,
+                 have ? L"" : app.noDemoText(m));
         bx += b1 + 8;
         std::string cs = m.checksum;
         float b2 = c.buttonWidth(L"Auswertung löschen", Icon::Trash);
@@ -818,6 +883,7 @@ float drawMatch(Canvas& c, App& app, float w) {
         if (!m.shareCode.empty()) c.text(L"Share-Code: " + W(m.shareCode), F::Small, c.th.text3, RectF(bx + b2 + 16, y, 420, 34));
     }
     y += 50;
+    y += pulledNote(c, app, m, x, y, cw);
     y += c.tabs(x, y, cw, {L"Übersicht", L"Scoreboard", L"Runden", L"Waffen", L"Duelle", L"Utility", L"Momente", L"Heatmap"}, app.matchTab, "mtab",
                 [&app](int i) {
                     app.matchTab = i;

@@ -8,8 +8,10 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 
-const PORT_FROM = 7700;
-const PORT_TO = 7749;
+// andere Ports, falls 7700–7749 auf diesem Rechner belegt sind: FRAGDESK_FETCH_TEST_PORTS=7800-7849
+const PORTS = (process.env.FRAGDESK_FETCH_TEST_PORTS || '').match(/^(\d{4,5})-(\d{4,5})$/);
+const PORT_FROM = PORTS ? Number(PORTS[1]) : 7700;
+const PORT_TO = PORTS && Number(PORTS[2]) >= PORT_FROM ? Number(PORTS[2]) : PORTS ? PORT_FROM : 7749;
 
 // Ohne npm ci fehlen die Steam-Bibliotheken: die Tests, die sie brauchen, werden dann mit diesem Hinweis übersprungen
 const noModules = fs.existsSync(path.join(__dirname, '..', 'node_modules', 'globaloffensive')) ? false : 'node_modules fehlt (npm ci im Ordner server/fetch)';
@@ -68,6 +70,7 @@ class FakeServer {
 		this.runs = [];             // POST /run
 		this.states = {};           // Konto → [Körper]
 		this.files = {};            // Konto → {Prüfsumme → {json, heat, replay}}
+		this.sources = {};          // Konto → {Prüfsumme → Körper von PUT …/source}
 		this.full = new Set();      // Konten mit vollem Speicher (507)
 		this.fetched = {};          // Konto → Summe von fetched
 		this.pendingCode = '';      // vom Admin eingegebener Code (einmal heraus)
@@ -165,6 +168,26 @@ class FakeServer {
 			}
 			this.fetched[m[1]] = (this.fetched[m[1]] || 0) + (json.fetched || 0);
 			return this.send(res, 200, {ok: true});
+		}
+		if ((m = p.match(/^\/api\/v1\/local\/fetch\/([0-9a-f]{8})\/match\/([0-9A-Za-z_-]{1,64})\/source$/)) && req.method == 'PUT') {
+			let [, id, checksum] = m;
+			if (this.reject.source) {   // z. B. 404: älterer Server ohne Demo-Quelle
+				return this.send(res, this.reject.source, {error: 'Unbekannte Anfrage'});
+			}
+			let src = null;
+			try {
+				src = JSON.parse(body.toString('utf8'));
+			} catch (e) {
+				src = null;
+			}
+			if (!this.account(id) || !((this.files[id] || {})[checksum] || {}).json) {
+				return this.send(res, 404, {error: 'Das Match ist (noch) nicht auf dem Server.'});
+			}
+			if (!src || !/^https?:\/\/[^/\s]+/.test(src.url || '')) {
+				return this.send(res, 400, {error: 'url fehlt oder ist keine Adresse (http://…).'});
+			}
+			(this.sources[id] = this.sources[id] || {})[checksum] = src;
+			return this.send(res, 200, {ok: true, until: src.matchtime ? src.matchtime + 30 * 86400 : 0});
 		}
 		if ((m = p.match(/^\/api\/v1\/local\/fetch\/([0-9a-f]{8})\/match\/([0-9A-Za-z_-]{1,64})\/(json|heat|replay)$/)) && req.method == 'PUT') {
 			let [, id, checksum, part] = m;

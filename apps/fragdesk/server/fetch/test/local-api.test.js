@@ -27,6 +27,13 @@ test('Kopfzeilen: X-FragDesk-Local immer, X-FragDesk: 1 bei schreibenden Anfrage
 		await api.run('start', 'Läuft');
 		await api.state('abcdef01', {knownCode: 'CSGO-x', lastCheck: 1});
 		await api.putMatchFile('abcdef01', 'abc', 'heat', Buffer.from('FDHM1234'));
+		let src = await api.putMatchSource('abcdef01', 'abc', {url: 'http://replay183.valve.net/730/1_2.dem.bz2', matchtime: 1762588800, shareCode: 'CSGO-x'});
+		assert.deepStrictEqual(src, {status: 200, error: '', json: {ok: true}});
+		assert.strictEqual(seen[4].method, 'PUT');
+		assert.strictEqual(seen[4].url, '/api/v1/local/fetch/abcdef01/match/abc/source');
+		assert.strictEqual(seen[4].headers['content-type'], 'application/json');
+		assert.strictEqual(seen[4].headers['x-fragdesk'], '1');
+		assert.deepStrictEqual(JSON.parse(seen[4].body), {url: 'http://replay183.valve.net/730/1_2.dem.bz2', matchtime: 1762588800, shareCode: 'CSGO-x'});
 		assert.strictEqual(seen[0].headers['x-fragdesk-local'], 'k3y-1234567890');
 		assert.strictEqual(seen[0].headers['x-fragdesk'], undefined);
 		assert.strictEqual(seen[1].headers['x-fragdesk'], '1');

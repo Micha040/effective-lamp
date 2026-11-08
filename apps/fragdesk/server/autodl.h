@@ -36,6 +36,9 @@ bool validApiKey(const std::string& s);
 std::string normGuardCode(const std::string& s);
 bool validGuardCode(const std::string& s);
 bool validRefreshToken(const std::string& s);   // JWT von Steam: [A-Za-z0-9._-], 20–4096 Zeichen
+// Adresse einer Demo, wie sie der Game Coordinator liefert (http://replay183.valve.net/730/…_….dem.bz2): http(s)://, mit
+// Host, höchstens 512 sichtbare Zeichen ohne Leerzeichen, Anführungszeichen und spitze Klammern
+bool validDemoUrl(const std::string& s);
 bool validSteamName(const std::string& s);      // Kontoname zum Anmelden: 1–64 sichtbare Zeichen ohne Leerzeichen
 std::string cleanSteamId64(const std::string& s);   // nur Ziffern, höchstens 20
 // Zeit vom Helfer: Sekunden seit 1970 (Millisekunden werden erkannt und umgerechnet), < 0 -> 0

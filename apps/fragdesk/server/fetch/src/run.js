@@ -5,7 +5,8 @@
 //   4. je Konto GetNextMatchSharingCode bis "n/a" oder 10 neue Codes (webapi.js)
 //   5. neue Codes: Bot einmal anmelden (Token-Erneuerung → /token), CS2-Lizenz falls nötig, Game Coordinator,
 //      je Code die Match-Infos → Demo-Adresse; dann abmelden
-//   6. je Konto und Match nacheinander: Demo laden, fdanalyze, json/heat/replay hochladen, /state; Fehlversuche
+//   6. je Konto und Match nacheinander: Demo laden, fdanalyze, json/heat/replay hochladen, Quelle der Demo (Adresse,
+//      Spielzeit, Freigabecode) melden, /state; Fehlversuche
 //      zählen (höchstens 3 je Code, dann überspringen), knownCode nur nach Erfolg oder Überspringen weiter
 //   7. tmp leeren, Sperre frei; hat sich wake im Lauf geändert: einmal von vorn
 // Spielen mehrere Konten dasselbe Match, wird die Demo nur einmal geladen und ausgewertet.
@@ -538,6 +539,11 @@ class Runner {
 			log.warn(`${label}: ${part == 'heat' ? 'Heatmap' : '2D-Daten'} nicht angenommen (${res.error}) – das Match ist trotzdem da.`);
 		}
 		log.info(`${label}: hochgeladen für Konto ${acc.id} (${sizes.join(', ')}).`);
+		// woher die Demo kam: FragDesk am PC lädt sie damit bei Bedarf selbst bei Valve („Demo von Valve laden“)
+		let src = await this.api.putMatchSource(acc.id, r.checksum, {url: info.url, matchtime: info.matchtime || 0, shareCode: code});
+		if (src.status != 200) {
+			log.warn(`${label}: Adresse der Demo nicht beim Server angekommen (${src.error}) – das Match ist trotzdem da.`);
+		}
 		return {ok: true};
 	}
 

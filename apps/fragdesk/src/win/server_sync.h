@@ -1,14 +1,20 @@
 // FragDesk – Handy-App über den eigenen Server: verbinden (Einladung), im Hintergrund abgleichen, Handy koppeln,
 // Freunde einladen. Spezifikation: FragDesk-Server v1, Abschnitt „FragDesk (Windows)“.
 //
+// Der Server ist die Drehscheibe: FragDesk lädt hoch, was es selbst ausgewertet hat, und holt alles, was der Server
+// sonst hat (selbst bei Valve geladen, von einem anderen PC) – die Handy-App liest vom Server.
+//
 // Abgleich in einem eigenen Thread mit niedriger Priorität (auch für die Festplatte): /sync/state holen, zuerst löschen,
-// was in FragDesk gelöscht wurde (macht Platz), dann fehlende Matches (.json, .heat), vorhandene 2D-Daten (.replay),
-// Videos in Stücken à 4 MB (fortsetzbar), Vorschaubild und „done“. Zum Schluss erstellt er fehlende 2D-Daten aus den
-// Demos – eins nach dem anderen, mit niedrigster Priorität, und nie, solange CS2 läuft oder FragDesk aufnimmt. Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder Löschung und alle
-// 15 Minuten. Pause, solange CS2 läuft (nur der Prozessname per Toolhelp) oder FragDesk aufnimmt; bei Fehlern neuer
-// Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen Schnappschuss mit; Ergebnisse kommen als
-// WM_APP_SYNC zurück. Die Aktionen der Einstellungen (verbinden, koppeln, einladen, abmelden) laufen in kurzen eigenen
-// Threads, damit sie nicht hinter einem großen Video warten.
+// was in FragDesk gelöscht wurde (macht Platz), dann fehlende eigene Matches (.json, .heat), vorhandene 2D-Daten
+// (.replay), dann holen, was hier fehlt (.json, .heat, mit „2D-Ansicht“ .replay – in Stapeln an die Bibliothek), Videos
+// in Stücken à 4 MB (fortsetzbar), Vorschaubild und „done“. Zum Schluss erstellt er fehlende 2D-Daten aus den Demos –
+// eins nach dem anderen, mit niedrigster Priorität, und nie, solange CS2 läuft oder FragDesk aufnimmt. Geholte Matches
+// (Markierung .src) lädt er nie hoch und löscht sie nie; ist dort eine neuere Fassung, holt er sie neu. Löschen in
+// FragDesk löscht auch dort (wie bei eigenen Matches). Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder
+// Löschung und alle 15 Minuten. Pause, solange CS2 läuft (nur der Prozessname per Toolhelp) oder FragDesk aufnimmt;
+// bei Fehlern neuer Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen Schnappschuss mit;
+// Ergebnisse kommen als WM_APP_SYNC zurück. Die Aktionen der Einstellungen (verbinden, koppeln, einladen, abmelden)
+// laufen in kurzen eigenen Threads, damit sie nicht hinter einem großen Video warten.
 #pragma once
 #include <windows.h>
 
@@ -30,6 +36,8 @@ struct SyncStatus {
     int matchesDone = 0, matchesTotal = 0, clipsDone = 0, clipsTotal = 0;
     int replaysDone = 0, replaysTotal = 0;   // 2D-Daten auf dem Server (total: ohne die, die es nicht geben kann)
     bool replaysOld = false;   // der Server ist zu alt für 2D-Daten (kennt „replays“ in /sync/state nicht)
+    int pullsDone = 0, pullsTotal = 0;   // in diesem Durchgang vom Server geholt / zu holen (Matches)
+    bool pullOld = false;      // der Server ist zu alt, um Matches herauszugeben (kennt „download“ nicht)
     std::wstring current;      // Running: was gerade hochgeladen wird
     int64_t used = -1, limit = 0;   // Speicher in Bytes (−1 = unbekannt; limit 0 = unbegrenzt)
 };

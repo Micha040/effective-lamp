@@ -163,7 +163,7 @@ std::string deviceName(const std::string& wanted, const std::string& agent) {   
     return "Gerät";
 }
 
-fdapi::FileReader openReader(const std::string& path, int64_t& size) {
+fdapi::FileReader openReader(const std::string& path, int64_t& size, int64_t* mtimeNs = nullptr) {
     int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) return nullptr;
     struct stat st{};
@@ -172,6 +172,7 @@ fdapi::FileReader openReader(const std::string& path, int64_t& size) {
         return nullptr;
     }
     size = int64_t(st.st_size);
+    if (mtimeNs) *mtimeNs = int64_t(st.st_mtim.tv_sec) * 1000000000 + int64_t(st.st_mtim.tv_nsec);
     std::shared_ptr<int> file(new int(fd), [](int* p) {
         close(*p);
         delete p;
@@ -323,7 +324,7 @@ fdapi::Host App::host(const UserPtr& u) {
         return h;
     }
     h.withSource = [this, u](const std::function<void(fdapi::Source&)>& fn) { return views_.with(u, fn); };
-    h.openFile = openReader;
+    h.openFile = [](const std::string& path, int64_t& size) { return openReader(path, size); };
     h.thumbnail = [this, u](const fdapi::ClipInfo& ci, std::string& jpeg) {
         return validClipId(ci.id) && readFile(store_.clipPath(u->id, ci.id, ".jpg"), jpeg, kMaxThumb);
     };
@@ -407,6 +408,9 @@ void App::account(const Request& req, Response& res) {
         store_.logoutToken(u, token);
         return ok(res);
     }
+    // Demos automatisch laden aus FragDesk am PC: dieselben Anfragen und Antworten wie /api/v1/me/autodl
+    if (p == "/api/v1/account/autodl") return autodl(req, res, u, false);
+    if (p == "/api/v1/account/autodl/check") return autodl(req, res, u, true);
     if (startsWith(p, "/api/v1/account/devices/")) {   // gekoppeltes Handy entfernen (Erweiterung)
         if (req.method != "DELETE") return res.error(405, "Nur DELETE");
         if (!store_.removeDeviceById(u, p.substr(24))) return res.error(404, "Dieses Handy gibt es nicht.");
@@ -434,6 +438,15 @@ void App::sync(const Request& req, Response& res) {
             j.key(kv.first.c_str()).obj().ki("json", std::max<int64_t>(0, r.json)).ki("heat", std::max<int64_t>(0, r.heat));
             j.ki("replay", std::max<int64_t>(0, r.replay));   // 2D-Ansicht (0 = fehlt)
             if (r.noreplay >= 0) j.kb("noreplay", true);       // FragDesk hat gemeldet: keine 2D-Daten möglich
+            if (r.src >= 0) {   // der Server hat das Match selbst bei Valve geholt; Adresse der Demo, solange Valve sie aufhebt
+                j.kb("fetched", true);
+                const MatchSource& s = r.source;
+                if (!s.url.empty()) {
+                    j.key("src").obj().kv("url", s.url).ki("matchtime", s.matchtime).ki("until", s.until);
+                    if (!s.shareCode.empty()) j.kv("shareCode", s.shareCode);
+                    j.end();
+                }
+            }
             j.end();
         }
         j.end().key("clips").obj();
@@ -443,7 +456,8 @@ void App::sync(const Request& req, Response& res) {
             j.key(kv.first.c_str()).obj().ki("size", c.mp4 >= 0 ? c.mp4 : std::max<int64_t>(0, c.part)).kb("complete", c.complete()).kb("thumb", c.thumb >= 0).end();
         }
         j.end().key("quota").obj().ki("used", store_.used(u)).ki("limit", store_.limit(u)).end();
-        j.kb("replays", true);   // nimmt 2D-Daten an – fehlt bei älteren Servern, dann lädt FragDesk keine hoch
+        j.kb("replays", true);    // nimmt 2D-Daten an – fehlt bei älteren Servern, dann lädt FragDesk keine hoch
+        j.kb("download", true);   // liefert Matches aus (GET /sync/match/…) – fehlt bei älteren: FragDesk holt dann nichts
         j.end();
         res.body = j.take();
         return;
@@ -472,6 +486,7 @@ void App::sync(const Request& req, Response& res) {
             if (!f.ok()) return fail(res, f);
             return ok(res);
         }
+        if (m == "GET" || m == "HEAD") return getMatch(req, res, u, checksum, part[2]);   // FragDesk holt, was ihm fehlt
         putMatch(req, res, u, checksum, part[2], nullptr);
         return;
     }
@@ -532,6 +547,29 @@ void App::sync(const Request& req, Response& res) {
         }
     }
     res.error(404, "Unbekannte Anfrage");
+}
+
+// Ein Teil eines Matches des eigenen Kontos ausliefern (json, heat, replay) – FragDesk holt damit Matches, die der
+// Server selbst geladen hat oder die von einem anderen PC kommen. Nur aus dem Ordner des Kontos (Prüfsumme geprüft);
+// ETag aus Größe und Änderungszeit, If-None-Match → 304.
+void App::getMatch(const Request& req, Response& res, const UserPtr& u, const std::string& checksum, const std::string& what) {
+    MatchPart mp;
+    if (what == "json") mp = MatchPart::Json;
+    else if (what == "heat") mp = MatchPart::Heat;
+    else if (what == "replay") mp = MatchPart::Replay;
+    else return res.error(404, "Unbekannte Anfrage");
+    int64_t size = -1, mtime = 0;
+    fdapi::FileReader rd = validChecksum(checksum) ? openReader(store_.matchPath(u->id, checksum, matchExt(mp)), size, &mtime) : nullptr;
+    if (!rd) return res.error(404, mp == MatchPart::Json ? "Dieses Match gibt es auf dem Server nicht (mehr)." : "Diese Datei gibt es auf dem Server nicht.");
+    std::string etag = "\"" + std::to_string(size) + "-" + std::to_string(mtime) + "\"";
+    res.set("ETag", etag);
+    if (req.header("if-none-match") == etag) {
+        res.status = 304;
+        return;
+    }
+    res.type = mp == MatchPart::Json ? "application/json; charset=utf-8" : "application/octet-stream";
+    res.file = rd;
+    res.fileSize = size;
 }
 
 bool App::putMatch(const Request& req, Response& res, const UserPtr& u, const std::string& checksum, const std::string& what, bool* isNew) {
@@ -703,13 +741,21 @@ void App::local(const Request& req, Response& res) {
     res.error(404, "Unbekannte Anfrage");
 }
 
-// ---- Demos automatisch laden: Handy -------------------------------------------------------------------------------------
+// ---- Demos automatisch laden: Handy und FragDesk ------------------------------------------------------------------------
 void App::meAutodl(const Request& req, Response& res) {
     UserPtr u = store_.byDeviceToken(deviceToken(req));
     if (!u) return res.error(401, kNoDevice);
+    if (req.path == "/api/v1/me/autodl/check") return autodl(req, res, u, true);
+    if (req.path != "/api/v1/me/autodl") return res.error(404, "Unbekannte Anfrage");
+    autodl(req, res, u, false);
+}
+
+// GET/PUT/DELETE …/autodl und POST …/autodl/check – für das Handy (/api/v1/me/autodl, Geräte-Cookie) und FragDesk am PC
+// (/api/v1/account/autodl, Konto-Token) gleich
+void App::autodl(const Request& req, Response& res, const UserPtr& u, bool check) {
     const std::string& m = req.method;
     int64_t now = nowEpoch();
-    if (req.path == "/api/v1/me/autodl/check") {   // „Jetzt prüfen“
+    if (check) {   // „Jetzt prüfen“
         if (m != "POST") return res.error(405, "Nur POST");
         if (!store_.autodl(u).enabled) return res.error(409, "„Demos automatisch laden“ ist aus – erst einschalten.");
         std::string problem = helperProblem(helperEnv);
@@ -718,7 +764,6 @@ void App::meAutodl(const Request& req, Response& res) {
         if (store_.requestCheck(u, now)) store_.wakeHelper();   // höchstens alle 30 s
         return writeAutodl(res, u);
     }
-    if (req.path != "/api/v1/me/autodl") return res.error(404, "Unbekannte Anfrage");
     if (m == "GET" || m == "HEAD") return writeAutodl(res, u);
     if (m == "DELETE") {   // aus, Codes löschen
         Fail f = store_.clearAutodl(u);
@@ -973,6 +1018,24 @@ void App::localFetch(const Request& req, Response& res, const std::string& sub) 
         const std::string& checksum = part[2];
         if (!validChecksum(checksum)) return res.error(400, "Ungültige Prüfsumme.");
         if (!store_.autodl(u).enabled) return res.error(403, "Für dieses Konto ist „Demos automatisch laden“ aus.");   // Helfer: Konto überspringen
+        if (part[3] == "source") {   // nach dem Import: woher die Demo kam (für „Demo von Valve laden“ in FragDesk)
+            if (m != "PUT" && m != "POST") return res.error(405, "Nur PUT");
+            if (!parseBody(req, res, v)) return;
+            MatchSource src;
+            src.url = trim(v.getString("url"));
+            if (!validDemoUrl(src.url)) return res.error(400, "url fehlt oder ist keine Adresse (http://…).");
+            src.shareCode = normShareCode(v.getString("shareCode"));
+            if (!src.shareCode.empty() && !validShareCode(src.shareCode)) return res.error(400, "shareCode ist kein Freigabecode (CSGO-…).");
+            src.matchtime = epochFrom(v.getNumber("matchtime"));
+            src.until = src.matchtime > 0 ? src.matchtime + kDemoKeepDays * 86400 : 0;   // so lange hebt Valve sie etwa auf
+            src.at = now;
+            Fail f = store_.putMatchSource(u, checksum, src);
+            if (!f.ok()) return fail(res, f);
+            JsonW j;
+            j.obj().kb("ok", true).ki("until", src.until).end();
+            res.body = j.take();
+            return;
+        }
         bool isNew = false;
         if (!putMatch(req, res, u, checksum, part[3], &isNew)) return;
         if (isNew) {

@@ -24,9 +24,12 @@ constexpr UINT WM_APP_REPLAY = WM_APP + 6;     // 2D-Daten geladen oder Fehler (
 constexpr UINT WM_APP_HEAT = WM_APP + 7;       // Heatmap vieler Matches geladen (lParam: HeatEvent*)
 constexpr UINT WM_APP_MOBILE = WM_APP + 8;     // Handy-App: Anfrage im UI-Thread beantworten bzw. Geräteliste geändert
 constexpr UINT WM_APP_SYNC = WM_APP + 9;       // eigener Server: Stand des Abgleichs, Ergebnis einer Aktion (lParam: SyncEvent*)
+constexpr UINT WM_APP_AUTODL = WM_APP + 10;    // eigener Server: Demos automatisch laden, Steam-Bot (lParam: AutodlEvent*)
+constexpr UINT WM_APP_DEMOFETCH = WM_APP + 11; // Demo von Valve laden: Fortschritt, fertig, Fehler (lParam: DemoFetchEvent*)
 constexpr UINT_PTR kMobileTimer = 10;          // Countdown des Kopplungscodes
 constexpr UINT_PTR kSyncTimer = 11;            // eigener Server: alle 15 Minuten abgleichen
 constexpr UINT_PTR kSyncViewTimer = 12;        // eigener Server: „zuletzt vor …“ in den Einstellungen auffrischen
+constexpr UINT_PTR kAutodlTimer = 13;          // eigener Server: Anmeldung des Steam-Bots bzw. „Jetzt prüfen“ verfolgen
 
 std::wstring widen(const std::string& utf8);
 std::string narrow(const std::wstring& w);
@@ -53,6 +56,7 @@ std::wstring localAppData();
 std::wstring dataDir();        // %LOCALAPPDATA%\FragDesk
 std::wstring matchesDir();     // %LOCALAPPDATA%\FragDesk\matches
 std::wstring tempDir();        // %LOCALAPPDATA%\FragDesk\temp
+std::wstring demosDir();       // %LOCALAPPDATA%\FragDesk\demos – Demos, die FragDesk selbst bei Valve geladen hat
 std::wstring downloadsDir();
 std::wstring videosDir();
 

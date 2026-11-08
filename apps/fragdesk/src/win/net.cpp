@@ -4,7 +4,9 @@
 #include <winhttp.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cwchar>
+#include <vector>
 
 #include "common.h"
 
@@ -85,6 +87,53 @@ bool parseServerUrl(const std::string& url, ServerUrl& out) {
         if (r.path.find("/../") != std::string::npos || r.path.find("/./") != std::string::npos) return false;
     }
     if (r.path.back() != '/') r.path += '/';
+    out = r;
+    return true;
+}
+
+bool parseDemoUrl(const std::string& url, WebUrl& out) {
+    std::wstring u = widen(url);
+    if (u.size() < 12 || u.size() > 512) return false;
+    for (wchar_t ch : u)
+        if (ch <= 32 || ch >= 127 || wcschr(L"\"<>\\^`{|}", ch)) return false;
+    WebUrl r;
+    size_t start;
+    std::wstring scheme = lowerCase(u.substr(0, 8));
+    if (scheme.rfind(L"https://", 0) == 0) {
+        r.secure = true;
+        r.port = 443;
+        start = 8;
+    } else if (scheme.rfind(L"http://", 0) == 0) {
+        r.secure = false;
+        r.port = 80;
+        start = 7;
+    } else return false;
+    size_t end = u.find_first_of(L"/?#", start);
+    if (end == std::wstring::npos || u[end] != L'/') return false;
+    std::wstring authority = u.substr(start, end - start), host = authority;
+    if (authority.find(L'@') != std::wstring::npos) return false;
+    size_t colon = authority.find(L':');
+    if (colon != std::wstring::npos) {
+        std::wstring p = authority.substr(colon + 1);
+        if (!isDigits(p) || p.size() > 5) return false;
+        r.port = _wtoi(p.c_str());
+        if (r.port < 1 || r.port > 65535) return false;
+        host = authority.substr(0, colon);
+    }
+    host = lowerCase(host);
+    if (!validHost(host)) return false;
+    auto under = [&](const wchar_t* domain) { return endsWithI(host, std::wstring(L".") + domain) || host == domain; };
+    if (!under(L"valve.net") && !under(L"wmsj.cn") && !isLoopback(host)) return false;
+    size_t q = u.find_first_of(L"?#", end);
+    std::wstring path = u.substr(end, q == std::wstring::npos ? std::wstring::npos : q - end);
+    if (path.find(L"/../") != std::wstring::npos || path.find(L"/./") != std::wstring::npos) return false;
+    bool demo = false;
+    for (const wchar_t* ext : {L".dem.bz2", L".dem.gz", L".dem.zst", L".dem"})
+        if (endsWithI(path, ext) && path.size() > wcslen(ext) + 1) demo = true;
+    if (!demo) return false;
+    size_t hash = u.find(L'#', end);
+    r.host = host;
+    r.path = narrow(u.substr(end, hash == std::wstring::npos ? std::wstring::npos : hash - end));
     out = r;
     return true;
 }
@@ -217,6 +266,11 @@ HttpResponse HttpClient::send(const ServerUrl& server, const HttpRequest& rq) {
                                  WINHTTP_NO_HEADER_INDEX);
         char buf[16384];
         while (ok) {
+            if (rq.cancel && rq.cancel()) {   // z. B. CS2 startet, während 2D-Daten vom Server kommen
+                r.cancelled = true;
+                ok = FALSE;
+                break;
+            }
             DWORD got = 0;
             ok = WinHttpReadData(req, buf, sizeof buf, &got);
             if (!ok || got == 0) break;
@@ -244,6 +298,185 @@ HttpResponse HttpClient::send(const ServerUrl& server, const HttpRequest& rq) {
         r.error = ERROR_WINHTTP_OPERATION_CANCELLED;
     }
     if (!ok) r.body.clear();
+    return r;
+}
+
+bool HttpClient::begin(void* req) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (aborted_) return false;
+    current_ = req;
+    return true;
+}
+
+bool HttpClient::end(void* req) {
+    std::lock_guard<std::mutex> lk(mu_);
+    bool mine = current_ == req;
+    if (mine) current_ = nullptr;
+    return mine;
+}
+
+namespace {
+
+std::string queryHeader(HINTERNET req, DWORD which) {
+    DWORD len = 0;
+    WinHttpQueryHeaders(req, which, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER, &len, WINHTTP_NO_HEADER_INDEX);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0 || len > 4096) return std::string();
+    std::wstring w(len / sizeof(wchar_t) + 1, L'\0');
+    if (!WinHttpQueryHeaders(req, which, WINHTTP_HEADER_NAME_BY_INDEX, &w[0], &len, WINHTTP_NO_HEADER_INDEX)) return std::string();
+    w.resize(len / sizeof(wchar_t));
+    return narrow(w);
+}
+
+int64_t toInt(const std::string& s) {
+    if (s.empty() || s.size() > 18 || s.find_first_not_of("0123456789") != std::string::npos) return -1;
+    return _strtoi64(s.c_str(), nullptr, 10);
+}
+
+}  // namespace
+
+DownloadResult HttpClient::download(const DownloadRequest& rq) {
+    DownloadResult r;
+    if (!open()) {
+        r.error = openError_;
+        return r;
+    }
+    const std::wstring part = rq.file + L".part";
+    int64_t have = std::max<int64_t>(0, fileSize(part));
+    HINTERNET con = WinHttpConnect(static_cast<HINTERNET>(session_), rq.url.host.c_str(), INTERNET_PORT(rq.url.port), 0);
+    if (!con) {
+        r.error = GetLastError();
+        return r;
+    }
+    HINTERNET req = WinHttpOpenRequest(con, L"GET", widen(rq.url.path).c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                       rq.url.secure ? WINHTTP_FLAG_SECURE : 0);
+    if (!req) {
+        r.error = GetLastError();
+        WinHttpCloseHandle(con);
+        return r;
+    }
+    if (!begin(req)) {
+        WinHttpCloseHandle(req);
+        WinHttpCloseHandle(con);
+        r.cancelled = true;
+        return r;
+    }
+    DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP, hops = 3, none = 0;
+    WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof policy);
+    WinHttpSetOption(req, WINHTTP_OPTION_MAX_HTTP_AUTOMATIC_REDIRECTS, &hops, sizeof hops);
+    WinHttpSetOption(req, WINHTTP_OPTION_DECOMPRESSION, &none, sizeof none);   // die Demo selbst, Byte für Byte (Range)
+    std::wstring headers = L"Accept: */*\r\n";
+    if (have > 0) headers += L"Range: bytes=" + std::to_wstring(have) + L"-\r\n";
+    BOOL ok = WinHttpSendRequest(req, headers.c_str(), DWORD(-1L), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(req, nullptr);
+    HANDLE out = INVALID_HANDLE_VALUE;
+    bool discard = false;   // zu groß oder keine Demo: nichts davon behalten
+    if (ok) {
+        DWORD code = 0, len = sizeof code;
+        ok = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &len,
+                                 WINHTTP_NO_HEADER_INDEX);
+        r.status = ok ? int(code) : 0;
+    }
+    if (ok) {
+        int64_t length = toInt(queryHeader(req, WINHTTP_QUERY_CONTENT_LENGTH));
+        if (r.status == 416 && have > 0) {   // .part passt nicht (mehr) zur Datei dort: neu anfangen
+            DeleteFileW(part.c_str());
+            r.problem = L"Der Download passte nicht zum vorigen Stand – bitte noch einmal laden.";
+            ok = FALSE;
+        } else if (r.status == 404 || r.status == 410) {
+            r.gone = true;
+            ok = FALSE;
+        } else if (r.status == 200 || (r.status == 206 && have > 0)) {
+            int64_t from = r.status == 206 ? have : 0;
+            if (r.status == 206) {   // Content-Range: bytes <a>-<b>/<gesamt> – muss genau dort weitergehen
+                std::string cr = queryHeader(req, WINHTTP_QUERY_CONTENT_RANGE);
+                size_t sp = cr.find(' '), dash = cr.find('-'), slash = cr.find('/');
+                int64_t a = sp != std::string::npos && dash != std::string::npos ? toInt(cr.substr(sp + 1, dash - sp - 1)) : -1;
+                r.total = slash != std::string::npos ? toInt(cr.substr(slash + 1)) : -1;
+                if (a != have) {
+                    DeleteFileW(part.c_str());
+                    r.problem = L"Der Server setzt den Download nicht an der richtigen Stelle fort – bitte noch einmal laden.";
+                    ok = FALSE;
+                }
+            } else r.total = length;
+            if (ok && r.total > rq.maxBytes) {
+                r.problem = L"Die Demo ist zu groß (" + std::to_wstring(r.total >> 20) + L" MB, höchstens " + std::to_wstring(rq.maxBytes >> 20) + L" MB).";
+                discard = true;
+                ok = FALSE;
+            }
+            if (ok) {
+                out = CreateFileW(part.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                LARGE_INTEGER pos;
+                pos.QuadPart = from;
+                if (out == INVALID_HANDLE_VALUE || !SetFilePointerEx(out, pos, nullptr, FILE_BEGIN) || !SetEndOfFile(out)) {
+                    r.problem = L"Die Demo lässt sich nicht speichern (" + std::to_wstring(GetLastError()) + L").";
+                    ok = FALSE;
+                } else r.done = from;
+            }
+        } else ok = FALSE;   // anderer Status: der Aufrufer sagt, was los ist
+    }
+    std::vector<char> buf(256 * 1024);
+    bool checked = r.done > 0;
+    while (ok && out != INVALID_HANDLE_VALUE) {
+        if (rq.cancel && rq.cancel()) {
+            r.cancelled = true;
+            break;
+        }
+        DWORD got = 0;
+        if (!WinHttpReadData(req, buf.data(), DWORD(buf.size()), &got)) {   // Verbindung weg, 60 s ohne Daten …
+            r.error = GetLastError();
+            r.interrupted = true;
+            ok = FALSE;
+            break;
+        }
+        if (got == 0) break;   // fertig
+        if (!checked) {        // die ersten Bytes: ist das überhaupt eine Demo?
+            checked = true;
+            if (rq.check && !rq.check(buf.data(), got)) {
+                r.problem = L"Die Antwort ist keine Demo.";
+                discard = true;
+                ok = FALSE;
+                break;
+            }
+        }
+        if (r.done + int64_t(got) > rq.maxBytes) {
+            r.problem = L"Die Demo ist zu groß (über " + std::to_wstring(rq.maxBytes >> 20) + L" MB).";
+            discard = true;
+            ok = FALSE;
+            break;
+        }
+        DWORD wrote = 0;
+        if (!WriteFile(out, buf.data(), got, &wrote, nullptr) || wrote != got) {
+            r.problem = L"Die Demo lässt sich nicht speichern (Platte voll?).";
+            ok = FALSE;
+            break;
+        }
+        r.done += got;
+        if (rq.progress) rq.progress(r.done, r.total);
+    }
+    if (!ok && r.status == 0 && !r.cancelled) r.error = GetLastError();
+    bool finished = ok && !r.cancelled && out != INVALID_HANDLE_VALUE;
+    if (out != INVALID_HANDLE_VALUE) {
+        if (finished) FlushFileBuffers(out);
+        CloseHandle(out);
+    }
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (aborted_) r.cancelled = true;
+    }
+    if (end(req)) WinHttpCloseHandle(req);
+    WinHttpCloseHandle(con);
+    if (discard) DeleteFileW(part.c_str());
+    if (!r.problem.empty()) return r;
+    if (finished && !r.cancelled) {
+        if (r.total >= 0 && r.done != r.total) {   // vorzeitig zu: beim nächsten Versuch an der Stelle weiter
+            r.interrupted = true;
+            return r;
+        }
+        if (r.done <= 0 || !MoveFileExW(part.c_str(), rq.file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            r.problem = L"Die Demo lässt sich nicht speichern (" + std::to_wstring(GetLastError()) + L").";
+            return r;
+        }
+        r.complete = true;
+    }
     return r;
 }
 

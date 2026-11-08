@@ -87,8 +87,26 @@ const char* matchExt(MatchPart part) {
         case MatchPart::Heat: return ".heat";
         case MatchPart::Replay: return ".replay";
         case MatchPart::NoReplay: return ".noreplay";
+        case MatchPart::Src: return ".src";
     }
     return ".json";
+}
+
+std::string sourceJson(const MatchSource& s) {
+    JsonW j;
+    j.obj().kb("fetched", true).kv("url", s.url).ki("matchtime", s.matchtime).ki("until", s.until).kv("shareCode", s.shareCode).ki("at", s.at).end();
+    return j.take();
+}
+
+bool parseSource(const std::string& text, MatchSource& out) {
+    json::Value v;
+    if (!json::parse(text, v) || !v.isObject()) return false;
+    out.url = v.getString("url");
+    out.shareCode = v.getString("shareCode");
+    out.matchtime = std::max<int64_t>(0, int64_t(v.getNumber("matchtime")));
+    out.until = std::max<int64_t>(0, int64_t(v.getNumber("until")));
+    out.at = std::max<int64_t>(0, int64_t(v.getNumber("at")));
+    return true;
 }
 
 namespace {
@@ -98,6 +116,7 @@ int64_t& slotOf(MatchRec& r, MatchPart part) {
         case MatchPart::Heat: return r.heat;
         case MatchPart::Replay: return r.replay;
         case MatchPart::NoReplay: return r.noreplay;
+        case MatchPart::Src: return r.src;
         case MatchPart::Json: break;
     }
     return r.json;
@@ -294,11 +313,15 @@ void Store::scanFiles(const UserPtr& u) {
             removeFile(path);
             continue;
         }
-        for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay}) {
+        for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay, MatchPart::Src}) {
             std::string ext = matchExt(part);
             if (!endsWith(n, ext)) continue;
             std::string c = n.substr(0, n.size() - ext.size());
-            if (validChecksum(c)) slotOf(u->matches[c], part) = fileSize(path);
+            if (!validChecksum(c)) break;
+            MatchRec& rec = u->matches[c];
+            slotOf(rec, part) = fileSize(path);
+            std::string text;   // Demo-Quelle: klein, gleich mit lesen (steht in /sync/state)
+            if (part == MatchPart::Src && !(readFile(path, text, kMaxSourceFile) && parseSource(text, rec.source))) rec.source = MatchSource();
             break;
         }
     }
@@ -338,7 +361,8 @@ void Store::recount(const UserPtr& u) {
     int64_t sum = 0;
     for (const auto& kv : u->matches) {
         const MatchRec& m = kv.second;
-        sum += std::max<int64_t>(0, m.json) + std::max<int64_t>(0, m.heat) + std::max<int64_t>(0, m.replay) + std::max<int64_t>(0, m.noreplay);
+        sum += std::max<int64_t>(0, m.json) + std::max<int64_t>(0, m.heat) + std::max<int64_t>(0, m.replay) + std::max<int64_t>(0, m.noreplay) +
+               std::max<int64_t>(0, m.src);
     }
     for (const auto& kv : u->clips)
         sum += std::max<int64_t>(0, kv.second.mp4) + std::max<int64_t>(0, kv.second.part) + std::max<int64_t>(0, kv.second.thumb);
@@ -900,6 +924,28 @@ Fail Store::putMatchFile(const UserPtr& u, const std::string& checksum, MatchPar
     return Fail();
 }
 
+Fail Store::putMatchSource(const UserPtr& u, const std::string& checksum, const MatchSource& src) {
+    std::string body = sourceJson(src) + "\n";
+    if (int64_t(body.size()) > kMaxSourceFile) return Fail::make(413, "Die Angaben zur Demo sind zu lang.");
+    std::lock_guard<std::mutex> fl(u->fileMu);
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!alive(u)) return Fail::make(401, kGone);
+        auto it = u->matches.find(checksum);
+        if (it == u->matches.end() || it->second.json < 0) return Fail::make(404, "Das Match ist (noch) nicht auf dem Server.");
+        Fail f = checkSpace(*u, int64_t(body.size()) - std::max<int64_t>(0, it->second.src));
+        if (!f.ok()) return f;
+    }
+    if (!writeAtomic(matchPath(u->id, checksum, matchExt(MatchPart::Src)), body))
+        return Fail::make(500, "Speichern auf dem Server ging schief: " + lastError());
+    std::lock_guard<std::mutex> lk(mu_);
+    MatchRec& rec = u->matches[checksum];
+    u->used += int64_t(body.size()) - std::max<int64_t>(0, rec.src);
+    rec.src = int64_t(body.size());
+    rec.source = src;
+    return Fail();
+}
+
 Fail Store::deleteMatch(const UserPtr& u, const std::string& checksum) {
     std::lock_guard<std::mutex> fl(u->fileMu);
     {
@@ -907,7 +953,7 @@ Fail Store::deleteMatch(const UserPtr& u, const std::string& checksum) {
         if (!alive(u)) return Fail::make(401, kGone);
     }
     bool ok = true;
-    for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay})
+    for (MatchPart part : {MatchPart::Json, MatchPart::Heat, MatchPart::Replay, MatchPart::NoReplay, MatchPart::Src})
         ok = removeFile(matchPath(u->id, checksum, matchExt(part))) && ok;
     std::lock_guard<std::mutex> lk(mu_);
     u->matches.erase(checksum);

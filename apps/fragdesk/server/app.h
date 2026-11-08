@@ -8,11 +8,18 @@
 // 127.0.0.1 (nicht über Caddy) mit „X-FragDesk-Local: <local.key>“.
 // Schreibende Anfragen brauchen „X-FragDesk: 1“ (außer /api/v1/local/*: dort reicht der Schlüssel).
 //
+// Abgleich in beide Richtungen (der Server ist die Drehscheibe): FragDesk lädt seine Matches hoch (PUT /api/v1/sync/
+// match/<prüfsumme>/{json|heat|replay}) und holt, was ihm fehlt (GET …, nur aus dem eigenen Konto, ETag); /sync/state
+// sagt je Match, ob der Server es selbst geholt hat ("fetched") und woher die Demo kam ("src": url, matchtime, until,
+// shareCode).
+//
 // Demos automatisch laden (siehe autodl.h):
 //   GET/PUT/DELETE /api/v1/me/autodl, POST /api/v1/me/autodl/check                      Handy, jedes Konto
-//   GET/DELETE /api/v1/admin/steam, POST …/steam/login, POST …/steam/code, PUT …/steam/apikey  Admin
+//   GET/PUT/DELETE /api/v1/account/autodl, POST /api/v1/account/autodl/check            FragDesk (Konto-Token), gleich
+//   GET/DELETE /api/v1/admin/steam, POST …/steam/login, POST …/steam/code, PUT …/steam/apikey  Admin (Cookie oder Konto-Token)
 //   GET /api/v1/local/fetch/job, POST …/fetch/login, …/fetch/token, …/fetch/run,
 //   POST …/fetch/<konto>/state, PUT …/fetch/<konto>/match/<prüfsumme>/{json|heat|replay}  Helfer
+//   PUT …/fetch/<konto>/match/<prüfsumme>/source {"url","matchtime","shareCode"}           Helfer: Demo-Quelle (.src)
 #pragma once
 
 #include <atomic>
@@ -90,8 +97,10 @@ private:
     // (/local/fetch) dieselben Grenzen und Prüfungen. false: res enthält schon den Fehler
     bool putMatch(const fdapi::Request& req, fdapi::Response& res, const UserPtr& u, const std::string& checksum, const std::string& what,
                   bool* isNew);
+    void getMatch(const fdapi::Request& req, fdapi::Response& res, const UserPtr& u, const std::string& checksum, const std::string& what);
     // Demos automatisch laden
     void meAutodl(const fdapi::Request& req, fdapi::Response& res);
+    void autodl(const fdapi::Request& req, fdapi::Response& res, const UserPtr& u, bool check);
     void writeAutodl(fdapi::Response& res, const UserPtr& u);
     void adminSteam(const fdapi::Request& req, fdapi::Response& res, const std::string& sub);
     void writeSteam(fdapi::Response& res);

@@ -38,6 +38,7 @@ nie andere Programme):
 | **Premier, Wettkampf, Wingman** | in CS2 unter **Deine Matches** beim Match auf „Herunterladen“ – CS2 legt die Demo in `game\csgo\replays` ab, FragDesk findet sie dort |
 | **FACEIT** | auf der Match-Seite „Demo ansehen/herunterladen“ – die Datei (`.dem.zst` oder `.dem.gz`) landet im Downloads-Ordner, FragDesk entpackt sie selbst |
 | **alles andere** | weitere Ordner in den Einstellungen hinzufügen, Demos ins Fenster ziehen oder „Demos hinzufügen“ |
+| **vom eigenen Server** | mit [eigenem Server](#eigener-server) holt FragDesk fertig ausgewertete Matches, die der Server selbst bei Valve geladen hat oder die von einem anderen PC kommen – die Demo dazu auf Klick mit [„Demo von Valve laden“](#matches-vom-server-am-pc) |
 
 **Auswerten** startest du pro Demo selbst (oder „Alle auswerten“). Eine Demo braucht dafür meist 2–10 Sekunden.
 Wer es automatisch mag: Einstellungen › „Neue Demos sofort auswerten“.
@@ -234,9 +235,11 @@ sein, und Freunde können mitmachen.
 
 ## Eigener Server
 
-Ein kleiner gemieteter Linux-Server speichert deine Stats und Clips – und auf Wunsch die deiner Freunde. FragDesk lädt
-im Hintergrund hoch, die Handy-App liest vom Server: dieselbe App mit denselben Ansichten wie oben, aber dein PC muss
-nicht an sein und Tailscale brauchst du nicht. Hochgeladen wird **nie, während CS2 läuft oder aufgenommen wird**.
+Ein kleiner gemieteter Linux-Server wird zur **Drehscheibe** für deine Stats und Clips – und auf Wunsch die deiner
+Freunde. Der Server hat alle Matches: FragDesk am PC lädt seine eigenen hoch und holt sich, was ihm fehlt (z. B. Matches,
+die der Server [selbst bei Valve geladen](#demos-automatisch-laden) hat), die Handy-App liest vom Server – dieselbe App
+mit denselben Ansichten wie oben, aber dein PC muss nicht an sein und Tailscale brauchst du nicht. Hochgeladen und
+geholt wird **nie, während CS2 läuft oder aufgenommen wird**.
 
 **Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64), einer eigenen IPv4-Adresse und SSH-Zugang als root.
 Klein reicht völlig, z. B. der kleinste netcup-VPS („VPS nano“) für rund 3–4 € im Monat samt IPv4 – Preise ändern
@@ -271,10 +274,11 @@ auf die IP des Servers, kostenlos z. B. bei [DuckDNS](https://www.duckdns.org)):
 eine eigene Firewall im Kundenmenü, müssen dort die Ports 80 und 443 offen sein.
 
 **Verbinden:** Den Einladungslink auf den PC bringen (z. B. per Messenger an dich selbst) und kopieren. In FragDesk
-unter **Einstellungen › Handy-App** den Modus **„Eigener Server“** wählen und **„Einladung einfügen“**. Ab dann lädt
-FragDesk neue Matches und Videos hoch (beim Start, nach jeder Auswertung und Aufnahme, sonst alle 15 Minuten; Videos in
-Stücken, ein Abbruch schadet nicht) und zeigt dort Server, Konto, Speicher und Stand. **„Handy verbinden“** zeigt wie
-gewohnt einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“ bleiben Videos auf Wunsch am PC;
+unter **Einstellungen › Handy-App** den Modus **„Eigener Server“** wählen und **„Einladung einfügen“**. Ab dann gleicht
+FragDesk in beide Richtungen ab – neue Matches und Videos hoch, fehlende Matches vom Server zurück (beim Start, nach jeder
+Auswertung und Aufnahme, sonst alle 15 Minuten; Videos in Stücken, ein Abbruch schadet nicht) – und zeigt dort Server,
+Konto, Speicher und Stand („41 Matches auf dem PC · 3 vom Server geholt · …“). **„Handy verbinden“** zeigt wie gewohnt
+einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“ bleiben Videos auf Wunsch am PC;
 **„Trennen“** meldet FragDesk vom Server ab.
 
 **2D-Ansicht über den Server:** Der Schalter **„2D-Ansicht hochladen“** (an) lädt die Daten der 2D-Ansicht mit hoch,
@@ -285,12 +289,14 @@ dann, warum. Ausgeschaltet bleibt die 2D-Ansicht am PC, und FragDesk erstellt da
 braucht der Server eine aktuelle Version – ein älterer nimmt keine 2D-Daten an; FragDesk sagt das dann in den
 Einstellungen, und der Installationsbefehl von oben, noch einmal ausgeführt, aktualisiert ihn.
 
-**Löschen:** Löschst du in FragDesk ein Match oder Video, verschwindet es beim nächsten Abgleich auch vom Server. Fehlt
-etwas nur in FragDesk – neuer PC, Video im Explorer gelöscht, um am PC Platz zu sparen –, bleibt es auf dem Server.
+**Löschen:** Löschst du in FragDesk ein Match oder Video, verschwindet es beim nächsten Abgleich auch vom Server – auch
+ein [vom Server geholtes](#matches-vom-server-am-pc) Match. Fehlt ein Match nur am PC (neuer PC, Datei verloren), holt
+FragDesk es vom Server zurück; ein Video, das du im Explorer löschst, um am PC Platz zu sparen, bleibt auf dem Server.
 
 **Neuer PC oder „Trennen“ gedrückt:** In der Handy-App unter **Einstellungen › PC neu verbinden** einen Link holen und
-in FragDesk wie eine Einladung einfügen – das verbindet FragDesk wieder mit *deinem* Konto, alle Daten bleiben (der
-bisher verbundene PC wird abgemeldet; der Link gilt einen Tag und einmal). Für Freunde macht das der Admin unter
+in FragDesk wie eine Einladung einfügen – das verbindet FragDesk wieder mit *deinem* Konto, alle Daten bleiben, und die
+Matches holt FragDesk von selbst vom Server (der bisher verbundene PC wird abgemeldet; der Link gilt einen Tag und
+einmal). Für Freunde macht das der Admin unter
 **Server verwalten** › Konto › „PC neu verbinden“, auf dem Server geht es mit `fragdesk-server invite --user <ID>`
 (IDs zeigt `fragdesk-server users`).
 
@@ -338,15 +344,39 @@ Text, Videos nicht. Der Helfer für „Demos automatisch laden“ läuft nur, so
 Uhrzeiten in der Handy-App rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh`
 Europe/Berlin (`--timezone <Zone>` ändert das).
 
+### Matches vom Server am PC
+
+Was der Server hat und dem PC fehlt, holt FragDesk beim Abgleich im Hintergrund: Auswertung, Heatmap und – mit
+„2D-Ansicht hochladen“ – die 2D-Daten; die Liste füllt sich nach und nach. Solche Matches tragen in der
+Liste „vom Server“, Stats, Heatmap und 2D-Ansicht gehen sofort. Hochgeladen werden sie nie (der Server hat sie ja), eine
+neuere Fassung auf dem Server ersetzt die am PC, und ist eins auf dem Server weg, bleibt es am PC. Löschst du es in
+FragDesk, ist es auch auf dem Server weg. Wertest du dieselbe Demo am PC selbst aus, wird daraus ein ganz normales
+eigenes Match.
+
+**Demo von Valve laden:** Nur Ansehen, Aufnehmen und Neu auswerten brauchen die Demo. Hat der Server das Match
+[selbst bei Valve geholt](#demos-automatisch-laden), kennt er ihre Adresse, und im Match steht ruhig **„Demo nicht auf
+diesem PC“** mit dem Knopf **„Demo von Valve laden“** – solange Valve sie aufhebt (etwa einen Monat nach dem Spiel, das
+Datum steht dabei). FragDesk lädt sie dann im Hintergrund nach `%LOCALAPPDATA%\FragDesk\demos` (meist 50–200 MB,
+höchstens 1 GB) – mit Fortschritt und „Abbrechen“, nie während CS2 läuft: Dann pausiert es und macht danach an
+derselben Stelle weiter. Danach gehört die Demo zum Match wie jede andere (gepackt; entpackt wird erst fürs Ansehen und
+Aufnehmen). Ist sie bei Valve schon weg, sagt FragDesk das – Stats, Heatmap und 2D-Ansicht bleiben. Löschst du das
+Match, löscht FragDesk die geladene Demo mit.
+
 ### Demos automatisch laden
 
 Der Server holt neue Matches eines Kontos **selbst bei Valve**, wertet sie aus (Stats, Heatmap, 2D-Ansicht) und legt
-sie ins Konto – ohne PC, ohne Klick in CS2. Neue Matches erscheinen von selbst in der Handy-App. So machen es auch
-Leetify & Co.: Mit deinem Authentifizierungscode fragt der Server bei Steam nach den Freigabecodes deiner neuen Matches,
-ein eigenes Steam-Konto des Servers (der „Bot“) holt dazu die Adresse der Demo, und die Demo kommt von Valve.
+sie ins Konto – ohne PC, ohne Klick in CS2. Neue Matches erscheinen von selbst in der Handy-App und – sobald FragDesk
+abgleicht – [am PC](#matches-vom-server-am-pc). So machen es auch Leetify & Co.: Mit deinem Authentifizierungscode fragt
+der Server bei Steam nach den Freigabecodes deiner neuen Matches, ein eigenes Steam-Konto des Servers (der „Bot“) holt
+dazu die Adresse der Demo, und die Demo kommt von Valve.
 
-**Einmal für den ganzen Server (Admin):** in der Handy-App unter **Server verwalten › Steam-Bot** – dort steht es
-auch Schritt für Schritt:
+Einrichten geht in FragDesk unter **Einstellungen › Demos automatisch laden** (mit „Eigener Server“ verbunden) oder in
+der Handy-App – beides zeigt denselben Stand. FragDesk hat dafür keine Eingabefelder: Codes und Schlüssel kopierst du
+bei Steam, die Knöpfe „… einfügen“ nehmen sie aus der Zwischenablage (geprüft wie auf dem Server); Benutzername und
+Passwort des Bots und den Steam-Guard-Code fragt ein kleines Fenster ab.
+
+**Einmal für den ganzen Server (Admin):** in FragDesk unter **Einstellungen › Demos automatisch laden › Steam-Bot**
+oder in der Handy-App unter **Server verwalten › Steam-Bot** – dort steht es auch Schritt für Schritt:
 
 1. Ein **neues Steam-Konto** nur für den Server anlegen (nicht dein eigenes!) – deine normale E-Mail-Adresse geht
    auch, Steam erlaubt mehrere Konten pro Adresse.
@@ -355,18 +385,19 @@ auch Schritt für Schritt:
    heraus. Das Guthaben bleibt auf dem Konto.
 4. **Steam Guard mit der Steam-App** einrichten (Steam-App aufs Handy, mit dem Bot anmelden, Authenticator).
 5. Den **Web-API-Schlüssel** holen: als Bot auf [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey),
-   als Domain z. B. die Adresse deines Servers, und in der Handy-App eintragen. Nimm den Schlüssel des Bots – der deines
-   eigenen Kontos ginge auch, läge dann aber auf dem Server, und wer ihn erbeutet, kann damit Betrug beim Handeln mit
-   Skins versuchen.
+   als Domain z. B. die Adresse deines Servers, und eintragen (in FragDesk kopieren und „Schlüssel einfügen“). Nimm den
+   Schlüssel des Bots – der deines eigenen Kontos ginge auch, läge dann aber auf dem Server, und wer ihn erbeutet, kann
+   damit Betrug beim Handeln mit Skins versuchen.
 6. **Bot anmelden:** Benutzername und Passwort des Bots, dann den Code aus der E-Mail bzw. der Steam-App eingeben
-   oder in der Steam-App bestätigen.
+   oder in der Steam-App bestätigen (FragDesk fragt den Code von selbst ab bzw. wartet, bis du bestätigt hast).
 
-**Jeder für sich (jedes Konto):** in der Handy-App unter **Einstellungen › Demos automatisch laden** zwei Codes
-eintragen und einschalten. Beide stehen auf derselben
+**Jeder für sich (jedes Konto):** in FragDesk unter **Einstellungen › Demos automatisch laden** oder in der Handy-App
+unter **Einstellungen › Demos automatisch laden** zwei Codes eintragen und einschalten. Beide stehen auf derselben
 [Steam-Seite](https://help.steampowered.com/de/wizard/HelpWithGameIssue/?appid=730&issueid=128): der
 **Authentifizierungscode** („Authentifizierungscode erstellen“, Form `AAAA-AAAAA-AAAA`) und der **Freigabecode deines
 letzten Matches** (`CSGO-…`). Dafür muss in FragDesk am PC dein Spieler gewählt sein (die SteamID kommt vom PC).
 „Jetzt prüfen“ schaut sofort nach, sonst prüft der Server alle 15 Minuten; „Ausschalten“ löscht beide Codes vom Server.
+Nach „Jetzt prüfen“ in FragDesk holt es neue Matches gleich, sobald der Server fertig ist.
 
 **Grenzen:** nur **Premier, Wettkampf und Wingman** – FACEIT nicht (das lädt weiter FragDesk am PC hoch). Valve hebt
 Demos nur etwa **einen Monat** auf; geladen werden jeweils die Matches *nach* dem eingetragenen Freigabecode. Ist eine
@@ -379,7 +410,9 @@ PC dasselbe Match später hoch, ersetzt es einfach die Server-Fassung (gleiche P
 und der Web-API-Schlüssel – nur in `/var/lib/fragdesk/steam.json` (0600, nur für `fragdesk` lesbar). Der
 Authentifizierungscode jedes Kontos liegt in dessen `account.json` (die Handy-App zeigt ihn nur gekürzt, ins Protokoll
 kommt er nie); mit ihm lässt sich nur der Spielverlauf abfragen, keine Anmeldung. Name, SteamID und Ablauf des Tokens
-des Bots stehen in `server.json`. „Bot abmelden“ löscht das Token, „Ausschalten“ die Codes eines Kontos.
+des Bots stehen in `server.json`. „Bot abmelden“ löscht das Token, „Ausschalten“ die Codes eines Kontos. Zu jedem
+selbst geholten Match merkt sich der Server Adresse und Spielzeit der Demo bei Valve und den Freigabecode
+(`<Prüfsumme>.src` neben dem Match, 0600) – für „Demo von Valve laden“ in FragDesk; die Datei geht mit dem Match.
 
 **So läuft es:** Den Weg nach außen hat nur der Helfer `fragdesk-fetch` (Node.js, eigener systemd-Dienst
 `fragdesk-fetch.service`, als Benutzer `fragdesk`, darf nur in `/var/lib/fragdesk/fetch` schreiben). Ein Timer startet
@@ -412,9 +445,10 @@ meldet `install.sh` das und lässt nur diese Funktion aus.
 - Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet. Die [Handy-App](#handy-app)
   (aus, bis du sie einschaltest) verbindet nur Handys, die du selbst gekoppelt hast – im Heimnetz oder über Tailscale.
   Nur wenn du einen [eigenen Server](#eigener-server) einrichtest, lädt FragDesk Auswertungen, 2D-Daten und Videos
-  dorthin – und nirgendwo sonst hin. Mit [Demos automatisch laden](#demos-automatisch-laden) holt der Server Demos
-  selbst bei Valve – über ein eigenes Steam-Konto (den Bot), nie über deins; dein Authentifizierungscode erlaubt nur,
-  deinen Spielverlauf abzufragen.
+  dorthin und holt Matches von dort – und spricht mit niemandem sonst; einzige Ausnahme ist
+  [„Demo von Valve laden“](#matches-vom-server-am-pc): nur auf Klick, direkt von Valves Demo-Servern, ohne Anmeldung.
+  Mit [Demos automatisch laden](#demos-automatisch-laden) holt der Server Demos selbst bei Valve – über ein eigenes
+  Steam-Konto (den Bot), nie über deins; dein Authentifizierungscode erlaubt nur, deinen Spielverlauf abzufragen.
 
 ## Ressourcen
 
@@ -427,6 +461,10 @@ meldet `install.sh` das und lässt nur diese Funktion aus.
   daneben die Heatmap-Daten (30–200 KB) und die Daten der 2D-Ansicht (0,5–3 MB) für die Matches, die du dir am PC
   oder Handy angesehen hast – mit eigenem Server und „2D-Ansicht hochladen“ für alle. Die Demo selbst brauchst du
   danach nur noch zum Ansehen und Aufnehmen in CS2.
+- Mit eigenem Server holt FragDesk fehlende Matches im selben Hintergrund-Thread wie das Hochladen (niedrige
+  Priorität, nie während CS2 läuft oder aufgenommen wird) und gibt sie in Stapeln an die Liste. „Demo von Valve laden“
+  lädt nur auf Klick, eine Demo zur Zeit, mit niedriger Priorität, pausiert, solange CS2 läuft, und hört nach
+  30 Minuten Laden auf (ein Klick macht an der Stelle weiter).
 - Die 2D-Ansicht zeichnet nur, solange sie abspielt und das Fenster zu sehen ist (rund 30 Bilder pro Sekunde),
   angehalten oder minimiert kostet sie nichts. Heatmaps rechnet FragDesk nur, wenn sich die Auswahl ändert; die
   Daten vieler Matches liest es im Hintergrund.
@@ -449,10 +487,12 @@ von Valve. Demos aus CS:GO und POV-Demos kann FragDesk nicht lesen.
 |---|---|
 | Programm | `%LOCALAPPDATA%\Programs\FragDesk` |
 | Auswertungen, Einstellungen, Protokoll | `%LOCALAPPDATA%\FragDesk` |
+| Von Valve geladene Demos („Demo von Valve laden“) | `%LOCALAPPDATA%\FragDesk\demos` |
 | Videos | `Videos\FragDesk` (änderbar) |
 
 Entfernen: `Uninstall.cmd` aus dem ZIP oder **Einstellungen › Apps › Installierte Apps › FragDesk**. Auf Wunsch
-löscht es auch die Auswertungen; deine Demos und Videos bleiben immer erhalten.
+löscht es auch die Auswertungen (samt der von Valve geladenen Demos); deine eigenen Demos und Videos bleiben immer
+erhalten.
 
 Befehlszeile: `FragDesk.exe <Demo> …` wertet Demos aus (auch für „Öffnen mit“), `--theme dark|light` erzwingt
 das Farbschema.

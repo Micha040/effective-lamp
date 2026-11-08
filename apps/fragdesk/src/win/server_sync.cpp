@@ -69,17 +69,19 @@ struct Snapshot {
     std::string name, steamId, profile;   // Profil jetzt und zuletzt gemeldet
     std::vector<std::string> matches;     // Prüfsummen, neueste zuerst
     std::vector<std::wstring> demos;      // Demo je Match (für fehlende 2D-Daten)
+    std::set<std::string> pulled;         // davon vom Server geholt (nie hochladen, neuere Fassung neu holen)
     std::vector<SyncClip> clips;          // neueste zuerst
     std::vector<std::string> gone;        // in FragDesk gelöscht ("m:…", "c:…"), auf dem Server noch zu löschen
 };
 
 // ---- Ergebnisse für den UI-Thread (WM_APP_SYNC, lParam) --------------------------------------------------------------
 struct SyncEvent {
-    enum Kind { Status, Synced, Profile, Account, Registered, ConnectFailed, Pairing, Invite, ActionFailed } kind = Status;
+    enum Kind { Status, Synced, Profile, Account, Registered, ConnectFailed, Pairing, Invite, ActionFailed, Pulled } kind = Status;
     uint64_t epoch = 0;   // für welches Konto (ältere werden verworfen)
     SyncStatus status;
     std::string url, token, user, userId, code, link, profile;
     std::vector<std::string> gone;   // Synced: auf dem Server erledigte Löschungen
+    std::vector<PulledMatch> pulled;   // Pulled: vom Server geholt (Dateien liegen schon in matches\)
     bool admin = false, auth = false;
     int64_t time = 0;     // Synced: Zeitpunkt; Pairing, Invite: gültig bis
     std::wstring text;
@@ -218,13 +220,18 @@ struct RemoteClip {
 struct RemoteMatch {
     int64_t json = -1, heat = -1, replay = 0;   // Bytes (replay 0 = fehlt)
     bool noreplay = false;                      // FragDesk hat gemeldet: keine 2D-Daten möglich
+    bool fetched = false;                       // der Server hat es selbst bei Valve geholt
+    std::string srcUrl;                         // … und so heißt die Demo dort (leer = unbekannt)
+    std::string srcShare;                       // Freigabecode, mit dem er sie gefunden hat (leer = unbekannt)
+    int64_t srcTime = 0, srcUntil = 0;          // Spielzeit, so lange hebt Valve sie etwa auf
 };
 
 struct Remote {
     std::map<std::string, RemoteMatch> matches;   // Prüfsumme ->
     std::map<std::string, RemoteClip> clips;
     int64_t used = -1, limit = 0;
-    bool replays = false;   // nimmt 2D-Daten an (ältere Server sagen dazu nichts)
+    bool replays = false;    // nimmt 2D-Daten an (ältere Server sagen dazu nichts)
+    bool download = false;   // gibt Matches heraus (GET /sync/match/…; ältere Server: nicht)
 };
 
 bool parseState(const std::string& body, Remote& out) {
@@ -236,6 +243,14 @@ bool parseState(const std::string& body, Remote& out) {
         m.heat = int64_t(kv.second.getNumber("heat", -1));
         m.replay = int64_t(kv.second.getNumber("replay", 0));   // ältere Server kennen keine 2D-Daten: 0
         m.noreplay = kv.second.getBool("noreplay");
+        m.fetched = kv.second.getBool("fetched");
+        const json::Value& src = kv.second["src"];
+        if (src.isObject()) {
+            m.srcUrl = src.getString("url").substr(0, 512);
+            m.srcShare = src.getString("shareCode").substr(0, 64);
+            m.srcTime = std::max<int64_t>(0, int64_t(src.getNumber("matchtime")));
+            m.srcUntil = std::max<int64_t>(0, int64_t(src.getNumber("until")));
+        }
     }
     for (const auto& kv : v["clips"].obj) {
         RemoteClip c;
@@ -250,6 +265,7 @@ bool parseState(const std::string& body, Remote& out) {
         out.limit = int64_t(q.getNumber("limit", 0));
     }
     out.replays = v.getBool("replays");
+    out.download = v.getBool("download");
     return true;
 }
 
@@ -264,7 +280,7 @@ public:
     SyncStatus st;                                      // Stand, auch für die Anzeige danach
     std::wstring text;                                  // Grund bei Net, Full, Auth, Item
     SyncStatus::State pausedBy = SyncStatus::PausedCs2;
-    int uploads = 0, deletes = 0;
+    int uploads = 0, deletes = 0, pulls = 0;
     std::vector<std::string> goneDone;                  // erledigte Löschungen (auch: gab es dort schon nicht mehr)
 
 private:
@@ -274,6 +290,12 @@ private:
         int64_t json = 0, heat = 0, replay = 0;   // replay: lokale .replay (0 = keine)
         int64_t remoteReplay = 0;
         bool jsonOk = false, heatOk = false, noreplay = false;
+    };
+    struct PullItem {   // was vom Server zu holen ist
+        std::string checksum;
+        bool json = false, heat = false, replay = false;   // diese Teile
+        bool fresh = false;                                // gibt es hier noch nicht
+        const RemoteMatch* remote = nullptr;
     };
     struct LocalClip {
         const SyncClip* clip;
@@ -306,6 +328,10 @@ private:
     Fail uploadClip(const SyncClip& c, int64_t size, const RemoteClip* e, int index, int count);
     void uploadThumb(const SyncClip& c);
     void account();
+    Fail pull(const Remote& rem, bool replays, const std::vector<LocalMatch>& mine, const std::vector<LocalMatch>& pulledHere);
+    Fail pullOne(const PullItem& item, std::vector<PulledMatch>& batch);
+    Fail fetchPart(const std::string& checksum, const char* part, size_t maxBytes, std::string& out);
+    void postPulled(std::vector<PulledMatch>& batch);
 };
 
 HttpResponse Pass::call(const wchar_t* method, const std::string& path, const std::string& body, const char* type, bool stoppable) {
@@ -391,8 +417,8 @@ Fail Pass::run() {
     if (st.replaysOld && sh_.rejected.insert("server.replays").second)
         logLine(L"Server: kennt noch keine 2D-Daten – auf dem Server den Installationsbefehl noch einmal ausführen (aktualisiert)");
 
-    // Was liegt hier, was fehlt dort?
-    std::vector<LocalMatch> all;
+    // Was liegt hier, was fehlt dort? (vom Server geholte Matches gehen nie zurück – dort liegen sie ja)
+    std::vector<LocalMatch> all, pulledHere;
     for (size_t i = 0; i < s_.matches.size(); ++i) {
         const std::string& cs = s_.matches[i];
         LocalMatch m;
@@ -402,6 +428,10 @@ Fail Pass::run() {
         if (m.json <= 0) continue;   // gerade gelöscht
         m.heat = fileSize(heatFile(cs));
         m.replay = std::max<int64_t>(0, fileSize(replayFile(cs)));
+        if (s_.pulled.count(cs)) {
+            pulledHere.push_back(m);
+            continue;
+        }
         auto it = rem.matches.find(cs);
         m.jsonOk = it != rem.matches.end() && it->second.json == m.json;
         m.heatOk = m.heat <= 0 || (it != rem.matches.end() && it->second.heat == m.heat);
@@ -443,6 +473,15 @@ Fail Pass::run() {
     if (replays) {   // 2D-Daten, die es in FragDesk schon gibt (klein, schnell)
         f = uploadReplays(all);
         if (f != Fail::None) return f;
+    }
+    // Was der Server hat und hier fehlt (selbst bei Valve geholt, von einem anderen PC): holen – vor den Videos, damit
+    // neue Matches schnell in FragDesk stehen. Ältere Server geben keine Matches heraus.
+    st.pullOld = !rem.download;
+    if (rem.download) {
+        f = pull(rem, replays, all, pulledHere);
+        if (f != Fail::None) return f;
+    } else if (sh_.rejected.insert("server.download").second) {
+        logLine(L"Server: gibt noch keine Matches heraus – auf dem Server den Installationsbefehl noch einmal ausführen (aktualisiert)");
     }
     int count = st.clipsTotal - st.clipsDone, index = 0;
     for (const auto& lc : clips) {
@@ -664,6 +703,160 @@ Fail Pass::makeReplays(std::vector<LocalMatch>& all) {
     return Fail::None;
 }
 
+// ---- Holen, was der Server hat ---------------------------------------------------------------------------------------
+// Fehlt hier ganz (und wurde hier nicht gerade gelöscht): .json, .heat und mit „2D-Ansicht“ .replay. Schon geholt und
+// dort neuer: neu holen. Eigene Matches: nur fehlende 2D-Daten (sie gehören zur selben Demo). Neueste zuerst, soweit
+// der Server die Spielzeit kennt.
+Fail Pass::pull(const Remote& rem, bool replays, const std::vector<LocalMatch>& mine, const std::vector<LocalMatch>& pulledHere) {
+    std::set<std::string> local(s_.matches.begin(), s_.matches.end()), deleted;
+    for (const auto& g : s_.gone)
+        if (g.compare(0, 2, "m:") == 0) deleted.insert(g.substr(2));   // gerade hier gelöscht: auf dem Server weg damit, nicht zurückholen
+    std::vector<PullItem> todo;
+    for (const auto& kv : rem.matches) {
+        const RemoteMatch& r = kv.second;
+        if (r.json <= 0 || r.json > kMaxMatchFile || !safeChecksum(kv.first) || local.count(kv.first) || deleted.count(kv.first) ||
+            sh_.rejected.count(kv.first + ".pull"))
+            continue;
+        todo.push_back({kv.first, true, r.heat > 0, replays && r.replay > 0, true, &r});
+    }
+    std::stable_sort(todo.begin(), todo.end(), [](const PullItem& a, const PullItem& b) { return a.remote->srcTime > b.remote->srcTime; });
+    for (const auto& m : pulledHere) {   // schon geholt: der Server hat die maßgebliche Fassung
+        auto it = rem.matches.find(m.checksum);
+        if (it == rem.matches.end() || it->second.json <= 0 || sh_.rejected.count(m.checksum + ".pull")) continue;   // dort weg: hier bleibt es
+        const RemoteMatch& r = it->second;
+        PullItem p{m.checksum, r.json != m.json, false, false, false, &r};
+        p.heat = r.heat > 0 && (p.json || r.heat != m.heat);
+        p.replay = replays && r.replay > 0 && r.replay != m.replay;
+        if (p.json || p.heat || p.replay) todo.push_back(p);
+    }
+    if (replays)
+        for (const auto& m : mine) {   // eigene Matches: 2D-Daten, die der Server hat und hier fehlen (dieselbe Demo)
+            auto it = rem.matches.find(m.checksum);
+            if (m.replay <= 0 && it != rem.matches.end() && it->second.replay > 0 && !sh_.rejected.count(m.checksum + ".pull"))
+                todo.push_back({m.checksum, false, false, true, false, &it->second});
+        }
+    if (todo.empty()) return Fail::None;
+    st.pullsTotal = int(std::count_if(todo.begin(), todo.end(), [](const PullItem& p) { return p.json; }));
+    std::vector<PulledMatch> batch;
+    ULONGLONG posted = GetTickCount64();
+    Fail result = Fail::None;
+    int index = 0;
+    for (const PullItem& p : todo) {
+        if (cancelled()) {
+            result = Fail::Cancel;
+            break;
+        }
+        if (blocked()) {
+            result = Fail::Paused;
+            break;
+        }
+        st.current = p.json ? L"Holt Match " + std::to_wstring(++index) + L" von " + std::to_wstring(st.pullsTotal) + L" vom Server …"
+                            : std::wstring(L"Holt 2D-Ansicht vom Server …");
+        progress();
+        Fail f = pullOne(p, batch);
+        if (f == Fail::Item) {   // dieses eine nicht (kaputt, gerade dort gelöscht …): in dieser Sitzung nicht noch einmal
+            sh_.rejected.insert(p.checksum + ".pull");
+            continue;
+        }
+        if (f != Fail::None) {
+            result = f;
+            break;
+        }
+        if (p.json) ++st.pullsDone;
+        ++pulls;
+        changed_ = true;
+        // in Stapeln an die Bibliothek: neue Matches erscheinen nach und nach, sortiert wird je Stapel einmal
+        if (batch.size() >= 25 || (!batch.empty() && GetTickCount64() - posted >= 3000)) {
+            postPulled(batch);
+            posted = GetTickCount64();
+            progress(true);
+        }
+    }
+    postPulled(batch);   // auch bei Pause oder Fehler: was schon auf der Platte liegt, gehört in die Bibliothek
+    return result;
+}
+
+Fail Pass::fetchPart(const std::string& checksum, const char* part, size_t maxBytes, std::string& out) {
+    HttpRequest rq;
+    rq.method = L"GET";
+    rq.path = "api/v1/sync/match/" + checksum + "/" + part;
+    rq.token = s_.token;
+    rq.maxBody = maxBytes;
+    rq.cancel = [this] { return cancelled() || blocked(); };   // CS2 startet: 2D-Daten (bis 16 MB) nicht zu Ende laden
+    HttpResponse r;
+    if (cancelled() || blocked()) r.cancelled = true;
+    else r = sh_.http.send(url_, rq);
+    Fail f = check(r);
+    if (f == Fail::Item && r.status != 404) logLine(L"Server: %hs/%hs nicht geholt – %ls", checksum.c_str(), part, text.c_str());
+    if (f == Fail::None) out = std::move(r.body);
+    return f;
+}
+
+Fail Pass::pullOne(const PullItem& p, std::vector<PulledMatch>& batch) {
+    const std::string& cs = p.checksum;
+    std::string json, heat, replay, err;
+    auto match = std::make_unique<fd::Match>();
+    if (p.json) {
+        Fail f = fetchPart(cs, "json", size_t(kMaxMatchFile), json);
+        if (f != Fail::None) return f;
+        if (!fd::parseMatch(json, *match, err, false) || match->checksum != cs) {   // muss genau dieses Match sein
+            logLine(L"Server: %hs ist keine lesbare Auswertung (%hs) – bleibt dort", cs.c_str(), err.c_str());
+            return Fail::Item;
+        }
+    }
+    if (p.heat) {   // ohne Heatmap ist das Match trotzdem da
+        Fail f = fetchPart(cs, "heat", size_t(kMaxMatchFile), heat);
+        if (f != Fail::None && f != Fail::Item) return f;
+        if (heat.size() < 8 || heat.compare(0, 4, "FDHM") != 0) heat.clear();
+    }
+    if (p.replay) {
+        Fail f = fetchPart(cs, "replay", size_t(kMaxReplayFile), replay);
+        if (f != Fail::None && f != Fail::Item) return f;
+        if (replay.size() < 8 || replay.compare(0, 4, "FDRP") != 0) replay.clear();
+        if (!p.json && replay.empty()) return Fail::Item;
+    }
+    // Schreiben: Heatmap und 2D-Daten zuerst, dann die Markierung, zuletzt die Auswertung – erst mit ihr gibt es das
+    // Match hier (bricht FragDesk dazwischen ab, holt der nächste Abgleich es noch einmal)
+    createDirs(matchesDir());
+    if (!heat.empty() && !writeFileAtomic(heatFile(cs), heat)) logLine(L"Server: Heatmap von %hs nicht gespeichert", cs.c_str());
+    if (p.json && heat.empty()) DeleteFileW(heatFile(cs).c_str());   // eine alte gehört zur alten Fassung
+    if (!replay.empty() && !writeFileAtomic(replayFile(cs), replay)) logLine(L"Server: 2D-Daten von %hs nicht gespeichert", cs.c_str());
+    if (!p.json) return Fail::None;
+    PulledInfo info;
+    info.fetched = p.remote->fetched;
+    info.url = p.remote->srcUrl;
+    info.matchtime = p.remote->srcTime;
+    info.until = p.remote->srcUntil;
+    info.shareCode = p.remote->srcShare.empty() ? match->shareCode : p.remote->srcShare;
+    // neu: die Markierung schreibt nur dieser Thread; schon geholte Matches gleicht die Bibliothek ab (dort steht die
+    // geladene Demo)
+    if (p.fresh && !Library::writePulled(cs, info)) {
+        logLine(L"Server: %hs lässt sich nicht speichern", cs.c_str());
+        return Fail::Item;
+    }
+    if (!writeFileAtomic(Library::matchFile(cs), json)) {
+        logLine(L"Server: %hs lässt sich nicht speichern", cs.c_str());
+        if (p.fresh) DeleteFileW(Library::pulledFile(cs).c_str());
+        return Fail::Item;
+    }
+    PulledMatch pm;
+    pm.match = std::move(match);
+    pm.info = info;
+    pm.fresh = p.fresh;
+    batch.push_back(std::move(pm));
+    return Fail::None;
+}
+
+void Pass::postPulled(std::vector<PulledMatch>& batch) {
+    if (batch.empty()) return;
+    auto* e = new SyncEvent();
+    e->kind = SyncEvent::Pulled;
+    e->epoch = s_.epoch;
+    e->pulled = std::move(batch);
+    batch.clear();
+    post(sh_, e);
+}
+
 // Ein Video in Stücken à 4 MB; ein unterbrochenes geht an der Stelle weiter, die der Server kennt
 Fail Pass::uploadClip(const SyncClip& c, int64_t size, const RemoteClip* e, int index, int count) {
     std::string key = c.id + "|" + std::to_string(size);
@@ -849,9 +1042,10 @@ void runOnce(Shared& sh, const Snapshot& s) {
                 sh.backoffUntil = 0;
             }
             st.state = SyncStatus::Idle;
-            if (pass.uploads || pass.deletes || sh.lastLogged != SyncStatus::Idle)
-                logLine(L"Server: abgeglichen – %d von %d Matches, %d von %d Videos, 2D-Daten %d von %d (%d hochgeladen, %d gelöscht)",
-                        st.matchesDone, st.matchesTotal, st.clipsDone, st.clipsTotal, st.replaysDone, st.replaysTotal, pass.uploads, pass.deletes);
+            if (pass.uploads || pass.deletes || pass.pulls || sh.lastLogged != SyncStatus::Idle)
+                logLine(L"Server: abgeglichen – %d von %d Matches, %d von %d Videos, 2D-Daten %d von %d (%d hochgeladen, %d gelöscht, %d geholt)",
+                        st.matchesDone, st.matchesTotal, st.clipsDone, st.clipsTotal, st.replaysDone, st.replaysTotal, pass.uploads, pass.deletes,
+                        pass.pulls);
             sh.lastLogged = SyncStatus::Idle;
             auto* e = new SyncEvent();
             e->kind = SyncEvent::Synced;
@@ -1133,6 +1327,7 @@ void ServerSync::request(int delayMs, bool manual) {
             snap->matches.push_back(m->checksum);
             snap->demos.push_back(widen(m->demoPath));
         }
+    for (const std::string& cs : d.app.lib.pulledChecksums()) snap->pulled.insert(cs);
     for (const Clip& c : d.app.clips) {
         SyncClip sc;
         sc.path = c.path;
@@ -1318,6 +1513,7 @@ LRESULT ServerSync::onMessage(WPARAM, LPARAM lp) {
                 next.replaysDone = d.status.replaysDone;
                 next.replaysTotal = d.status.replaysTotal;
                 next.replaysOld = d.status.replaysOld;
+                next.pullOld = d.status.pullOld;
             }
             d.status = next;
             if (next.used >= 0) {   // wird mit dem nächsten Speichern gemerkt
@@ -1338,6 +1534,31 @@ LRESULT ServerSync::onMessage(WPARAM, LPARAM lp) {
                 app.saveSettings();
             }
             break;
+        case SyncEvent::Pulled: {
+            // Dateien liegen schon in matches\ (auch nach einem Kontowechsel: sonst stünden sie beim nächsten Start ohne
+            // Bescheid da). Inzwischen hier gelöscht: wieder weg damit.
+            std::vector<PulledMatch> keep;
+            bool openOne = false;
+            for (PulledMatch& pm : e->pulled) {
+                if (!pm.match) continue;
+                const std::string cs = pm.match->checksum;
+                if (std::find(srv.gone.begin(), srv.gone.end(), "m:" + cs) != srv.gone.end()) {
+                    for (const wchar_t* ext : {L".json", L".heat", L".replay", L".src"}) DeleteFileW(joinPath(matchesDir(), widen(cs) + ext).c_str());
+                    continue;
+                }
+                openOne = openOne || cs == app.matchId;
+                keep.push_back(std::move(pm));
+            }
+            if (keep.empty()) return 0;
+            size_t n = keep.size();
+            app.lib.addPulled(keep);
+            logLine(L"Server: %zu %ls in die Bibliothek übernommen", n, n == 1 ? L"geholtes Match" : L"geholte Matches");
+            if (app.me.empty()) app.detectMe();
+            app.invalidateCareer();
+            if (openOne) app.refreshDetail();   // gerade offen: neuere Fassung zeigen
+            app.lib.scanAsync();                 // Demos, die jetzt zu einem Match gehören, sind nicht mehr „neu“
+            break;
+        }
         case SyncEvent::Profile:
             if (current) {
                 srv.profile = e->profile;

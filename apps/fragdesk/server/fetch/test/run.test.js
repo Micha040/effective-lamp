@@ -116,6 +116,19 @@ test('Kette → Match-Infos → Demo → fdanalyze → json/heat/replay hochlade
 		for (let f of Object.values(files)) {
 			assert.ok(f.json && f.heat && f.replay, 'alle drei Teile');
 		}
+		// nach jedem Import: woher die Demo kam (für „Demo von Valve laden“ in FragDesk) – zum richtigen Match
+		let sources = ctx.server.sources[A] || {};
+		assert.deepStrictEqual(Object.keys(sources).sort(), Object.keys(files).sort());
+		for (let [checksum, s] of Object.entries(sources)) {
+			let c = [c1, c2, c3].find((x) => gc[x].url == s.url);
+			assert.ok(c, `Adresse der Demo von ${checksum}`);
+			assert.deepStrictEqual(s, {url: gc[c].url, matchtime: gc[c].matchtime, shareCode: c});
+			let demo = demoBytes(c);   // falsches fdanalyze: Prüfsumme = SHA-256 der Demo, gekürzt
+			assert.strictEqual(checksum, require('crypto').createHash('sha256').update(demo).digest('hex').slice(0, 16), 'Quelle gehört zu diesem Match');
+		}
+		let order = ctx.server.calls.filter((x) => x.path.includes('/match/')).map((x) => x.path.split('/').pop());
+		assert.deepStrictEqual(order, ['json', 'heat', 'replay', 'source', 'json', 'heat', 'replay', 'source', 'json', 'heat', 'replay', 'source'],
+			'Quelle erst nach den Dateien');
 		let states = ctx.server.states[A];
 		assert.deepStrictEqual(states.map((s) => s.knownCode), [c1, c2, c3, c3]);
 		assert.deepStrictEqual(states.map((s) => s.from), [c0, c1, c2, c3]);
@@ -303,6 +316,8 @@ test('zwei Konten im selben Match: eine Demo, eine Auswertung, beide bekommen da
 		assert.strictEqual(sumA.length, 1);
 		assert.strictEqual(sumB.length, 2);
 		assert.ok(sumB.includes(sumA[0]));
+		assert.deepStrictEqual(ctx.server.sources[A][sumA[0]], {url, matchtime: OLD, shareCode: c1}, 'beide Konten bekommen die Quelle');
+		assert.deepStrictEqual(ctx.server.sources[B][sumA[0]], {url, matchtime: OLD, shareCode: c1});
 		assert.strictEqual(ctx.calls('gc-request').length, 2, 'jeder Code einmal beim Game Coordinator');
 		assert.strictEqual(ctx.server.runs[1].text, '2 Konten geprüft · 3 neue Matches');
 	} finally {
@@ -418,6 +433,7 @@ test('Heatmap abgelehnt: Match trotzdem da; Auswertung abgelehnt (400): Fehlvers
 
 		delete ctx.server.reject.json;
 		ctx.server.reject.heat = 400;
+		ctx.server.reject.source = 404;   // älterer Server ohne Demo-Quelle: kein Fehler des Matches
 		let cap = captureLog();
 		try {
 			await ctx.run();
@@ -425,9 +441,12 @@ test('Heatmap abgelehnt: Match trotzdem da; Auswertung abgelehnt (400): Fehlvers
 			cap.stop();
 		}
 		assert.strictEqual(ctx.lastState(A).knownCode, c1);
+		assert.strictEqual(ctx.lastState(A).lastError, '');
 		let f = Object.values(ctx.server.files[A])[0];
 		assert.ok(f.json && f.replay && !f.heat);
 		assert.ok(cap.has(/Heatmap nicht angenommen/));
+		assert.ok(cap.has(/Adresse der Demo nicht beim Server angekommen \(Unbekannte Anfrage\) – das Match ist trotzdem da/));
+		assert.strictEqual(ctx.server.sources[A], undefined);
 	} finally {
 		await ctx.done();
 	}
@@ -483,7 +502,7 @@ test('Server weg mitten im Lauf: Lauf endet mit Fehler, Sperre frei; nächster L
 	let puts = 0;
 	ctx.server.server.removeAllListeners('request');
 	ctx.server.server.on('request', (req, res) => {
-		if (req.method == 'PUT' && ++puts == 4) {   // zweites Match, erster Teil
+		if (req.method == 'PUT' && ++puts == 5) {   // zweites Match, erster Teil (erstes: json, heat, replay, source)
 			ctx.server.down = true;
 		}
 		return orig(req, res);

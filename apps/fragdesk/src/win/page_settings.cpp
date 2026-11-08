@@ -8,6 +8,7 @@
 #include "app.h"
 #include "common.h"
 #include "mobile_host.h"
+#include "server_autodl.h"
 #include "server_sync.h"
 
 namespace fdw {
@@ -99,16 +100,25 @@ std::wstring agoText(int64_t t) {
     return L"am " + dateText(t);
 }
 
-// Stand des Abgleichs: „41 von 41 Matches · 4 von 4 Videos · zuletzt vor 2 min“, Pause oder Fehler (col: Farbe dafür)
-std::wstring syncText(Canvas& c, const SyncStatus& st, const ServerSettings& srv, Color& col) {
+// Stand des Abgleichs in beide Richtungen: „44 Matches auf dem PC · 3 vom Server geholt · 4 von 4 Videos · zuletzt vor
+// 2 min“ (fehlt noch etwas auf dem Server: „38 von 41 hochgeladen“), Pause oder Fehler (col: Farbe dafür)
+std::wstring syncText(Canvas& c, App& app, const SyncStatus& st, const ServerSettings& srv, Color& col) {
     col = c.th.text3;
     std::wstring counts;
     if (st.counted) {
-        counts = std::to_wstring(st.matchesDone) + L" von " + std::to_wstring(st.matchesTotal) + L" Matches · ";
+        int onPc = int(app.lib.matches.size()), pulled = app.lib.pulledCount();
+        counts = std::to_wstring(onPc) + (onPc == 1 ? L" Match auf dem PC · " : L" Matches auf dem PC · ");
+        if (pulled > 0) counts += std::to_wstring(pulled) + L" vom Server geholt · ";
+        if (st.matchesDone < st.matchesTotal)
+            counts += std::to_wstring(st.matchesDone) + L" von " + std::to_wstring(st.matchesTotal) + L" hochgeladen · ";
         counts += srv.videos ? std::to_wstring(st.clipsDone) + L" von " + std::to_wstring(st.clipsTotal) + L" Videos" : L"Videos hochladen aus";
         if (srv.replays && st.replaysTotal > 0)
             counts += L" · 2D-Ansicht " + std::to_wstring(st.replaysDone) + L" von " + std::to_wstring(st.replaysTotal);
     }
+    // älterer Server: nimmt an, gibt aber nichts heraus
+    const std::wstring old = st.pullOld ? L" Dein Server gibt noch keine Matches an den PC – auf dem Server den Installationsbefehl noch einmal "
+                                          L"ausführen (aktualisiert, Daten bleiben)."
+                                        : L"";
     std::wstring done = counts.empty() ? std::wstring() : L" Stand: " + counts + L".";
     switch (st.state) {
         case SyncStatus::AuthFailed:
@@ -131,7 +141,7 @@ std::wstring syncText(Canvas& c, const SyncStatus& st, const ServerSettings& srv
         return (counts.empty() ? std::wstring() : counts + L" · ") + (st.current.empty() ? std::wstring(L"lädt hoch …") : st.current);
     }
     if (!st.counted) return srv.lastSync ? L"Zuletzt abgeglichen " + agoText(srv.lastSync) : std::wstring(L"Wird gleich abgeglichen …");
-    return counts + L" · zuletzt " + agoText(srv.lastSync);
+    return counts + L" · zuletzt " + agoText(srv.lastSync) + (old.empty() ? L"" : L"." + old);
 }
 
 // Höhe einer Zeile, deren Beschreibung umbricht
@@ -195,7 +205,7 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
     h += 64;
     // Stand
     Color col;
-    std::wstring state = syncText(c, st, srv, col);
+    std::wstring state = syncText(c, app, st, srv, col);
     float rh = rowHeight(c, cw, state, 200, 72);
     if (sec) {
         RectF r = sec->row(L"Abgleich", state, rh, 200, col);
@@ -273,13 +283,245 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
     return h;
 }
 
+// ---- Demos automatisch laden (eigener Server, verbunden) ---------------------------------------------------------------
+// Wie in der Handy-App: Stand, ein/aus, beide Codes aus der Zwischenablage, „Jetzt prüfen“, „Ausschalten“; für Admins der
+// Steam-Bot des Servers. sec == nullptr: nur die Höhe bestimmen.
+const wchar_t* kSteamHelp = L"https://help.steampowered.com/de/wizard/HelpWithGameIssue/?appid=730&issueid=128";
+const wchar_t* kKeyPage = L"https://steamcommunity.com/dev/apikey";
+
+bool pendingLogin(const std::string& s) { return s == "working" || s == "need-code" || s == "need-confirm"; }
+
+// Der Stand kommt vom Server und ist fürs Handy geschrieben: am PC steht der Steam-Bot weiter unten, der Spieler oben
+std::wstring pcStatus(std::wstring s) {
+    auto swap = [&s](const std::wstring& from, const std::wstring& to) {
+        size_t at = s.find(from);
+        if (at != std::wstring::npos) s.replace(at, from.size(), to);
+    };
+    swap(L"unter Server verwalten › Steam-Bot", L"unten unter „Steam-Bot“");
+    swap(L": Server verwalten › Steam-Bot", L" – unten unter „Steam-Bot“");
+    swap(L"Erst in FragDesk am PC deinen Spieler wählen", L"Erst oben unter „Dein Konto“ deinen Spieler wählen");
+    return s;
+}
+
+void subHeading(Canvas& c, float x, float cw, Section* sec, const std::wstring& title) {
+    if (!sec) return;
+    c.line(x + 20, sec->y, x + cw - 20, sec->y, alpha(c.th.border, 150), 1);
+    c.text(title, F::SmallSemi, c.th.text2, RectF(x + 20, sec->y + 12, cw - 40, 20));
+    sec->y += 40;
+}
+
+float steamBotRows(Canvas& c, App& app, float x, float cw, Section* sec) {
+    ServerAutodl& ad = *app.autodl;
+    float h = 40;
+    subHeading(c, x, cw, sec, L"Steam-Bot – einmal für den ganzen Server (nur Admins)");
+    if (!ad.steamLoaded()) {
+        if (sec) sec->row(L"Steam-Bot", L"Wird vom Server geholt …", 64, 10);
+        return h + 64;
+    }
+    const json::Value& s = ad.steam();
+    const json::Value& b = s["bot"];
+    const json::Value& l = s["login"];
+    std::string state = l.getString("state", "idle"), codeType = l.getString("codeType");
+    bool loggedIn = b.getBool("loggedIn"), needs = b.getBool("needsLogin"), pending = pendingLogin(state);
+    std::wstring name = W(b.getString("name")), helper = W(s.getString("helper")), hint = W(l.getString("hint"));
+    // Bot
+    std::wstring title = needs ? L"Neu anmelden nötig" + (name.empty() ? L"" : L": " + name) : loggedIn ? L"Angemeldet als " + (name.empty() ? L"Bot" : name)
+                                                                                                        : L"Nicht angemeldet";
+    int64_t until = int64_t(b.getNumber("tokenUntil"));
+    std::wstring desc = !helper.empty() ? helper
+                        : needs         ? (b.getString("problem").empty() ? L"Steam nimmt die Anmeldung des Bots nicht mehr an." : W(b.getString("problem")))
+                        : loggedIn      ? (until > 0 ? L"Token gültig bis " + dateText(until) + L" – dann hier neu anmelden." : L"Token ohne Ablaufdatum.")
+                                        : L"Ein eigenes Steam-Konto des Servers (nicht deins) holt die Adressen der Demos – mit CS2 in der Bibliothek, "
+                                          L"5 € Umsatz und Steam Guard über die Steam-App. Die Anleitung steht im README.";
+    // Platz rechts nach den Knöpfen (Schrift und Maßstab ändern ihre Breite), damit lange Texte nie darunter laufen
+    std::wstring label = pending ? L"Neu anfangen …" : loggedIn || needs ? L"Bot neu anmelden …" : L"Bot anmelden …";
+    bool guide = !loggedIn && !needs;
+    float bw = c.buttonWidth(label, Icon::Shield), gw = guide ? c.buttonWidth(L"Anleitung", Icon::External) : 0;
+    float cw1 = std::max(300.0f, bw + (guide ? 8 + gw : 0));
+    float rh = rowHeight(c, cw, desc, cw1, 72);
+    if (sec) {
+        RectF r = sec->row(title, desc, rh, cw1, !helper.empty() || needs ? c.th.danger : Color(0, 0, 0, 0));
+        c.button(RectF(r.X + r.Width - bw, r.Y + (rh - 36) / 2, bw, 36), label, "ad-login", [&app] { app.autodl->loginBot(); },
+                 loggedIn || pending ? Btn::Secondary : Btn::Primary, Icon::Shield, helper.empty() && !ad.busy("login"),
+                 helper.empty() ? L"Benutzername und Passwort des Bot-Kontos – bleiben nur kurz im Arbeitsspeicher des Servers" : helper);
+        if (guide)
+            c.button(RectF(r.X + r.Width - bw - 8 - gw, r.Y + (rh - 36) / 2, gw, 36), L"Anleitung", "ad-guide",
+                     [] { openInShell(std::wstring(kRepoUrl) + L"/tree/main/apps/fragdesk#demos-automatisch-laden"); }, Btn::Ghost, Icon::External);
+    }
+    h += rh;
+    // laufende Anmeldung: Code oder Bestätigen in der Steam-App (der Stand kommt alle 2 s vom Server)
+    if (pending || state == "error") {
+        std::wstring t = state == "working"        ? L"Anmeldung läuft …"
+                         : state == "need-code"    ? (codeType == "app" ? L"Code aus der Steam-App" : L"Code aus der E-Mail von Steam")
+                         : state == "need-confirm" ? L"In der Steam-App bestätigen"
+                                                   : L"Anmeldung hat nicht geklappt";
+        bool code = state == "need-code" || (state == "need-confirm" && codeType == "app");
+        float rh2 = rowHeight(c, cw, hint, code ? 200 : 10, 64);
+        if (sec) {
+            RectF r = sec->row(t, hint, rh2, code ? 200 : 10, state == "error" ? c.th.danger : c.th.accentText);
+            if (code)
+                c.button(RectF(r.X + r.Width - 180, r.Y + (rh2 - 36) / 2, 180, 36), L"Code eingeben …", "ad-code", [&app] { app.autodl->enterCode(); },
+                         state == "need-code" ? Btn::Primary : Btn::Secondary, Icon::Shield, !ad.busy("code"));
+        }
+        h += rh2;
+    }
+    // Web-API-Schlüssel
+    bool key = s.getBool("apiKeySet");
+    std::wstring kd = key ? L"Gesetzt – ein neuer ersetzt ihn." : L"Fehlt noch. Als Bot auf steamcommunity.com/dev/apikey holen (eine Domain eintragen, z. B. "
+                                                                    L"die Adresse deines Servers), kopieren, hier einfügen. Nimm den des Bots, nicht deinen eigenen.";
+    float kw = c.buttonWidth(L"Schlüssel einfügen", Icon::Plus), pw = c.buttonWidth(L"Seite öffnen", Icon::External);
+    float cw3 = std::max(300.0f, kw + 8 + pw);
+    float rh3 = rowHeight(c, cw, kd, cw3, 64);
+    if (sec) {
+        RectF r = sec->row(L"Web-API-Schlüssel", kd, rh3, cw3);
+        c.button(RectF(r.X + r.Width - kw, r.Y + (rh3 - 36) / 2, kw, 36), L"Schlüssel einfügen", "ad-key", [&app] { app.autodl->pasteApiKey(); },
+                 key ? Btn::Secondary : Btn::Primary, Icon::Plus, !ad.busy("key"), L"Kopiere vorher den Schlüssel (32 Zeichen, 0–9 und A–F)");
+        c.button(RectF(r.X + r.Width - kw - 8 - pw, r.Y + (rh3 - 36) / 2, pw, 36), L"Seite öffnen", "ad-keypage", [] { openInShell(kKeyPage); }, Btn::Ghost,
+                 Icon::External);
+    }
+    h += rh3;
+    // Letzter Lauf
+    const json::Value& run = s["lastRun"];
+    int n = int(s.getNumber("accounts"));
+    std::wstring rd = run.getBool("running") ? std::wstring(L"Läuft gerade …")
+                      : run.getNumber("at") > 0 ? dateTimeText(int64_t(run.getNumber("at"))) + (run.getString("text").empty() ? L"" : L" · " + W(run.getString("text")))
+                                                : std::wstring(L"Noch keiner");
+    rd += n > 0 ? L" · " + std::to_wstring(n) + (n == 1 ? L" Konto hat es eingeschaltet" : L" Konten haben es eingeschaltet") : L" · noch von keinem Konto eingeschaltet";
+    float rh4 = rowHeight(c, cw, rd, 10, 64);
+    if (sec) sec->row(L"Letzter Lauf", rd, rh4, 10);
+    h += rh4;
+    if (loggedIn || needs) {
+        const std::wstring od = L"Dann lädt der Server keine Demos mehr, bis du ihn wieder anmeldest. Der API-Schlüssel bleibt.";
+        float rh5 = rowHeight(c, cw, od, 180, 64);
+        if (sec) {
+            RectF r = sec->row(L"Bot abmelden", od, rh5, 180);
+            c.button(RectF(r.X + r.Width - 170, r.Y + (rh5 - 36) / 2, 170, 36), L"Bot abmelden", "ad-logout", [&app] { app.autodl->logoutBot(); }, Btn::Danger,
+                     Icon::Close, !ad.busy("logout"));
+        }
+        h += rh5;
+    }
+    return h;
+}
+
+float autodlRows(Canvas& c, App& app, float x, float cw, Section* sec) {
+    ServerAutodl& ad = *app.autodl;
+    if (!ad.loaded()) {
+        std::wstring t = ad.problem().empty() ? L"Wird vom Server geholt …" : ad.problem();
+        float rh = rowHeight(c, cw, t, 170, 64);
+        if (sec) {
+            RectF r = sec->row(L"Stand", t, rh, 170, ad.problem().empty() ? Color(0, 0, 0, 0) : c.th.danger);
+            if (!ad.problem().empty())
+                c.button(RectF(r.X + r.Width - 160, r.Y + (rh - 36) / 2, 160, 36), L"Noch einmal", "ad-retry", [&app] { app.autodl->refresh(true); },
+                         Btn::Secondary, Icon::Refresh, !ad.busy("get"));
+        }
+        return rh;
+    }
+    const json::Value& a = ad.account();
+    bool enabled = a.getBool("enabled"), hasSteamId = !a.getString("steamId").empty(), ready = a.getBool("ready"), checking = a.getBool("checking");
+    std::wstring masked = W(a.getString("authCodeMasked")), known = W(a.getString("knownCode")), status = pcStatus(W(a.getString("status", "–")));
+    bool saved = !masked.empty() && !known.empty();
+    std::string tone = a.getString("tone");
+    Color dotCol = tone == "ok" ? c.th.success : tone == "error" ? c.th.danger : tone == "off" ? c.th.text3 : c.th.warning;
+    float h = 0;
+    // Stand und Schalter
+    float rh = rowHeight(c, cw, status, 70, 64);
+    if (sec) {
+        RectF r = sec->row(L"Stand", status, rh, 70, tone == "error" ? c.th.danger : Color(0, 0, 0, 0));
+        c.dot(x + 20 + c.measure(L"Stand", F::BodySemi) + 10, r.Y + 20, 4.5f, dotCol);
+        if (saved && hasSteamId)
+            c.toggle(RectF(r.X + r.Width - 46, r.Y + (rh - 24) / 2, 44, 24), enabled, "t-autodl", [&app, enabled] {
+                if (!app.autodl->busy("toggle")) app.autodl->setEnabled(!enabled);
+            });
+    }
+    h += rh;
+    const std::wstring noPlayer = L"Erst oben unter „Dein Konto“ deinen Spieler wählen (die SteamID kommt vom PC)";
+    // Authentifizierungscode
+    std::wstring ad1 = masked.empty() ? L"Noch nicht eingetragen. Auf der Steam-Seite „Authentifizierungscode erstellen“, kopieren und hier einfügen."
+                                      : masked + L" – nur gekürzt zu sehen. Damit kann der Server nur deinen Spielverlauf abfragen, dich nicht anmelden.";
+    const std::wstring label1 = L"Authentifizierungscode einfügen";
+    float bw1 = c.buttonWidth(label1, Icon::Plus), cw1 = std::max(260.0f, bw1);   // Platz nach dem Knopf (Schrift, Maßstab)
+    float rh1 = rowHeight(c, cw, ad1, cw1, 64);
+    if (sec) {
+        RectF r = sec->row(L"Authentifizierungscode", ad1, rh1, cw1);
+        c.button(RectF(r.X + r.Width - bw1, r.Y + (rh1 - 36) / 2, bw1, 36), label1, "ad-auth", [&app] { app.autodl->pasteAuthCode(); },
+                 masked.empty() ? Btn::Primary : Btn::Secondary, Icon::Plus, hasSteamId && !ad.busy("auth"),
+                 hasSteamId ? L"Kopiere vorher den Code (AAAA-AAAAA-AAAA)" : noPlayer);
+    }
+    h += rh1;
+    // Freigabecode
+    std::wstring ad2 = known.empty() ? L"Steht auf derselben Steam-Seite unter dem Authentifizierungscode (beginnt mit CSGO-). Geladen werden die Matches danach."
+                                     : known + L" – zählt von selbst weiter. Neu einfügen nur, wenn der Server sagt, dass er nicht passt.";
+    const std::wstring label2 = L"Freigabecode einfügen";
+    float bw2 = c.buttonWidth(label2, Icon::Plus), cw2 = std::max(260.0f, bw2);
+    float rh2 = rowHeight(c, cw, ad2, cw2, 64);
+    if (sec) {
+        RectF r = sec->row(L"Freigabecode deines letzten Matches", ad2, rh2, cw2);
+        c.button(RectF(r.X + r.Width - bw2, r.Y + (rh2 - 36) / 2, bw2, 36), label2, "ad-known", [&app] { app.autodl->pasteShareCode(); },
+                 known.empty() && !masked.empty() ? Btn::Primary : Btn::Secondary, Icon::Plus, hasSteamId && !ad.busy("known"),
+                 hasSteamId ? L"Kopiere vorher den Code (CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx)" : noPlayer);
+    }
+    h += rh2;
+    // Steam-Seite
+    const std::wstring ad3 = L"Beide Codes stehen auf derselben Steam-Seite (mit deinem eigenen Steam-Konto). Dort kopieren – FragDesk nimmt sie aus der "
+                             L"Zwischenablage.";
+    float bw3 = c.buttonWidth(L"Codes bei Steam holen", Icon::External), cw3 = std::max(240.0f, bw3);
+    float rh3 = rowHeight(c, cw, ad3, cw3, 64);
+    if (sec) {
+        RectF r = sec->row(L"Codes bei Steam holen", ad3, rh3, cw3);
+        c.button(RectF(r.X + r.Width - bw3, r.Y + (rh3 - 36) / 2, bw3, 36), L"Codes bei Steam holen", "ad-steam", [] { openInShell(kSteamHelp); },
+                 Btn::Ghost, Icon::External);
+    }
+    h += rh3;
+    // Jetzt prüfen
+    if (saved) {
+        int64_t lastNew = int64_t(a.getNumber("lastNew"));
+        std::wstring ad4 = (lastNew > 0 ? L"Neuestes Match geladen am " + dateText(lastNew) + L". " : std::wstring()) +
+                           L"Sonst prüft der Server alle " + std::to_wstring(int(a.getNumber("every", 15))) + L" Minuten. Neue Matches holt FragDesk danach von selbst.";
+        float rh4 = rowHeight(c, cw, ad4, 180, 64);
+        if (sec) {
+            RectF r = sec->row(L"Jetzt prüfen", ad4, rh4, 180);
+            c.button(RectF(r.X + r.Width - 170, r.Y + (rh4 - 36) / 2, 170, 36), checking ? L"Prüft …" : L"Jetzt prüfen", "ad-check",
+                     [&app] { app.autodl->checkNow(); }, Btn::Secondary, Icon::Refresh, enabled && ready && !checking && !ad.busy("check"),
+                     !enabled ? L"Erst einschalten" : !ready ? L"Der Steam-Bot ist noch nicht bereit" : L"");
+        }
+        h += rh4;
+    }
+    // Ausschalten (Codes löschen)
+    if (saved || enabled || !masked.empty() || !known.empty()) {
+        const std::wstring ad5 = L"Schaltet ab und löscht beide Codes vom Server.";
+        float rh5 = rowHeight(c, cw, ad5, 180, 64);
+        if (sec) {
+            RectF r = sec->row(L"Ausschalten", ad5, rh5, 180);
+            c.button(RectF(r.X + r.Width - 170, r.Y + (rh5 - 36) / 2, 170, 36), L"Ausschalten", "ad-off", [&app] { app.autodl->turnOff(); }, Btn::Danger,
+                     Icon::Close, !ad.busy("off"));
+        }
+        h += rh5;
+    }
+    if (app.settings.mobile.srv.admin) h += steamBotRows(c, app, x, cw, sec);
+    return h;
+}
+
+float autodlCard(Canvas& c, App& app, float x, float y, float cw) {
+    app.autodl->refresh();   // höchstens jede Minute (die Anfrage läuft im Hintergrund)
+    const std::wstring sub =
+        L"Dein Server holt neue Premier-, Wettkampf- und Wingman-Matches selbst bei Valve und wertet sie aus – auch wenn dein PC aus ist. "
+        L"FragDesk holt sie danach vom Server. Valve hebt Demos nur etwa einen Monat auf; FACEIT geht so nicht (das lädt FragDesk hoch).";
+    float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
+    float h = 16 + 26 + subH + 10 + autodlRows(c, app, x, cw, nullptr) + 14;
+    cardBehind(c, x, y, cw, h);
+    Section sec(c, x, y, cw, L"Demos automatisch laden", sub);
+    autodlRows(c, app, x, cw, &sec);
+    return sec.finish();
+}
+
 float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     MobileHost& mh = *app.mobile;
     MobileSettings& ms = app.settings.mobile;
     const bool server = ms.server;
     const std::wstring sub =
-        server ? L"Deine Stats und Clips auf dem Handy – über deinen eigenen Server: FragDesk lädt neue Matches und Videos im Hintergrund hoch "
-                 L"(nie, solange CS2 läuft), das Handy liest sie von dort, auch wenn der PC aus ist. FragDesk selbst nimmt dann keine Verbindungen an."
+        server ? L"Deine Stats und Clips auf dem Handy – über deinen eigenen Server als Drehscheibe: FragDesk lädt neue Matches und Videos im "
+                 L"Hintergrund hoch und holt, was der Server sonst hat (z. B. selbst bei Valve geladene Matches) – nie, solange CS2 läuft. Das Handy "
+                 L"liest vom Server, auch wenn der PC aus ist. FragDesk selbst nimmt dann keine Verbindungen an."
                : L"Deine Stats und Clips auf dem Handy: FragDesk liefert dafür eine kleine Web-App aus, die du auf den Home-Bildschirm legst – "
                  L"nur an Handys, die du hier koppelst. Solange es aus ist, nimmt FragDesk keine Verbindungen an.";
     const std::wstring modeDesc = server ? L"Das Handy liest vom Server – auch unterwegs und wenn der PC aus ist."
@@ -423,7 +665,8 @@ float drawSettings(Canvas& c, App& app, float w) {
     Settings& s = app.settings;
     bool toServer = s.mobile.server && !s.mobile.srv.token.empty();
     y += pageTitle(c, x, y, cw, L"Einstellungen",
-                   toServer ? L"Gespeichert auf diesem PC – Matches und Videos zusätzlich auf deinem eigenen Server" : L"Alles wird nur auf diesem PC gespeichert") +
+                   toServer ? L"Gespeichert auf diesem PC und auf deinem eigenen Server – FragDesk gleicht Matches in beide Richtungen ab"
+                            : L"Alles wird nur auf diesem PC gespeichert") +
          14;
 
     // ---- Spieler
@@ -584,8 +827,9 @@ float drawSettings(Canvas& c, App& app, float w) {
         y += h + 16;
     }
 
-    // ---- Handy-App
+    // ---- Handy-App, eigener Server: Demos automatisch laden
     y += mobileCard(c, app, x, y, cw) + 16;
+    if (s.mobile.server && !s.mobile.srv.token.empty()) y += autodlCard(c, app, x, y, cw) + 16;
 
     // ---- Darstellung
     {

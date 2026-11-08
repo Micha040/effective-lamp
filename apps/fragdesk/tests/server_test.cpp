@@ -467,6 +467,43 @@ void autodlTests(const std::string& data, const std::string& matchJson, const st
     CHECK(s.putMatchFile(a, checksum, MatchPart::Json, matchJson, &isNew).ok() && !isNew);   // ersetzt: nicht neu
     CHECK(s.putMatchFile(a, checksum, MatchPart::Heat, "FDHM1234", &isNew).ok() && !isNew);
     CHECK(s.autodl(a).fetched == 1 && s.autodl(a).lastNew == t + 10);
+    // Demo-Quelle (.src): nur zu einem Match auf dem Server, gezählt, nach dem Neustart wieder da, weg mit dem Match
+    CHECK(validDemoUrl("http://replay183.valve.net/730/003717052436717584506_1418282143.dem.bz2") && validDemoUrl("https://x.example/a.dem.bz2"));
+    CHECK(!validDemoUrl("ftp://replay183.valve.net/a.dem.bz2") && !validDemoUrl("http://") && !validDemoUrl("http://a b/x") &&
+          !validDemoUrl("http://user:pw@host/x") && !validDemoUrl("http://host/\"x") && !validDemoUrl("http://host/" + std::string(600, 'a')));
+    MatchSource src;
+    src.url = "http://replay183.valve.net/730/003717052436717584506_1418282143.dem.bz2";
+    src.shareCode = share;
+    src.matchtime = t;
+    src.until = t + kDemoKeepDays * 86400;
+    src.at = t + 10;
+    int64_t usedBefore = s.used(a);
+    CHECK(s.putMatchSource(a, "nichtda", src).status == 404);
+    CHECK(s.putMatchSource(a, checksum, src).ok() && s.matchFiles(a)[checksum].src > 0 && s.matchFiles(a)[checksum].source.url == src.url);
+    CHECK(s.used(a) == usedBefore + s.matchFiles(a)[checksum].src && mode(s.matchPath(a->id, checksum, ".src")) == 0600);
+    std::string srcText;
+    MatchSource back;
+    CHECK(readFile(s.matchPath(a->id, checksum, ".src"), srcText) && parseSource(srcText, back) && back.url == src.url && back.matchtime == t &&
+          back.until == src.until && back.shareCode == share && back.at == t + 10 && srcText.find("\"fetched\":true") != std::string::npos);
+    CHECK(s.putMatchFile(a, checksum, MatchPart::Json, matchJson).ok() && s.matchFiles(a)[checksum].src > 0);   // neue Auswertung: Quelle bleibt
+    {
+        Store again;
+        CHECK(again.open(data, err));
+        UserPtr a3 = again.byAccountToken(ta);
+        MatchRec rec = a3 ? again.matchFiles(a3)[checksum] : MatchRec();
+        CHECK(rec.src > 0 && rec.source.url == src.url && rec.source.until == src.until && again.used(a3) == s.used(a));
+    }
+    {
+        Store tmp;   // eigenes Konto zum Löschen (der Rest des Tests braucht das Match von a)
+        std::string d2 = data + "-src", c2, t2;
+        removeTree(d2);
+        Invite i2;
+        UserPtr u2;
+        CHECK(tmp.open(d2, err) && tmp.createInvite(true, 7, "", i2, c2).ok() && tmp.registerUser(c2, "X", "76561190000000003", "", u2, t2).ok());
+        CHECK(tmp.putMatchFile(u2, checksum, MatchPart::Json, matchJson).ok() && tmp.putMatchSource(u2, checksum, src).ok());
+        CHECK(tmp.deleteMatch(u2, checksum).ok() && fileSize(tmp.matchPath(u2->id, checksum, ".src")) < 0 && tmp.used(u2) == 0);
+        removeTree(d2);
+    }
     // Speicher fast voll: das Konto fehlt im Auftrag (nichts umsonst herunterladen)
     CHECK(s.setLimit(a->id, s.used(a) + (1 << 20)).ok() && s.nearlyFull(a) && s.fetchAccounts(t + 11).empty());
     CHECK(s.setLimit(a->id, 0).ok() && !s.nearlyFull(a) && s.fetchAccounts(t + 12).size() == 1);

@@ -20,6 +20,8 @@ namespace fdw {
 class Recorder;
 class MobileHost;
 class ServerSync;
+class ServerAutodl;
+class DemoFetch;
 
 enum class Page { Dashboard, Matches, Match, Stats, Highlights, Settings, Replay, Count };
 
@@ -52,7 +54,9 @@ public:
     Library lib;
     std::unique_ptr<Recorder> recorder;
     std::unique_ptr<MobileHost> mobile;   // Handy-App direkt vom PC (Einstellungen › Handy-App)
-    std::unique_ptr<ServerSync> sync;     // Handy-App über den eigenen Server
+    std::unique_ptr<ServerSync> sync;     // Handy-App über den eigenen Server (Abgleich in beide Richtungen)
+    std::unique_ptr<ServerAutodl> autodl; // eigener Server: Demos automatisch laden, Steam-Bot (Einstellungen)
+    std::unique_ptr<DemoFetch> demoFetch; // „Demo von Valve laden“ für vom Server geholte Matches
 
     // eigener Spieler
     std::string me;
@@ -110,6 +114,8 @@ public:
     // Grund, warum Momente dieses Matches gerade nicht angesehen/aufgenommen werden können (leer = es geht)
     std::wstring momentBlocker(const fd::Match& m);
     bool demoAvailable(const fd::Match& m);   // Demo-Datei noch da? (kurz zwischengespeichert)
+    void demosChanged() { demoCache_.clear(); }   // z. B. Demo von Valve geladen: gleich neu nachsehen
+    std::wstring noDemoText(const fd::Match& m);   // warum die Demo fehlt („nicht mehr da“, „nicht auf diesem PC“)
     Tools tools();                            // CS2 Workshop Tools installiert? (kurz zwischengespeichert)
     std::wstring recordError;                 // Grund, warum die letzte Aufnahme scheiterte (bis zum Wegklicken)
     std::wstring recordBlocker();             // Grund gegen Ansehen/Aufnehmen unabhängig vom Match (leer = es geht)
@@ -121,6 +127,8 @@ public:
     // Fenster
     HWND hwnd = nullptr;
     bool renderMode = false;
+    bool uiDark = true;    // Farbschema und Maßstab des Fensters (für Dialoge)
+    float uiScale = 1;
     void invalidate();
     void notify(const std::wstring& msg, bool error = false);
     std::wstring toast;

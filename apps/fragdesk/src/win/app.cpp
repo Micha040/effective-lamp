@@ -3,17 +3,24 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 #include "../core/format.h"
 #include "../core/json.h"
 #include "common.h"
+#include "demo_fetch.h"
 #include "mobile_host.h"
 #include "recorder.h"
+#include "server_autodl.h"
 #include "server_sync.h"
 
 namespace fdw {
 
-App::App() : mobile(std::make_unique<MobileHost>(*this)), sync(std::make_unique<ServerSync>(*this)) {}
+App::App()
+    : mobile(std::make_unique<MobileHost>(*this)),
+      sync(std::make_unique<ServerSync>(*this)),
+      autodl(std::make_unique<ServerAutodl>(*this)),
+      demoFetch(std::make_unique<DemoFetch>(*this)) {}
 App::~App() = default;
 
 void App::invalidate() {
@@ -61,6 +68,7 @@ void App::applyFolders() {
     if (settings.watchReplays && !steam.replaysDir().empty()) folders.push_back({steam.replaysDir(), L"CS2"});
     if (settings.watchDownloads) folders.push_back({downloadsDir(), L"Downloads"});
     for (const auto& f : settings.folders) folders.push_back({f, L"Ordner"});
+    folders.push_back({demosDir(), L"Valve"});   // „Demo von Valve laden“ (nur da, wenn schon einmal geladen)
     lib.setFolders(folders);
     lib.setIgnored(settings.ignored);
 }
@@ -255,7 +263,7 @@ static bool makeJob(App& app, const MomentRef& ref, RecordJob& job, std::wstring
     const fd::PlayerInfo* p = m->player(h->player);
     std::wstring demo = widen(m->demoPath);
     if (!fileExists(demo)) {
-        err = L"Die Demo-Datei ist nicht mehr da: " + demo;
+        err = app.lib.pulled(m->checksum) ? app.noDemoText(*m) : L"Die Demo-Datei ist nicht mehr da: " + demo;
         return false;
     }
     job.demo = demo;
@@ -361,8 +369,16 @@ std::wstring App::recordBlocker() {
 std::wstring App::momentBlocker(const fd::Match& m) {
     std::wstring b = recordBlocker();
     if (!b.empty()) return b;
-    if (!demoAvailable(m)) return L"Die Demo-Datei ist nicht mehr da";
+    if (!demoAvailable(m)) return noDemoText(m);
     return L"";
+}
+
+std::wstring App::noDemoText(const fd::Match& m) {
+    const PulledInfo* p = lib.pulled(m.checksum);
+    if (!p) return L"Die Demo-Datei ist nicht mehr da";
+    int64_t until = demoUntil(*p, m);
+    bool valve = !p->url.empty() && !p->gone && (until <= 0 || int64_t(time(nullptr)) <= until);
+    return valve ? L"Die Demo liegt nicht auf diesem PC – im Match oben „Demo von Valve laden“." : L"Die Demo liegt nicht auf diesem PC (das Match kam vom Server).";
 }
 std::wstring App::recordStatus() const { return recorder ? recorder->status() : std::wstring(); }
 void App::cancelRecording() {
@@ -471,9 +487,19 @@ void App::chooseAccount(int x, int y) {
 void App::deleteMatch(const std::string& checksum) {
     const fd::Match* m = lib.find(checksum);
     if (!m) return;
-    std::wstring q = L"Auswertung von " + matchTitle(*m) + L" löschen?\n\nDie Demo-Datei bleibt erhalten; FragDesk bietet sie danach wieder zum Auswerten an.";
+    // Eine Demo, die FragDesk selbst bei Valve geladen hat (demosDir), geht mit – sie gehört nur zu diesem Match
+    std::wstring demo = widen(m->demoPath);
+    bool haveDemo = fileExists(demo), ownDemo = haveDemo && samePath(parentDir(demo), demosDir());
+    bool fromServer = lib.pulled(checksum) != nullptr, onServer = sync->active();
+    std::wstring q = L"Auswertung von " + matchTitle(*m) + L" löschen?\n\n";
+    if (ownDemo) q += L"Die von Valve geladene Demo wird mit gelöscht.";
+    else if (fromServer && !haveDemo) q += L"Das Match kam vom Server; die Demo liegt nicht auf diesem PC.";
+    else q += L"Die Demo-Datei bleibt erhalten; FragDesk bietet sie danach wieder zum Auswerten an.";
+    if (onServer) q += L" Auf deinem Server wird es beim nächsten Abgleich ebenfalls gelöscht.";
     if (MessageBoxW(hwnd, q.c_str(), L"FragDesk", MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return;
+    if (demoFetch->busy() && demoFetch->state().checksum == checksum) demoFetch->cancel();
     lib.remove(checksum);
+    if (ownDemo) DeleteFileW(demo.c_str());
     if (matchId == checksum) {
         detail.reset();
         matchId.clear();

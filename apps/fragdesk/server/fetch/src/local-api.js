@@ -144,6 +144,12 @@ class LocalApi {
 		let type = part == 'json' ? 'application/json' : 'application/octet-stream';
 		return this.forAccount('PUT', `/api/v1/local/fetch/${account}/match/${checksum}/${part}`, data, type);
 	}
+
+	// Nach dem Import: woher die Demo kam ({url, matchtime, shareCode}) – damit lädt FragDesk am PC sie bei Bedarf selbst
+	// bei Valve (solange Valve sie aufhebt). Ein älterer Server kennt das nicht (404): kein Fehler des Matches.
+	putMatchSource(account, checksum, body) {
+		return this.forAccount('PUT', `/api/v1/local/fetch/${account}/match/${checksum}/source`, body);
+	}
 }
 
 module.exports = {LocalApi, LocalError};

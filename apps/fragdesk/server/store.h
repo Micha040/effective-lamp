@@ -10,7 +10,8 @@
 //   users/<id>/account.json     Profil (name, steamId), Konto-Tokens (FragDesk) und Geräte (Handys), nur als SHA-256;
 //                               "autodl": Demos automatisch laden (Authentifizierungscode im Klartext – den braucht der Helfer)
 //   users/<id>/matches/         <Prüfsumme>.json, .heat und .replay (2D-Ansicht) – genau wie in FragDesk; .noreplay:
-//                               FragDesk meldet, dass es für dieses Match keine 2D-Daten geben kann (Grund als JSON)
+//                               FragDesk meldet, dass es für dieses Match keine 2D-Daten geben kann (Grund als JSON);
+//                               .src: der Server hat das Match selbst bei Valve geholt (Adresse der Demo, Spielzeit)
 //   users/<id>/clips/           <clipId>.mp4, .jpg, .part (unfertig) und clips.json (Titel, Match, Moment …)
 // Jedes Konto hat seinen eigenen Ordner; gegenseitiges Anschauen lässt sich später über server.json nachrüsten.
 //
@@ -58,12 +59,26 @@ struct ClipRec {
     bool complete() const { return mp4 >= 0 && hasMeta; }
 };
 
+// Woher der Server ein Match selbst geholt hat (.src, meldet der Helfer nach dem Import): Adresse der Demo bei Valve,
+// Spielzeit, bis wann Valve die Demo etwa aufhebt, Freigabecode. Nichts Geheimes – FragDesk lädt damit die Demo nach.
+constexpr int64_t kDemoKeepDays = 30;   // so lange hebt Valve Matchmaking-Demos etwa auf
+constexpr int64_t kMaxSourceFile = 4096;
+struct MatchSource {
+    std::string url, shareCode;
+    int64_t matchtime = 0;   // Spielzeit (Sekunden seit 1970), 0 = unbekannt
+    int64_t until = 0;       // Valve hebt die Demo etwa bis hierhin auf (Spielzeit + 30 Tage), 0 = unbekannt
+    int64_t at = 0;          // wann der Server das Match geholt hat
+};
+std::string sourceJson(const MatchSource& s);                 // Inhalt der .src-Datei
+bool parseSource(const std::string& text, MatchSource& out);
+
 struct MatchRec {
-    int64_t json = -1, heat = -1, replay = -1, noreplay = -1;   // Größen in Bytes, -1 = fehlt
+    int64_t json = -1, heat = -1, replay = -1, noreplay = -1, src = -1;   // Größen in Bytes, -1 = fehlt
+    MatchSource source;                                                  // nur mit src >= 0
 };
 
-// Dateien eines Matches (Endung: .json, .heat, .replay, .noreplay)
-enum class MatchPart { Json, Heat, Replay, NoReplay };
+// Dateien eines Matches (Endung: .json, .heat, .replay, .noreplay, .src)
+enum class MatchPart { Json, Heat, Replay, NoReplay, Src };
 const char* matchExt(MatchPart part);
 
 struct TokenRec {
@@ -225,6 +240,9 @@ public:
     // Replay/NoReplay nur, wenn das Match schon da ist (404); ein Replay ersetzt die Markierung NoReplay, eine
     // Markierung neben einem Replay wird nicht gespeichert. isNew: das Match (.json) war vorher nicht da
     Fail putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body, bool* isNew = nullptr);
+    // Demo-Quelle eines Matches, das der Server selbst geholt hat (.src); 404, wenn das Match nicht da ist. Löschen geht
+    // mit dem Match (deleteMatch).
+    Fail putMatchSource(const UserPtr& u, const std::string& checksum, const MatchSource& src);
     Fail deleteMatch(const UserPtr& u, const std::string& checksum);
     Fail appendClip(const UserPtr& u, const std::string& clipId, int64_t offset, int64_t total, const std::string& body, int64_t& size);
     Fail putThumb(const UserPtr& u, const std::string& clipId, const std::string& jpeg);

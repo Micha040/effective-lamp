@@ -180,6 +180,7 @@ std::wstring dataDir() {
 
 std::wstring matchesDir() { return joinPath(dataDir(), L"matches"); }
 std::wstring tempDir() { return joinPath(dataDir(), L"temp"); }
+std::wstring demosDir() { return joinPath(dataDir(), L"demos"); }
 
 std::wstring downloadsDir() {
     std::wstring p = knownFolder(FOLDERID_Downloads);

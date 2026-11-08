@@ -11,8 +11,10 @@
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
+#include "demo_fetch.h"
 #include "mobile_host.h"
 #include "recorder.h"
+#include "server_autodl.h"
 #include "server_sync.h"
 #include "../../res/resource.h"
 
@@ -123,6 +125,7 @@ private:
 void Window::setScale(UINT dpi) {
     dpi_ = dpi ? dpi : 96;
     scale_ = float(dpi_) / 96.0f;
+    app_.uiScale = scale_;   // Dialoge in derselben Größe
     clearMeasureCache();
 }
 
@@ -132,6 +135,7 @@ void Window::applyTheme() {
     if (opt_.theme == L"dark") dark_ = true;
     if (opt_.theme == L"light") dark_ = false;
     th_ = makeTheme(dark_);
+    app_.uiDark = dark_;
     if (hwnd_) {
         BOOL d = dark_ ? TRUE : FALSE;
         if (FAILED(DwmSetWindowAttribute(hwnd_, 20, &d, sizeof d))) DwmSetWindowAttribute(hwnd_, 19, &d, sizeof d);
@@ -734,6 +738,9 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     if (app_.page != Page::Settings || !app_.sync->active()) KillTimer(hwnd_, kSyncViewTimer);
                     else if (!IsIconic(hwnd_)) InvalidateRect(hwnd_, nullptr, FALSE);
                     break;
+                case kAutodlTimer:   // Demos automatisch laden: Anmeldung des Bots bzw. „Jetzt prüfen“ verfolgen
+                    app_.autodl->onTimer();
+                    break;
             }
             return 0;
         case WM_APP_LIBRARY:
@@ -761,6 +768,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_APP_DEMOS:
             app_.lib.onScanned(reinterpret_cast<ScanResult*>(lp));
+            app_.demosChanged();   // eine von Valve geladene Demo kann eben zu ihrem Match gefunden haben
             if (app_.settings.autoAnalyze && !app_.lib.demos.empty()) {
                 app_.lib.analyzeAll(false);   // fehlgeschlagene nicht bei jeder Ordneränderung erneut versuchen
                 SetTimer(hwnd_, kBusyTimer, 400, nullptr);
@@ -794,6 +802,10 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
             return app_.mobile->onMessage(wp, lp);
         case WM_APP_SYNC:
             return app_.sync->onMessage(wp, lp);
+        case WM_APP_AUTODL:
+            return app_.autodl->onMessage(wp, lp);
+        case WM_APP_DEMOFETCH:
+            return app_.demoFetch->onMessage(wp, lp);
         case WM_APP_HEAT: {
             auto* e = reinterpret_cast<HeatEvent*>(lp);
             if (!app_.statsHeat.apply(e)) app_.matchHeat.apply(e);
@@ -855,6 +867,7 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DESTROY:
             app_.mobile->stop();
             app_.sync->stop();
+            app_.demoFetch->stop();
             app_.cancelRecording();
             releaseInstanceLock();
             PostQuitMessage(0);
