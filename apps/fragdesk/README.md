@@ -348,7 +348,8 @@ ein eigenes Steam-Konto des Servers (der „Bot“) holt dazu die Adresse der De
 **Einmal für den ganzen Server (Admin):** in der Handy-App unter **Server verwalten › Steam-Bot** – dort steht es
 auch Schritt für Schritt:
 
-1. Ein **neues Steam-Konto** nur für den Server anlegen (nicht dein eigenes!), mit eigener E-Mail-Adresse.
+1. Ein **neues Steam-Konto** nur für den Server anlegen (nicht dein eigenes!) – deine normale E-Mail-Adresse geht
+   auch, Steam erlaubt mehrere Konten pro Adresse.
 2. **Counter-Strike 2 hinzufügen** – kostenlos, im Steam-Shop bei CS2 „Spielen“ bzw. „Zur Bibliothek hinzufügen“.
 3. **5 € aufladen** (z. B. Steam-Guthabenkarte): Ohne mindestens 5 € Umsatz gibt Valve keinen Web-API-Schlüssel
    heraus. Das Guthaben bleibt auf dem Konto.

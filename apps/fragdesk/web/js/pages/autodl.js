@@ -353,7 +353,7 @@ function guide() {
     h('summary', null, h('div', {class: 'h'}, h('b', null, 'So richtest du den Steam-Bot ein'),
       h('small', null, 'Einmal für den ganzen Server – jeder trägt danach nur noch seine eigenen Codes ein')), icon('down', 'chev')),
     h('ol', {class: 'steps', style: {margin: '0'}},
-      h('li', null, h('b', null, 'Neues Steam-Konto'), ' nur für den Server anlegen (nicht dein eigenes!) – auf ', ext('https://store.steampowered.com/join/', 'store.steampowered.com/join'), ' mit eigener E-Mail-Adresse.'),
+      h('li', null, h('b', null, 'Neues Steam-Konto'), ' nur für den Server anlegen (nicht dein eigenes!) – auf ', ext('https://store.steampowered.com/join/', 'store.steampowered.com/join'), ' – deine normale E-Mail-Adresse geht auch, Steam erlaubt mehrere Konten pro Adresse.'),
       h('li', null, h('b', null, 'Counter-Strike 2 hinzufügen'), ' – kostenlos: im Steam-Shop bei CS2 auf „Spielen“ bzw. „Zur Bibliothek hinzufügen“.'),
       h('li', null, h('b', null, '5 € aufladen'), ' (z. B. Steam-Guthabenkarte). Ohne mindestens 5 € Umsatz gibt Valve keinen API-Schlüssel heraus; das Guthaben bleibt auf dem Konto.'),
       h('li', null, h('b', null, 'Steam Guard mit der Steam-App'), ': die Steam-App aufs Handy, mit dem Bot-Konto anmelden, unter „Steam Guard“ den Authenticator einrichten.'),

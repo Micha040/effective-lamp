@@ -9,8 +9,8 @@
 namespace fdw {
 
 constexpr const wchar_t* kAppName = L"FragDesk";
-constexpr const wchar_t* kVersion = L"1.5.0";
-constexpr const char* kVersionA = "1.5.0";
+constexpr const wchar_t* kVersion = L"1.6.0";
+constexpr const char* kVersionA = "1.6.0";
 constexpr const wchar_t* kRepoUrl = L"https://github.com/Micha040/effective-lamp";
 constexpr const wchar_t* kAnalyzerExe = L"fdanalyze.exe";
 
