@@ -2,7 +2,7 @@
   "id": "fragdesk",
   "order": 5,
   "name": "FragDesk",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "versionCheck": [
     {
       "file": "setup/Setup.ps1",
