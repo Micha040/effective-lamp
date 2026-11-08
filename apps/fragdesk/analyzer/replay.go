@@ -2,8 +2,9 @@ package main
 
 // Daten für die 2D-Ansicht einer Runde: Positionen, Blickrichtung, HP und Waffe aller Spieler rund 8-mal pro Sekunde,
 // dazu Flugbahnen und Wirkung der Granaten, Kills, Schüsse und die Bombe. Eigenes kompaktes Binärformat ("FDRP"),
-// das FragDesk nur bei Bedarf erzeugt (rund 1–2 MB je Match). Der Aufbau ist in src/core/replay.h beschrieben;
-// Konstanten und Reihenfolge müssen dazu passen.
+// das FragDesk bei Bedarf erzeugt (rund 1–2 MB je Match): allein (-replay) oder beim Auswerten (-out … -replay …) im
+// selben Durchgang wie Heatmap und Zielen (extras.go), dann ohne die Demo ein weiteres Mal zu lesen. Der Aufbau ist in
+// src/core/replay.h beschrieben; Konstanten und Reihenfolge müssen dazu passen.
 
 import (
 	"bufio"
@@ -12,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -142,6 +144,36 @@ type replayBuilder struct {
 	bomb       []replayBomb
 	planted    bool
 	plantPos   vec3
+	broken     error // Fehler in einem der eigenen Handler: ab dann wird nichts mehr gesammelt
+	projIDs    []int // Zwischenspeicher für frame()
+}
+
+func newReplayBuilder(p dem.Parser) *replayBuilder {
+	return &replayBuilder{
+		parser:    p,
+		playerIdx: map[string]int{},
+		weaponIdx: map[string]int{"": 0},
+		weapons:   []string{""},
+		tracks:    map[common.UniqueID]*grenadeTrack{},
+		open:      map[int]*replayEffect{},
+		fires:     map[common.UniqueID]*replayEffect{},
+	}
+}
+
+// on: Handler, der eine Panik der 2D-Daten abfängt. Im gemeinsamen Durchgang mit Heatmap und Zielen kostet ein Fehler
+// hier so nur die 2D-Daten, nicht den ganzen Durchgang.
+func on[E any](rb *replayBuilder, fn func(E)) func(E) {
+	return func(e E) {
+		if rb.broken != nil {
+			return
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				rb.broken = coded("CORRUPT", "2D-Daten abgebrochen: %v", r)
+			}
+		}()
+		fn(e)
+	}
 }
 
 // buildReplay liest die Demo einmal komplett und schreibt die Rundendaten nach target.
@@ -154,15 +186,7 @@ func buildReplay(demoPath, target string) (err error) {
 
 	p := dem.NewParser(bufio.NewReaderSize(f, 1<<20))
 	defer p.Close()
-	rb := &replayBuilder{
-		parser:    p,
-		playerIdx: map[string]int{},
-		weaponIdx: map[string]int{"": 0},
-		weapons:   []string{""},
-		tracks:    map[common.UniqueID]*grenadeTrack{},
-		open:      map[int]*replayEffect{},
-		fires:     map[common.UniqueID]*replayEffect{},
-	}
+	rb := newReplayBuilder(p)
 	rb.register()
 
 	defer func() {
@@ -170,12 +194,18 @@ func buildReplay(demoPath, target string) (err error) {
 			err = coded("CORRUPT", "Auswertung abgebrochen: %v", r)
 		}
 	}()
-	if perr := p.ParseToEnd(); perr != nil && !errors.Is(perr, dem.ErrUnexpectedEndOfDemo) {
-		if rb.nFrames == 0 {
-			return coded("CORRUPT", "%v", perr)
-		}
-		// abgeschnittene Demo: alles bis dahin ist trotzdem brauchbar
+	return rb.finish(p.ParseToEnd(), target)
+}
+
+// finish: nach dem Lesen der Demo (perr: Ergebnis von ParseToEnd) die Datei schreiben – oder sagen, warum nicht
+func (rb *replayBuilder) finish(perr error, target string) error {
+	if rb.broken != nil {
+		return rb.broken
 	}
+	if perr != nil && !errors.Is(perr, dem.ErrUnexpectedEndOfDemo) && rb.nFrames == 0 {
+		return coded("CORRUPT", "%v", perr)
+	}
+	// abgeschnittene Demo: alles bis dahin ist trotzdem brauchbar
 	if rb.nFrames == 0 {
 		return coded("EMPTY", "keine Spielerpositionen gefunden")
 	}
@@ -299,15 +329,16 @@ func grenadeKind(t common.EquipmentType) uint8 {
 
 func (rb *replayBuilder) register() {
 	p := rb.parser
-	p.RegisterEventHandler(func(events.FrameDone) { rb.frame() })
+	// alle Handler über on(): eine Panik kostet nur die 2D-Daten (siehe on)
+	p.RegisterEventHandler(on(rb, func(events.FrameDone) { rb.frame() }))
 
-	p.RegisterEventHandler(func(e events.SmokeStart) { rb.effectStart(fxSmoke, e.GrenadeEvent) })
-	p.RegisterEventHandler(func(e events.SmokeExpired) { rb.effectEnd(e.GrenadeEntityID) })
-	p.RegisterEventHandler(func(e events.DecoyStart) { rb.effectStart(fxDecoy, e.GrenadeEvent) })
-	p.RegisterEventHandler(func(e events.DecoyExpired) { rb.effectEnd(e.GrenadeEntityID) })
-	p.RegisterEventHandler(func(e events.FlashExplode) { rb.effectStart(fxFlash, e.GrenadeEvent) })
-	p.RegisterEventHandler(func(e events.HeExplode) { rb.effectStart(fxHE, e.GrenadeEvent) })
-	p.RegisterEventHandler(func(e events.InfernoStart) {
+	p.RegisterEventHandler(on(rb, func(e events.SmokeStart) { rb.effectStart(fxSmoke, e.GrenadeEvent) }))
+	p.RegisterEventHandler(on(rb, func(e events.SmokeExpired) { rb.effectEnd(e.GrenadeEntityID) }))
+	p.RegisterEventHandler(on(rb, func(e events.DecoyStart) { rb.effectStart(fxDecoy, e.GrenadeEvent) }))
+	p.RegisterEventHandler(on(rb, func(e events.DecoyExpired) { rb.effectEnd(e.GrenadeEntityID) }))
+	p.RegisterEventHandler(on(rb, func(e events.FlashExplode) { rb.effectStart(fxFlash, e.GrenadeEvent) }))
+	p.RegisterEventHandler(on(rb, func(e events.HeExplode) { rb.effectStart(fxHE, e.GrenadeEvent) }))
+	p.RegisterEventHandler(on(rb, func(e events.InfernoStart) {
 		if e.Inferno == nil {
 			return
 		}
@@ -318,8 +349,8 @@ func (rb *replayBuilder) register() {
 		}
 		rb.effects = append(rb.effects, fx)
 		rb.fires[e.Inferno.UniqueID()] = fx
-	})
-	p.RegisterEventHandler(func(e events.InfernoExpired) {
+	}))
+	p.RegisterEventHandler(on(rb, func(e events.InfernoExpired) {
 		if e.Inferno == nil {
 			return
 		}
@@ -327,9 +358,9 @@ func (rb *replayBuilder) register() {
 			fx.end = int32(rb.tick())
 			delete(rb.fires, e.Inferno.UniqueID())
 		}
-	})
+	}))
 
-	p.RegisterEventHandler(func(e events.Kill) {
+	p.RegisterEventHandler(on(rb, func(e events.Kill) {
 		if e.Victim == nil || isCoach(e.Victim) { // Trainer „sterben“ bei manchen Anbietern nach der Kaufzeit
 			return
 		}
@@ -359,9 +390,9 @@ func (rb *replayBuilder) register() {
 			k.killerPos = k.victimPos
 		}
 		rb.kills = append(rb.kills, k)
-	})
+	}))
 
-	p.RegisterEventHandler(func(e events.WeaponFire) {
+	p.RegisterEventHandler(on(rb, func(e events.WeaponFire) {
 		if e.Shooter == nil || e.Weapon == nil || isCoach(e.Shooter) {
 			return
 		}
@@ -373,9 +404,9 @@ func (rb *replayBuilder) register() {
 			return
 		}
 		rb.shots = append(rb.shots, replayShot{int32(rb.tick()), rb.player(e.Shooter), rb.weapon(e.Weapon)})
-	})
+	}))
 
-	p.RegisterEventHandler(func(e events.BombPlanted) {
+	p.RegisterEventHandler(on(rb, func(e events.BombPlanted) {
 		pos := rb.parser.GameState().Bomb().Position()
 		if e.Player != nil {
 			pos = e.Player.Position()
@@ -383,16 +414,16 @@ func (rb *replayBuilder) register() {
 		rb.planted = true
 		rb.plantPos = pos3(pos.X, pos.Y, pos.Z)
 		rb.bomb = append(rb.bomb, replayBomb{int32(rb.tick()), bombPlanted, rb.player(e.Player), rb.plantPos})
-	})
-	p.RegisterEventHandler(func(e events.BombDefused) {
+	}))
+	p.RegisterEventHandler(on(rb, func(e events.BombDefused) {
 		rb.bomb = append(rb.bomb, replayBomb{int32(rb.tick()), bombDefused, rb.player(e.Player), rb.plantPos})
 		rb.planted = false
-	})
-	p.RegisterEventHandler(func(e events.BombExplode) {
+	}))
+	p.RegisterEventHandler(on(rb, func(e events.BombExplode) {
 		rb.bomb = append(rb.bomb, replayBomb{int32(rb.tick()), bombExploded, noPlayer, rb.plantPos})
 		rb.planted = false
-	})
-	p.RegisterEventHandler(func(events.RoundStart) {
+	}))
+	p.RegisterEventHandler(on(rb, func(events.RoundStart) {
 		rb.planted = false
 		// Granaten der alten Runde sind weg
 		for _, fx := range rb.open {
@@ -407,7 +438,7 @@ func (rb *replayBuilder) register() {
 			}
 		}
 		rb.fires = map[common.UniqueID]*replayEffect{}
-	})
+	}))
 }
 
 func (rb *replayBuilder) effectStart(kind uint8, e events.GrenadeEvent) {
@@ -546,8 +577,15 @@ func (rb *replayBuilder) frame() {
 	rb.frames = b
 	rb.nFrames++
 
-	// Granaten im Flug
-	for _, proj := range gs.GrenadeProjectiles() {
+	// Granaten im Flug – nach Entity-ID, damit die Reihenfolge der Flugbahnen (und so die Datei) bei jedem Lauf gleich ist
+	projs := gs.GrenadeProjectiles()
+	rb.projIDs = rb.projIDs[:0]
+	for id := range projs {
+		rb.projIDs = append(rb.projIDs, id)
+	}
+	slices.Sort(rb.projIDs)
+	for _, id := range rb.projIDs {
+		proj := projs[id]
 		if proj == nil || proj.WeaponInstance == nil {
 			continue
 		}

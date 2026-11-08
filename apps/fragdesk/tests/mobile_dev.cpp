@@ -2,15 +2,20 @@
 // die App-Dateien von der Platte und beantwortet dieselben Anfragen wie FragDesk.
 //
 //   mobile_dev --data <Ordner> --web <Ordner> [--port 7420] [--me <SteamID>] [--code 123456] [--blocked]
+//              [--analyzer <fdanalyze>]
 //
-// --code: fester Kopplungscode (sonst zufällig, wird ausgegeben). --blocked: so tun, als liefe CS2 (keine Videos).
+// --code: fester Kopplungscode (sonst zufällig, wird ausgegeben). --blocked: so tun, als liefe CS2 (keine Videos, keine
+// 2D-Daten). --analyzer: fehlende 2D-Daten wie FragDesk im Hintergrund aus der Demo erstellen (fdanalyze für Linux);
+// ohne verhält sich der Testserver wie der eigene Server (erklärt nur, warum es keine gibt).
 #include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -128,8 +133,46 @@ void onSignal(int) { stopFlag = true; }
 
 }  // namespace
 
+// 2D-Daten erstellen wie FragDesk (mobile_host.cpp): eins zur Zeit im Hintergrund, Fehler bis „Erneut versuchen“
+struct ReplayMaker {
+    std::mutex mu;
+    std::string running, analyzer, dir;
+    std::map<std::string, std::string> failed;
+    bool blocked = false;
+
+    static ReplayState state(ReplayState::Kind k, const std::string& error = std::string()) {
+        ReplayState st;
+        st.kind = k;
+        st.error = error;
+        return st;
+    }
+
+    ReplayState prepare(const std::string& cs, const std::string& demo, bool broken, bool retry) {
+        std::lock_guard<std::mutex> lk(mu);
+        if (retry) failed.erase(cs);
+        if (running == cs) return state(ReplayState::Working);
+        if (failed.count(cs)) return state(ReplayState::Failed, failed[cs]);
+        if (blocked) return state(ReplayState::WaitCs2);
+        if (!running.empty()) return state(ReplayState::Queued);
+        if (demo.empty() || !std::ifstream(demo)) return state(ReplayState::NoDemo);
+        std::string target = dir + "/matches/" + cs + ".replay";
+        if (broken) std::remove(target.c_str());
+        running = cs;
+        std::thread([this, cs, demo, target] {
+            std::string tmp = target + ".tmp", cmd = "'" + analyzer + "' -demo '" + demo + "' -replay '" + tmp + "' -temp '" + dir + "/temp' >/dev/null 2>&1";
+            int rc = std::system(cmd.c_str());
+            bool ok = rc == 0 && std::rename(tmp.c_str(), target.c_str()) == 0;
+            std::cout << "2D-Daten " << cs << (ok ? " erstellt" : " nicht erstellt") << std::endl;
+            std::lock_guard<std::mutex> lk(mu);
+            if (!ok) failed[cs] = "Die Demo ist beschädigt";
+            running.clear();
+        }).detach();
+        return state(ReplayState::Working);
+    }
+};
+
 int main(int argc, char** argv) {
-    std::string data = ".", web = "web", radars = "res/radars", me, code;
+    std::string data = ".", web = "web", radars = "res/radars", me, code, analyzer;
     int port = 7420;
     bool blocked = false;
     for (int i = 1; i < argc; ++i) {
@@ -142,6 +185,7 @@ int main(int argc, char** argv) {
         else if (a == "--me") me = next();
         else if (a == "--code") code = next();
         else if (a == "--blocked") blocked = true;
+        else if (a == "--analyzer") analyzer = next();
     }
     DirSource src;
     src.dir = data;
@@ -186,6 +230,14 @@ int main(int argc, char** argv) {
         return readAll(radars + "/" + name + (lower ? "_lower.png" : ".png"), png);
     };
     host.mediaBlocked = [blocked]() { return blocked ? std::string("CS2 läuft gerade – Videos gibt es wieder, sobald das Spiel zu ist.") : std::string(); };
+    ReplayMaker maker;
+    maker.analyzer = analyzer;
+    maker.dir = data;
+    maker.blocked = blocked;
+    if (!analyzer.empty())
+        host.prepareReplay = [&maker](const std::string& cs, const std::string& demo, bool broken, bool retry) {
+            return maker.prepare(cs, demo, broken, retry);
+        };
 
     auth.startPairing(600, code);
     std::string err;

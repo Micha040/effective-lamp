@@ -91,15 +91,26 @@ type extrasBuilder struct {
 }
 
 type extrasResult struct {
-	heat []byte // Inhalt der .heat-Datei
-	aim  map[uint64]*aimCounters
+	heat      []byte // Inhalt der .heat-Datei
+	aim       map[uint64]*aimCounters
+	replayErr error // nur mit replayTo: warum die 2D-Daten fehlen (nil = geschrieben)
 }
 
-// buildExtras liest die (entpackte) Demo und sammelt Heatmap-Daten und die Zähler fürs Zielen.
-func buildExtras(demoPath string) (res *extrasResult, err error) {
+// buildExtras liest die (entpackte) Demo und sammelt Heatmap-Daten und die Zähler fürs Zielen. Mit replayTo sammelt
+// derselbe Durchgang auch die 2D-Daten und schreibt sie dorthin – ohne die Demo ein drittes Mal zu lesen. Das Ergebnis
+// ist nie nil: auch bei einem Fehler (err) steht in replayErr, was aus den 2D-Daten wurde.
+func buildExtras(demoPath, replayTo string) (res *extrasResult, err error) {
+	res = &extrasResult{}
+	fail := func(e error) (*extrasResult, error) {
+		res.heat, res.aim = nil, nil
+		if replayTo != "" {
+			res.replayErr = e
+		}
+		return res, e
+	}
 	f, err := os.Open(demoPath)
 	if err != nil {
-		return nil, coded("READ", "%v", err)
+		return fail(coded("READ", "%v", err))
 	}
 	defer f.Close()
 	p := dem.NewParser(bufio.NewReaderSize(f, 1<<20))
@@ -115,15 +126,26 @@ func buildExtras(demoPath string) (res *extrasResult, err error) {
 		aim:       map[uint64]*aimCounters{},
 	}
 	eb.register()
+	var rb *replayBuilder
+	if replayTo != "" {
+		rb = newReplayBuilder(p)
+		rb.register()
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			res, err = nil, coded("CORRUPT", "Zusatzdaten abgebrochen: %v", r)
+			res, err = fail(coded("CORRUPT", "Zusatzdaten abgebrochen: %v", r))
 		}
 	}()
-	if perr := p.ParseToEnd(); perr != nil && !errors.Is(perr, dem.ErrUnexpectedEndOfDemo) && eb.nFrames == 0 {
-		return nil, coded("CORRUPT", "%v", perr)
+	perr := p.ParseToEnd()
+	if rb != nil {
+		res.replayErr = rb.finish(perr, replayTo)
 	}
-	return &extrasResult{heat: eb.encode(p.Header().MapName), aim: eb.aim}, nil
+	if perr != nil && !errors.Is(perr, dem.ErrUnexpectedEndOfDemo) && eb.nFrames == 0 {
+		res.heat, res.aim = nil, nil
+		return res, coded("CORRUPT", "%v", perr)
+	}
+	res.heat, res.aim = eb.encode(p.Header().MapName), eb.aim
+	return res, nil
 }
 
 func (eb *extrasBuilder) tick() int { return eb.parser.GameState().IngameTick() }

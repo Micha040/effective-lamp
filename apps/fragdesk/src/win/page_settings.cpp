@@ -106,6 +106,8 @@ std::wstring syncText(Canvas& c, const SyncStatus& st, const ServerSettings& srv
     if (st.counted) {
         counts = std::to_wstring(st.matchesDone) + L" von " + std::to_wstring(st.matchesTotal) + L" Matches · ";
         counts += srv.videos ? std::to_wstring(st.clipsDone) + L" von " + std::to_wstring(st.clipsTotal) + L" Videos" : L"Videos hochladen aus";
+        if (srv.replays && st.replaysTotal > 0)
+            counts += L" · 2D-Ansicht " + std::to_wstring(st.replaysDone) + L" von " + std::to_wstring(st.replaysTotal);
     }
     std::wstring done = counts.empty() ? std::wstring() : L" Stand: " + counts + L".";
     switch (st.state) {
@@ -218,6 +220,24 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
         });
     }
     h += 64;
+    // 2D-Ansicht (ein älterer Server nimmt keine an: dann steht hier, was zu tun ist)
+    const std::wstring replays = srv.replays && st.replaysOld
+        ? L"Dein Server kennt die 2D-Ansicht noch nicht – führ auf dem Server den Installationsbefehl noch einmal aus (aktualisiert, "
+          L"Daten bleiben). Bis dahin erstellt FragDesk dafür nichts im Hintergrund und lädt nichts hoch."
+        : L"Positionen jeder Runde für die 2D-Ansicht in der Handy-App, rund 2 MB pro Match. Neue Matches bekommen sie beim Auswerten, "
+          L"für ältere erstellt FragDesk sie im Hintergrund aus der Demo – eins nach dem anderen und nie, solange CS2 läuft.";
+    float rr = rowHeight(c, cw, replays, 60, 64);
+    if (sec) {
+        RectF r = sec->row(L"2D-Ansicht hochladen", replays, rr, 60);
+        c.toggle(RectF(r.X + r.Width - 46, r.Y + (rr - 24) / 2, 44, 24), srv.replays, "t-sreplays", [&app] {
+            app.settings.mobile.srv.replays = !app.settings.mobile.srv.replays;
+            app.saveSettings();
+            app.sync->apply();     // auch: beim Auswerten gleich mit erzeugen (oder nicht mehr)
+            app.sync->request(0);
+            app.invalidate();
+        });
+    }
+    h += rr;
     // Handy koppeln
     std::string code = sy.pairingCode();
     bool rejected = st.state == SyncStatus::AuthFailed;   // erst neu verbinden

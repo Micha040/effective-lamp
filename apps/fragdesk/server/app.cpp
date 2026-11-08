@@ -2,6 +2,7 @@
 #include "app.h"
 
 #include <fcntl.h>
+#include <malloc.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -10,8 +11,10 @@
 #include <cmath>
 
 #include "../src/api/jsonw.h"
+#include "../src/api/views.h"
 #include "../src/core/json.h"
 #include "../src/core/model.h"
+#include "../src/core/replay.h"
 #include "files.h"
 #include "web_assets.h"
 
@@ -272,6 +275,7 @@ int64_t App::bodyLimit(const Request& head) {
     if (head.method == "PUT" && startsWith(p, "/api/v1/sync/") && store_.validAccountToken(bearer(head))) {
         if (startsWith(p, "/api/v1/sync/clip/") && endsWith(p, "/data")) return kMaxChunk;
         if (startsWith(p, "/api/v1/sync/clip/") && endsWith(p, "/thumb")) return kMaxThumb;
+        if (startsWith(p, "/api/v1/sync/match/") && endsWith(p, "/replay")) return kMaxReplayFile;
         if (startsWith(p, "/api/v1/sync/match/")) return kMaxMatchFile;
     }
     return kMaxJson;
@@ -280,6 +284,7 @@ int64_t App::bodyLimit(const Request& head) {
 void App::maintain() {
     store_.maintain();
     views_.unloadIdle(idleUnload);
+    if (fdapi::dropIdleReplay(idleUnload)) malloc_trim(0);   // zuletzt gelesene 2D-Daten (1–4 MB) nicht ewig behalten
     inviteLimit_.prune();
     pairLimit_.prune();
     localLimit_.prune();
@@ -411,9 +416,14 @@ void App::sync(const Request& req, Response& res) {
         auto cf = store_.clipFiles(u);
         JsonW j;
         j.obj().key("matches").obj();
-        for (const auto& kv : mf)
-            if (kv.second.json >= 0 || kv.second.heat >= 0)
-                j.key(kv.first.c_str()).obj().ki("json", std::max<int64_t>(0, kv.second.json)).ki("heat", std::max<int64_t>(0, kv.second.heat)).end();
+        for (const auto& kv : mf) {
+            const MatchRec& r = kv.second;
+            if (r.json < 0 && r.heat < 0) continue;
+            j.key(kv.first.c_str()).obj().ki("json", std::max<int64_t>(0, r.json)).ki("heat", std::max<int64_t>(0, r.heat));
+            j.ki("replay", std::max<int64_t>(0, r.replay));   // 2D-Ansicht (0 = fehlt)
+            if (r.noreplay >= 0) j.kb("noreplay", true);       // FragDesk hat gemeldet: keine 2D-Daten möglich
+            j.end();
+        }
         j.end().key("clips").obj();
         for (const auto& kv : cf) {
             const ClipRec& c = kv.second;
@@ -421,6 +431,7 @@ void App::sync(const Request& req, Response& res) {
             j.key(kv.first.c_str()).obj().ki("size", c.mp4 >= 0 ? c.mp4 : std::max<int64_t>(0, c.part)).kb("complete", c.complete()).kb("thumb", c.thumb >= 0).end();
         }
         j.end().key("quota").obj().ki("used", store_.used(u)).ki("limit", store_.limit(u)).end();
+        j.kb("replays", true);   // nimmt 2D-Daten an – fehlt bei älteren Servern, dann lädt FragDesk keine hoch
         j.end();
         res.body = j.take();
         return;
@@ -449,23 +460,38 @@ void App::sync(const Request& req, Response& res) {
             if (!f.ok()) return fail(res, f);
             return ok(res);
         }
-        bool heat = part[2] == "heat";
-        if (!heat && part[2] != "json") return res.error(404, "Unbekannte Anfrage");
+        const std::string& what = part[2];
+        MatchPart mp = what == "heat" ? MatchPart::Heat : what == "replay" ? MatchPart::Replay : what == "noreplay" ? MatchPart::NoReplay : MatchPart::Json;
+        if (mp == MatchPart::Json && what != "json") return res.error(404, "Unbekannte Anfrage");
         if (m != "PUT") return res.error(405, "Nur PUT");
-        if (int64_t(req.body.size()) > kMaxMatchFile) return res.error(413, "Die Datei ist zu groß (höchstens 4 MB).");
-        if (heat) {
-            if (req.body.size() < 8 || req.body.compare(0, 4, "FDHM") != 0) return res.error(400, "Das ist keine Heatmap-Datei von FragDesk.");
+        std::string marker;   // NoReplay: nur der Grund, sonst der Körper der Anfrage (ohne Kopie)
+        const std::string& body = mp == MatchPart::NoReplay ? marker : req.body;
+        if (mp == MatchPart::Replay) {   // 2D-Ansicht: ganz lesen – was hier liegt, muss die Handy-App auch zeigen können
+            if (int64_t(body.size()) > kMaxReplayFile) return res.error(413, "Die Datei ist zu groß (höchstens 16 MB).");
+            if (body.size() < 8 || body.compare(0, 4, "FDRP") != 0) return res.error(400, "Das sind keine 2D-Daten von FragDesk.");
+            fd::Replay r;
+            std::string err;
+            if (!fd::parseReplay(body, r, err)) return res.error(400, "Die 2D-Daten lassen sich nicht lesen: " + err);
+        } else if (mp != MatchPart::NoReplay && int64_t(body.size()) > kMaxMatchFile) {
+            return res.error(413, "Die Datei ist zu groß (höchstens 4 MB).");
+        } else if (mp == MatchPart::Heat) {
+            if (body.size() < 8 || body.compare(0, 4, "FDHM") != 0) return res.error(400, "Das ist keine Heatmap-Datei von FragDesk.");
+        } else if (mp == MatchPart::NoReplay) {   // {"reason": "demo"|"failed"} – nur der Grund wird gespeichert
+            json::Value v;
+            std::string reason = json::parse(req.body, v) && v.isObject() ? v.getString("reason") : std::string();
+            if (reason != "demo" && reason != "failed") return res.error(400, "reason muss \"demo\" oder \"failed\" sein.");
+            marker = "{\"reason\":\"" + reason + "\"}\n";
         } else {
             fd::Match match;
             std::string err;
-            if (!fd::parseMatch(req.body, match, err, true)) return res.error(400, "Das Match lässt sich nicht lesen: " + err);
+            if (!fd::parseMatch(body, match, err, true)) return res.error(400, "Das Match lässt sich nicht lesen: " + err);
             if (match.checksum != checksum) return res.error(400, "Die Prüfsumme passt nicht zum Match.");
         }
-        Fail f = store_.putMatchFile(u, checksum, heat, req.body);
+        Fail f = store_.putMatchFile(u, checksum, mp, body);
         if (!f.ok()) return fail(res, f);
-        if (!heat) views_.matchChanged(u, checksum);
+        if (mp == MatchPart::Json) views_.matchChanged(u, checksum);
         JsonW j;
-        j.obj().kb("ok", true).ki("size", int64_t(req.body.size())).end();
+        j.obj().kb("ok", true).ki("size", int64_t(body.size())).end();
         res.body = j.take();
         return;
     }

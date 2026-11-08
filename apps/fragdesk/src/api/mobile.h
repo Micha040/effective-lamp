@@ -37,9 +37,10 @@ public:
     virtual bool detail(const std::string& checksum, fd::Match& out) = 0;   // mit Kills, Runden, Highlights …
     virtual std::vector<ClipInfo> clips() = 0;
     virtual int newDemos() { return 0; }   // noch nicht ausgewertete Demos
-    // Pfad (UTF-8) einer Zusatzdatei neben der Auswertung: ext "heat" (Heatmap, FDHM) oder "replay" (2D-Ansicht, FDRP);
-    // leer, wenn es sie nicht gibt. Nur den Pfad hier holen – lesen und auswerten außerhalb (readAll im Thread der
-    // Anfrage), damit große Dateien nicht den Thread der Daten (FragDesk: UI-Thread) aufhalten.
+    // Pfad (UTF-8) einer Zusatzdatei neben der Auswertung: ext "heat" (Heatmap, FDHM) oder "replay" (2D-Ansicht, FDRP),
+    // auf dem eigenen Server auch "noreplay" (FragDesk meldet: keine 2D-Daten möglich); leer, wenn es sie nicht gibt.
+    // Nur den Pfad hier holen – lesen und auswerten außerhalb (readAll im Thread der Anfrage), damit große Dateien nicht
+    // den Thread der Daten (FragDesk: UI-Thread) aufhalten.
     virtual std::string matchFile(const std::string& checksum, const std::string& ext) {
         (void)checksum;
         (void)ext;
@@ -82,6 +83,19 @@ private:
 std::string randomHex(int bytes);   // aus dem Zufallsgenerator des Systems
 int64_t nowEpoch();
 
+// Stand der 2D-Daten eines Matches, das (noch) keine brauchbare .replay-Datei hat (Host::prepareReplay). Die Texte
+// dazu stehen in view_replay.cpp.
+struct ReplayState {
+    enum Kind {
+        Working,   // wird gerade aus der Demo erstellt
+        Queued,    // wartet, bis ein anderes Match fertig ist
+        WaitCs2,   // wird erstellt, sobald CS2 zu ist
+        NoDemo,    // Demo-Datei nicht mehr da
+        Failed,    // Erstellen ging schief (error: Grund)
+    } kind = Failed;
+    std::string error;
+};
+
 struct Host {
     std::string version;   // FragDesk-Version
     std::string kind = "pc";   // "pc" (FragDesk) oder "server"
@@ -98,6 +112,11 @@ struct Host {
     std::function<std::string()> mediaBlocked;
     // Radarbild (PNG) einer Karte – name wie fd::RadarMap::name (z. B. "de_nuke"), lower: untere Ebene; false = keins
     std::function<bool(const std::string& name, bool lower, std::string& png)> radar;
+    // 2D-Ansicht ohne brauchbare .replay-Datei: FragDesk (direkt vom PC) erstellt sie im Hintergrund aus der Demo (demo:
+    // Pfad laut Auswertung) und sagt, wie weit es ist – nie, solange CS2 läuft. Aus dem Thread der Anfrage, kehrt sofort
+    // zurück. broken: die vorhandene Datei ist unbrauchbar (neu erstellen), retry: nach einem Fehler noch einmal versuchen.
+    // Leer (eigener Server): die Ansicht erklärt selbst, warum es keine gibt.
+    std::function<ReplayState(const std::string& checksum, const std::string& demo, bool broken, bool retry)> prepareReplay;
 };
 
 // Datei ganz lesen (über Host::openFile, im aufrufenden Thread); false, wenn sie fehlt, größer als maxBytes ist oder

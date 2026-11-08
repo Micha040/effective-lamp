@@ -639,7 +639,9 @@ void tabMoments(JsonW& j, ViewCtx& c, const fd::Match& m, const std::map<std::st
             .kv("who", p ? p->name : std::string())   // „Alle Spieler“: Name vor meta
             .kb("mine", h.player == c.me)
             .ki("stars", std::max(1, std::min(5, h.score / 40 + 1)))
-            .kb("clutch", h.clutch > 0);
+            .kb("clutch", h.clutch > 0)
+            .ki("round", h.round)   // 2D-Ansicht an dieser Stelle
+            .ki("tick", momentTick(h, m.tickrate));
         writeClip(j, clipOf, m, h);
         j.end();
     }

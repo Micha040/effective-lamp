@@ -16,7 +16,9 @@
 #include <condition_variable>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <mutex>
+#include <thread>
 
 #include "../api/http.h"
 #include "../api/mobile.h"
@@ -25,6 +27,7 @@
 #include "app.h"
 #include "common.h"
 #include "recorder.h"
+#include "replay_maker.h"
 
 namespace fdw {
 
@@ -41,6 +44,13 @@ struct Job {
     enum State { Pending, Running, Done, Cancelled } state = Pending;
 };
 
+// 2D-Daten, die das Handy braucht (direkt vom PC): eins zur Zeit im Hintergrund, nie während CS2 läuft
+struct ReplayJobs {
+    std::mutex mu;
+    std::string running;                         // Prüfsumme, leer = nichts
+    std::map<std::string, std::string> failed;   // Prüfsumme -> Grund (bis „Erneut versuchen“)
+};
+
 // Alles, was die Threads des Servers brauchen. Lebt, solange noch eine Verbindung läuft (nie Zugriff auf App).
 struct Shared {
     std::atomic<HWND> hwnd{nullptr};
@@ -48,7 +58,60 @@ struct Shared {
     fdapi::Host host;
     std::atomic<ULONGLONG> cs2At{0};
     std::atomic<bool> cs2{false};
+    ReplayJobs replays;
 };
+
+// Läuft CS2? Nur der Name aus der Prozessliste (Toolhelp), höchstens alle maxAgeMs nachsehen
+bool cs2Now(Shared& sh, ULONGLONG maxAgeMs) {
+    ULONGLONG now = GetTickCount64();
+    if (now - sh.cs2At.load() > maxAgeMs) {
+        sh.cs2 = isProcessRunning(L"cs2.exe");
+        sh.cs2At = now;
+    }
+    return sh.cs2;
+}
+
+// Host::prepareReplay: .replay für das Handy erstellen (wie die 2D-Ansicht am PC, mit niedriger Priorität). Das Handy
+// fragt alle paar Sekunden wieder; ein weiteres Match kommt dran, sobald das laufende fertig ist.
+fdapi::ReplayState prepareReplay(const std::shared_ptr<Shared>& sh, const std::string& cs, const std::string& demo, bool broken, bool retry) {
+    fdapi::ReplayState st;
+    auto with = [&st](fdapi::ReplayState::Kind k) {
+        st.kind = k;
+        return st;
+    };
+    ReplayJobs& rj = sh->replays;
+    std::lock_guard<std::mutex> lk(rj.mu);
+    if (retry) rj.failed.erase(cs);
+    if (rj.running == cs) return with(fdapi::ReplayState::Working);
+    auto f = rj.failed.find(cs);
+    if (f != rj.failed.end()) {
+        st.error = f->second;
+        return with(fdapi::ReplayState::Failed);
+    }
+    if (cs2Now(*sh, 2000)) return with(fdapi::ReplayState::WaitCs2);   // nie, solange CS2 läuft
+    if (!rj.running.empty()) return with(fdapi::ReplayState::Queued);
+    std::wstring demoPath = widen(demo), target = replayFile(cs);
+    if (demo.empty() || !fileExists(demoPath)) return with(fdapi::ReplayState::NoDemo);
+    if (broken) {
+        logLine(L"Handy-App: 2D-Daten %ls unbrauchbar, werden neu erstellt", target.c_str());
+        DeleteFileW(target.c_str());
+    }
+    rj.running = cs;
+    std::thread([sh, cs, demoPath, target] {
+        ULONGLONG t0 = GetTickCount64();
+        // abbrechen, wenn CS2 startet oder die Handy-App aus geht (FragDesk endet, anderer Modus)
+        std::string code = makeReplay(demoPath, target, BELOW_NORMAL_PRIORITY_CLASS, [sh] { return !sh->hwnd.load() || cs2Now(*sh, 2000); });
+        std::lock_guard<std::mutex> lk(sh->replays.mu);
+        sh->replays.running.clear();
+        if (code.empty()) logLine(L"Handy-App: 2D-Daten erstellt in %.1f s: %ls", (GetTickCount64() - t0) / 1000.0, target.c_str());
+        else if (code == "CANCELLED") logLine(L"Handy-App: 2D-Daten abgebrochen (CS2 gestartet oder Handy-App aus)");
+        else {
+            sh->replays.failed[cs] = narrow(analysisErrorText(code));
+            logLine(L"Handy-App: 2D-Daten für %ls gehen nicht (%hs)", demoPath.c_str(), code.c_str());
+        }
+    }).detach();
+    return with(fdapi::ReplayState::Working);
+}
 
 class AppSource : public fdapi::Source {
 public:
@@ -332,12 +395,19 @@ MobileHost::MobileHost(App& app) : d_(std::make_unique<Impl>(app)) {
     host.radar = loadRadar;
     host.thumbnail = [](const fdapi::ClipInfo& clip, std::string& jpeg) { return videoThumbnail(widen(clip.path), clip.id, jpeg); };
     host.mediaBlocked = [raw]() -> std::string {
-        ULONGLONG now = GetTickCount64();
-        if (now - raw->cs2At.load() > 5000) {   // höchstens alle 5 s nachsehen
-            raw->cs2 = isProcessRunning(L"cs2.exe");
-            raw->cs2At = now;
+        return cs2Now(*raw, 5000) ? "Auf deinem PC läuft gerade CS2. Damit dein Spiel nicht ruckelt, gibt es Videos erst wieder, wenn CS2 zu ist."
+                                  : std::string();
+    };
+    std::weak_ptr<Shared> weak = sh;   // die Funktion gehört zu sh selbst (kein Kreis)
+    host.prepareReplay = [weak](const std::string& cs, const std::string& demo, bool broken, bool retry) {
+        std::shared_ptr<Shared> s = weak.lock();
+        if (!s) {
+            fdapi::ReplayState st;
+            st.kind = fdapi::ReplayState::Failed;
+            st.error = "FragDesk beendet sich gerade.";
+            return st;
         }
-        return raw->cs2 ? "Auf deinem PC läuft gerade CS2. Damit dein Spiel nicht ruckelt, gibt es Videos erst wieder, wenn CS2 zu ist." : std::string();
+        return prepareReplay(s, cs, demo, broken, retry);
     };
     sh->auth.onChange = [raw] {
         HWND hwnd = raw->hwnd.load();

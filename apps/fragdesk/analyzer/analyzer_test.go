@@ -173,7 +173,7 @@ func TestFixtures(t *testing.T) {
 			t.Logf("%s fehlt, übersprungen", file)
 			continue
 		}
-		out, err := analyzeFile(matches[0], t.TempDir(), func(string) {})
+		out, err := analyzeFile(matches[0], t.TempDir(), "", func(string) {})
 		if err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}

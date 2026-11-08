@@ -84,6 +84,7 @@ bool Settings::load() {
             s.userId = sv.getString("userId");
             s.admin = sv.getBool("admin", false);
             s.videos = sv.getBool("videos", true);
+            s.replays = sv.getBool("replays", true);
             s.profile = sv.getString("profile");
             s.lastSync = int64_t(sv.getNumber("lastSync"));
             s.used = int64_t(sv.getNumber("used", -1));
@@ -129,7 +130,7 @@ bool Settings::save() const {
     const ServerSettings& sv = mobile.srv;
     o += "    \"server\": {\"url\": " + jsonQuote(sv.url) + ", \"token\": " + jsonQuote(sv.token) + ", \"user\": " + jsonQuote(sv.user) +
          ", \"userId\": " + jsonQuote(sv.userId) + ", \"admin\": " + (sv.admin ? "true" : "false") + ", \"videos\": " + (sv.videos ? "true" : "false") +
-         ", \"profile\": " + jsonQuote(sv.profile);
+         ", \"replays\": " + (sv.replays ? "true" : "false") + ", \"profile\": " + jsonQuote(sv.profile);
     std::snprintf(b, sizeof b, ", \"lastSync\": %lld, \"used\": %lld, \"limit\": %lld, \"gone\": [", static_cast<long long>(sv.lastSync),
                   static_cast<long long>(sv.used), static_cast<long long>(sv.limit));
     o += b;

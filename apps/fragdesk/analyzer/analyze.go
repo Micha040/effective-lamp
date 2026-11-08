@@ -14,8 +14,9 @@ import (
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
 )
 
-// analyzeFile wertet eine Demo aus und baut die Ausgabe für die App.
-func analyzeFile(path, tempDir string, step func(string)) (*Output, error) {
+// analyzeFile wertet eine Demo aus und baut die Ausgabe für die App. Mit replayTo entstehen im selben Lauf die Daten der
+// 2D-Ansicht (Datei replayTo); geht das schief, bleibt die Auswertung gültig (Hinweis in Warnings, wie bei der Heatmap).
+func analyzeFile(path, tempDir, replayTo string, step func(string)) (*Output, error) {
 	abs, err := filepath.Abs(path)
 	if err == nil {
 		path = abs
@@ -36,11 +37,12 @@ func analyzeFile(path, tempDir string, step func(string)) (*Output, error) {
 	defer cleanup()
 
 	step("parse")
-	// Heatmap-Daten und Zielen im zweiten Durchgang, gleichzeitig mit cs-demo-analyzer (beide lesen nur)
+	// Heatmap-Daten, Zielen und (mit replayTo) die 2D-Daten im zweiten Durchgang, gleichzeitig mit cs-demo-analyzer
+	// (beide lesen nur)
 	extrasDone := make(chan *extrasResult, 1)
 	var extrasErr error
 	go func() {
-		res, err := buildExtras(demoPath)
+		res, err := buildExtras(demoPath, replayTo)
 		if err != nil {
 			extrasErr = err
 		}
@@ -72,11 +74,14 @@ func analyzeFile(path, tempDir string, step func(string)) (*Output, error) {
 	fillKills(out, m)
 	fillRounds(out, m)
 	fillPlayers(out, m, sb)
-	if ex != nil {
+	if extrasErr != nil {
+		out.Warnings = append(out.Warnings, "Heatmap und Zielen: "+extrasErr.Error())
+	} else {
 		mergeAim(out, ex.aim)
 		out.heat = ex.heat
-	} else if extrasErr != nil {
-		out.Warnings = append(out.Warnings, "Heatmap und Zielen: "+extrasErr.Error())
+	}
+	if replayTo != "" && ex.replayErr != nil {
+		out.Warnings = append(out.Warnings, "2D-Daten: "+ex.replayErr.Error())
 	}
 	out.Highlights = buildHighlights(out, sb.tickrate)
 	if out.Highlights == nil {

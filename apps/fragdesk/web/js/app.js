@@ -32,11 +32,14 @@ const pages = {
   moments: () => import('./pages/moments.js'),
   settings: () => import('./pages/settings.js'),
   admin: () => import('./pages/admin.js'),
+  replay: () => import('./pages/replay.js'),
 };
+// full: Seite braucht den ganzen Bildschirm (ohne Reiter unten, auch quer breit)
 const routes = [
   {re: /^\/?$/, page: 'overview', nav: 0},
   {re: /^\/matches$/, page: 'matches', nav: 1},
   {re: /^\/match\/([^/]+)(?:\/(\d+))?$/, page: 'match', nav: 1, detail: true},
+  {re: /^\/replay\/([^/]+)$/, page: 'replay', nav: 1, detail: true, full: true},   // 2D-Ansicht: ?round=&tick=
   {re: /^\/stats(?:\/(\d+))?$/, page: 'stats', nav: 2},
   {re: /^\/moments(?:\/(\d+))?$/, page: 'moments', nav: 3},
   {re: /^\/settings$/, page: 'settings', nav: -1, detail: true},
@@ -87,6 +90,18 @@ export function replaceRoute(hash) {
   render();
 }
 
+// Adresse der 2D-Ansicht: Runde (0 = erste) und Zeitpunkt (Tick, die Ansicht beginnt 2 s davor; 0 = Rundenstart)
+export function replayHref(id, round, tick) {
+  return '#/replay/' + encodeURIComponent(id) + (round ? '?round=' + round + (tick ? '&tick=' + tick : '') : '');
+}
+
+// Nur die Adresse anpassen, ohne neu zu zeichnen (z. B. Runde in der 2D-Ansicht, die die Seite selbst wechselt)
+export function setHash(hash) {
+  if (location.hash === hash) return;
+  history.replaceState(null, '', hash);
+  if (visited.length) visited[visited.length - 1] = location.hash;
+}
+
 export function goBack() {
   if (visited.length > 1) history.back();
   else location.hash = '#/';
@@ -110,6 +125,7 @@ async function render(fresh) {
   shell.left.classList.toggle('spacer', !route.detail);
   shell.right.classList.toggle('spacer', !!route.detail);
   shell.top.classList.toggle('always', !!route.detail);
+  document.body.classList.toggle('fd-full', !!route.full);
   shell.tt.textContent = '';
   const main = h('main');
   shell.main.replaceWith(main);

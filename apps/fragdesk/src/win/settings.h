@@ -30,6 +30,7 @@ struct ServerSettings {
     std::string user, userId;   // Konto auf dem Server
     bool admin = false;
     bool videos = true;         // Videos hochladen
+    bool replays = true;        // 2D-Ansicht hochladen (.replay; fehlende im Hintergrund aus der Demo erstellen)
     std::string profile;        // zuletzt gemeldetes Profil ("Name\nSteamID")
     int64_t lastSync = 0;       // letzter vollständiger Abgleich (Sekunden seit 1970)
     int64_t used = -1, limit = 0;   // Speicher laut Server beim letzten Abgleich (−1 = unbekannt, limit 0 = unbegrenzt)

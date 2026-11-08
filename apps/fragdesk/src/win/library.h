@@ -62,6 +62,9 @@ public:
     // Auswerten
     void analyze(const std::wstring& path);
     void analyzeAll(bool retryFailed = true);   // automatisch: nur neue Demos, sonst auch fehlgeschlagene noch einmal
+    // Beim Auswerten gleich die 2D-Daten (.replay) mit erzeugen – im selben Lauf von fdanalyze, ohne die Demo noch
+    // einmal zu lesen. An, solange FragDesk 2D-Daten auf den eigenen Server lädt.
+    void setWithReplay(bool on);
     bool busy() const;
     int queued() const;
     void onEvent(AnalysisEvent* e);   // im UI-Thread
@@ -100,6 +103,7 @@ private:
     std::wstring running_;
     bool quit_ = false;
     HANDLE child_ = nullptr;   // laufendes fdanalyze (zum Beenden beim Schließen)
+    bool withReplay_ = false;   // mit mu_
 
     std::thread watcher_;
     HANDLE watchStop_ = nullptr;

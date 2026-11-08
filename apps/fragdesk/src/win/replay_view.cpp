@@ -6,6 +6,7 @@
 
 #include "common.h"
 #include "library.h"
+#include "replay_maker.h"
 
 using namespace Gdiplus;
 
@@ -13,78 +14,7 @@ namespace fdw {
 
 namespace {
 
-// fdanalyze endet mit FragDesk
-HANDLE analyzerJob() {
-    static HANDLE job = [] {
-        HANDLE j = CreateJobObjectW(nullptr, nullptr);
-        if (j) {
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = {};
-            li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(j, JobObjectExtendedLimitInformation, &li, sizeof li);
-        }
-        return j;
-    }();
-    return job;
-}
-
-// fdanalyze -replay; liefert das Fehler-Kennwort (leer = fertig)
-std::string runReplayTool(const std::wstring& demo, const std::wstring& out) {
-    std::wstring exe = joinPath(selfDir(), kAnalyzerExe);
-    if (!fileExists(exe)) return "MISSING";
-    SECURITY_ATTRIBUTES sa = {sizeof sa, nullptr, TRUE};
-    HANDLE rd = nullptr, wr = nullptr;
-    if (!CreatePipe(&rd, &wr, &sa, 0)) return "START";
-    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
-    std::wstring cmd = L"\"" + exe + L"\" -demo \"" + demo + L"\" -replay \"" + out + L"\" -temp \"" + tempDir() + L"\"";
-    STARTUPINFOW si = {};
-    si.cb = sizeof si;
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = wr;
-    si.hStdError = wr;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
-    buf.push_back(0);
-    BOOL ok = CreateProcessW(exe.c_str(), buf.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED,
-                             nullptr, nullptr, &si, &pi);
-    CloseHandle(wr);
-    if (!ok) {
-        logLine(L"fdanalyze -replay startet nicht (%lu)", GetLastError());
-        CloseHandle(rd);
-        return "START";
-    }
-    if (HANDLE job = analyzerJob()) AssignProcessToJobObject(job, pi.hProcess);
-    ResumeThread(pi.hThread);
-    std::string pending, code, done;
-    char chunk[512];
-    DWORD got = 0;
-    while (ReadFile(rd, chunk, sizeof chunk, &got, nullptr) && got > 0) {
-        pending.append(chunk, got);
-        size_t nl;
-        while ((nl = pending.find('\n')) != std::string::npos) {
-            std::string line = pending.substr(0, nl);
-            pending.erase(0, nl + 1);
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (line.rfind("ERROR ", 0) == 0) {
-                std::string rest = line.substr(6);
-                code = rest.substr(0, rest.find(' '));
-                logLine(L"2D-Daten %ls: %ls", demo.c_str(), widen(rest).c_str());
-            } else if (line.rfind("DONE ", 0) == 0) {
-                done = line;
-            }
-        }
-    }
-    CloseHandle(rd);
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    if (exitCode != 0 || done.empty()) return code.empty() ? "INTERNAL" : code;
-    return "";
-}
-
-std::wstring replayPath(const std::string& checksum) { return joinPath(matchesDir(), widen(checksum) + L".replay"); }
+std::wstring replayPath(const std::string& checksum) { return replayFile(checksum); }
 
 // vorhandene Datei laden, sonst aus der Demo erzeugen
 ReplayEvent* loadReplay(const std::string& checksum, const std::wstring& demo) {
@@ -107,10 +37,8 @@ ReplayEvent* loadReplay(const std::string& checksum, const std::wstring& demo) {
         if (demo.empty() || !fileExists(demo)) {
             e->error = L"Die Demo-Datei ist nicht mehr da – ohne sie lassen sich keine 2D-Daten erstellen.";
         } else {
-            createDirs(matchesDir());
-            createDirs(tempDir());
             ULONGLONG t0 = GetTickCount64();
-            std::string code = runReplayTool(demo, path);
+            std::string code = makeReplay(demo, path, BELOW_NORMAL_PRIORITY_CLASS);
             if (!code.empty()) e->error = analysisErrorText(code);
             else if (!tryLoad()) e->error = L"Die 2D-Daten sind unvollständig.";
             else logLine(L"2D-Daten erstellt in %.1f s: %ls", (GetTickCount64() - t0) / 1000.0, path.c_str());
