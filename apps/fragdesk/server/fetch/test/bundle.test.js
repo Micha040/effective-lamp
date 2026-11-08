@@ -149,8 +149,17 @@ test('Bündel: SIGTERM mitten in der Auswertung – fdanalyze weg, tmp leer, Spe
 		assert.ok(!fs.existsSync(path.join(fx.data, 'fetch', 'lock')), 'Sperre frei');
 		assert.deepStrictEqual(fs.readdirSync(path.join(fx.data, 'fetch', 'tmp')), []);
 		assert.strictEqual(fx.server.job.accounts[0].knownCode, fx.codes[0], 'nichts weitergezählt');
-		let ps = spawnSync('pgrep', ['-f', 'fdanalyze-test'], {encoding: 'utf8'});
-		assert.ok(ps.error || !ps.stdout.trim(), 'kein fdanalyze mehr: ' + ps.stdout);
+		// nur das fdanalyze dieses Tests suchen (node --test führt Dateien parallel aus) und kurz Zeit zum Aufräumen geben
+		let left = '';
+		for (let i = 0; i < 20; i++) {
+			let ps = spawnSync('pgrep', ['-f', analyzer], {encoding: 'utf8'});
+			left = ps.error ? '' : ps.stdout.trim();
+			if (!left) {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		assert.ok(!left, 'kein fdanalyze mehr: ' + left);
 	} finally {
 		await fx.server.stop();
 		await fx.demos.close();
