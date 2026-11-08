@@ -1,0 +1,27 @@
+{
+  "name": "fragdesk-fetch",
+  "private": true,
+  "version": "0.0.0",
+  "description": "FragDesk-Server: lädt neue Matchmaking-Demos bei Valve und wertet sie aus",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "globaloffensive": "3.3.0",
+    "steam-session": "1.9.4",
+    "steam-user": "5.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "overrides": {
+    "adm-zip": "0.6.1",
+    "steam-appticket": "2.0.1"
+  }
+}

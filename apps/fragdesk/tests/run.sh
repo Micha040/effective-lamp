@@ -13,3 +13,5 @@ g++ -std=c++17 -O1 -Wall -Wextra -o build/tests/api_test tests/api_test.cpp src/
 ./build/tests/api_test
 # Eigener Server (fragdesk-server): Einzelteile, ganzer Ablauf über HTTP, install.sh
 sh tests/server.sh
+# Helfer fragdesk-fetch (Node ≥ 18): Einzelteile, ganzer Lauf mit Steam-Attrappe, gebündelte Datei (npm ci nur, wenn node_modules fehlt)
+if command -v node >/dev/null; then (cd server/fetch && { [ -d node_modules ] || npm ci --ignore-scripts --no-audit --no-fund --loglevel=error || true; } && node --test test/*.test.js); else echo "Hinweis: node fehlt – Tests von fragdesk-fetch übersprungen"; fi
