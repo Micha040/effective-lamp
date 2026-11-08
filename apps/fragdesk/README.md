@@ -177,9 +177,14 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 ## Handy-App
 
 Deine Stats und Clips auf dem Handy – als Web-App, die FragDesk selbst ausliefert: kein App Store, kein Server, keine
-Kosten. Zu sehen ist dasselbe wie in FragDesk, fürs Handy umgebaut: **Übersicht**, **Matches** mit allen Bereichen,
-**Statistiken** samt Verlauf und deine **Momente und Videos**. Heatmaps und die 2D-Ansicht kommen noch. Ansehen und
-Aufnehmen in CS2 bleibt am PC.
+Kosten. Zu sehen ist dasselbe wie in FragDesk, fürs Handy umgebaut: **Übersicht**, **Matches** mit allen Bereichen samt
+**Heatmap**, **Statistiken** samt Verlauf und Heatmaps und deine **Momente und Videos**. Die 2D-Ansicht kommt noch.
+Ansehen und Aufnehmen in CS2 bleibt am PC.
+
+**Heatmaps** wie in FragDesk: im Match und unter Statistiken › Heatmaps pro Map (die neuesten 200 Matches einer Map).
+Ebenen, Spieler und Seite wählen, bei Nuke & Co. die Ebene oben links auf der Karte; mit zwei Fingern vergrößern oder
+doppelt tippen. Ein Punkt zeigt, was dort war (Runde, Zeit, wer, Waffe), und führt in die 2D-Ansicht. Gerechnet wird
+am PC bzw. auf dem Server und nur, wenn das Handy fragt.
 
 Zwei Wege: **Direkt vom PC** (so wie hier beschrieben – der PC muss an sein) oder über einen **[eigenen
 Server](#eigener-server)** (ein paar Euro im Monat; der PC muss nicht an sein, auch mit Freunden teilbar). Umschalten
@@ -306,7 +311,8 @@ fragdesk`. Caddy bleibt installiert.
 
 **Ressourcen:** Im Leerlauf schläft der Server (einmal pro Minute räumt er kurz auf) und braucht wenige MB
 Arbeitsspeicher. Die Matches eines Kontos lädt er erst, wenn ein Handy fragt (rund 150 KB pro Match), und gibt sie
-nach 15 Minuten ohne Handy wieder frei. Caddy komprimiert JSON und Text, Videos nicht. Uhrzeiten in der Handy-App
+nach 15 Minuten ohne Handy wieder frei. Heatmaps rechnet er eine nach der anderen und vergisst sie nach 10 Minuten
+ohne Heatmap-Anfrage. Caddy komprimiert JSON und Text, Videos nicht. Uhrzeiten in der Handy-App
 rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh` Europe/Berlin
 (`--timezone <Zone>` ändert das).
 

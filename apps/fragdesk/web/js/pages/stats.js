@@ -1,14 +1,17 @@
-// FragDesk Handy-App – Statistiken (wie in FragDesk: Filter, Tabs mit Kennzahlen, Tabellen, Balken und Verlauf).
-// Der Server schickt je Tab fertige Blöcke (src/api/view_stats.cpp); die Seite zeigt sie nur an.
-import {h, icon, card, tabs, bars, sheet, notice, emptyState, skeleton, toneClass, toast, useCss} from '../ui.js';
+// FragDesk Handy-App – Statistiken (wie in FragDesk: Filter, Tabs mit Kennzahlen, Tabellen, Balken, Verlauf und Heatmaps).
+// Der Server schickt je Tab fertige Blöcke (src/api/view_stats.cpp), für die Heatmaps die Daten aus /api/v1/heat
+// (src/api/view_heat.cpp); die Seite zeigt sie nur an.
+import {h, icon, card, chips, tabs, bars, sheet, notice, emptyState, skeleton, toneClass, toast, useCss} from '../ui.js';
 import {lineChart} from '../chart.js';
 import {filterBar, filterQuery} from '../filters.js';
+import {heatView, heatPath} from '../heatmap.js';
 import * as api from '../api.js';
 import {store, replaceRoute} from '../app.js';
 
-// Tabs mit den Nummern aus FragDesk; die Heatmaps (11) fehlen noch
+// Tabs mit den Nummern aus FragDesk
 const TABS = ['Allgemein', 'Waffen', 'Maps', 'Eröffnung & Trades', 'Clutches', 'Utility', 'Zielen', 'Besondere Kills', 'Schaden & Zeit',
-  'Economy & Bombe', 'Verlauf'];
+  'Economy & Bombe', 'Verlauf', 'Heatmaps'];
+const HEAT = 11;   // eigene Schnittstelle (/api/v1/heat)
 
 export async function render(ctx) {
   useCss('css/stats.css');
@@ -17,13 +20,14 @@ export async function render(ctx) {
   let tab = ctx.params[0] != null ? Number(ctx.params[0]) : store.get('statsTab', 0);
   if (!Number.isInteger(tab) || tab < 0 || tab >= TABS.length) tab = 0;
   store.set('statsTab', tab);
-  const path = '/api/v1/stats?' + filterQuery(ctx.filters) + '&tab=' + tab;
   const head = d => [
     h('h1', {class: 'page-title'}, 'Statistiken'),
     h('div', {class: 'page-sub'}, d ? d.sub : ' '),
     filterBar(ctx),
   ];
   const tabBar = () => tabs(TABS, tab, i => { if (i !== tab) replaceRoute('#/stats/' + i); });
+  if (tab === HEAT) return renderHeat(ctx, head, tabBar);
+  const path = '/api/v1/stats?' + filterQuery(ctx.filters) + '&tab=' + tab;
   const show = d => ctx.main.replaceChildren(...head(d), ...(d.empty ? [emptyState(d.empty, 'stats')] : [tabBar(), ...body(ctx, d)]));
   const old = api.cached(path);
   if (old && !ctx.fresh) show(old);
@@ -31,6 +35,42 @@ export async function render(ctx) {
   const d = await api.get(path);
   if (!ctx.current()) return;
   show(d);
+}
+
+// ---- Heatmaps (wie heatTab in FragDesk): alle Matches einer Map mit den Filtern Modus und Zeitraum -----------------------
+// Ohne Map-Filter wird die Map hier gewählt (gemerkt wie app.heatMap in FragDesk), sonst gilt der Filter.
+async function renderHeat(ctx, head, tabBar) {
+  useCss('css/heat.css');
+  const pick = ctx.filters.map ? '' : store.get('heatMap', '');
+  const path = heatPath('stats', filterQuery(ctx.filters) + (pick ? '&pick=' + encodeURIComponent(pick) : ''));
+  const show = d => ctx.main.replaceChildren(...head(d), ...(d.noMatches ? [emptyState(d.noMatches, 'stats')] : [tabBar(), ...heatBody(ctx, d)]));
+  const old = ctx.fresh ? null : api.cached(path);
+  if (old) show(old);
+  else ctx.main.replaceChildren(...head(null), tabBar(), ...skeleton(36, 100, 360, 150));
+  let d;
+  try {
+    d = await api.get(path);
+  } catch (e) {
+    if (old && ctx.current() && e && e.status !== 401) { toast(e.message, true); return; }   // die gespeicherte Ansicht bleibt
+    throw e;
+  }
+  if (!ctx.current()) return;
+  if (old && JSON.stringify(old) === JSON.stringify(d)) return;   // unverändert: Auswahl und Vergrößerung bleiben
+  show(d);
+}
+
+function heatBody(ctx, d) {
+  const out = [];
+  if (d.maps.length) {   // Maps mit Heatmap-Daten, meistgespielte zuerst (wie FragDesk)
+    out.push(chips(d.maps.map(m => m.label), d.maps.findIndex(m => m.id === d.map), i => {
+      store.set('heatMap', d.maps[i].id);
+      replaceRoute('#/stats/' + HEAT);
+    }));
+  }
+  if (d.notice) out.push(notice('info', d.notice.title, d.notice.text));
+  const base = filterQuery(ctx.filters) + (!ctx.filters.map && d.map ? '&pick=' + encodeURIComponent(d.map) : '');
+  out.push(heatView(d, {kind: 'stats', base}));
+  return out;
 }
 
 function body(ctx, d) {

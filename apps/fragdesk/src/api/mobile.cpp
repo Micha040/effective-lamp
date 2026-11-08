@@ -443,6 +443,7 @@ void handle(Host& host, const Request& req, Response& res) {
             return;
         }
         if (!get) return res.error(405, "Nur GET");
+        if (p == "/api/v1/heat") return heatRoute(host, req, res);   // liest Dateien im Thread der Anfrage (view_heat.cpp)
         bool ok = host.withSource([&](Source& src) {
             ViewCtx c{src, req, host, src.me()};
             if (p == "/api/v1/info") viewInfo(c, res);

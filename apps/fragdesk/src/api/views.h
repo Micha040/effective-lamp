@@ -28,6 +28,11 @@ void viewMatch(ViewCtx& c, Response& res, const std::string& checksum);   // GET
 void viewStats(ViewCtx& c, Response& res);      // GET /api/v1/stats?mode=&period=&map=&tab=
 void viewMoments(ViewCtx& c, Response& res);    // GET /api/v1/moments
 
+// Heatmaps (view_heat.cpp): GET /api/v1/heat?match=<Prüfsumme> bzw. ?mode=&period=&map=&pick= plus Auswahl. Eigene
+// Route statt einer Ansicht: Nur das Zusammenstellen läuft über Host::withSource, Dateien liest und rechnet der Thread
+// der Anfrage (nie der UI-Thread von FragDesk).
+void heatRoute(Host& host, const Request& req, Response& res);
+
 // ---- Gemeinsame Helfer ------------------------------------------------------------------------------------------
 std::string hexColor(uint32_t rgb);   // 0xRRGGBB -> "#rrggbb"
 // Farbton eines Ratings wie in FragDesk: "good" (≥ 1,10), "bad" (< 0,90), "muted" (keins), sonst ""

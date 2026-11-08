@@ -1,14 +1,17 @@
-// FragDesk Handy-App – ein Match (wie page_match.cpp): Übersicht, Scoreboard, Runden, Waffen, Duelle, Utility, Momente.
-// Jeder Bereich ist eine eigene Anfrage (/api/v1/match/<Prüfsumme>?tab=…&player=…); der Kopf steht beim Wechseln
-// sofort da. Was FragDesk beim Darüberfahren erklärt, zeigt die App beim Tippen als Blatt von unten.
+// FragDesk Handy-App – ein Match (wie page_match.cpp): Übersicht, Scoreboard, Runden, Waffen, Duelle, Utility, Momente,
+// Heatmap. Jeder Bereich ist eine eigene Anfrage (/api/v1/match/<Prüfsumme>?tab=…&player=…, die Heatmap
+// /api/v1/heat?match=…); der Kopf steht beim Wechseln sofort da. Was FragDesk beim Darüberfahren erklärt, zeigt die App
+// beim Tippen als Blatt von unten.
 import {h, icon, card, chips, statTile, bars, tabs, sheet, emptyState, notice, skeleton, stars, toast, useCss} from '../ui.js';
 import {openPlayer} from './player.js';
+import {heatView, heatPath} from '../heatmap.js';
 import * as api from '../api.js';
 import {store, replaceRoute} from '../app.js';
 
-const TABS = ['Übersicht', 'Scoreboard', 'Runden', 'Waffen', 'Duelle', 'Utility', 'Momente'];   // Nummern wie in FragDesk
-const PER_PLAYER = [true, false, true, true, true, false, false];   // Bereiche mit „Werte von …“
-const SKEL = [[34, 430, 150, 200], [62, 430, 430], [34, 640], [34, 400, 280, 230], [34, 300, 640], [520], [40, 74, 74, 74]];
+const TABS = ['Übersicht', 'Scoreboard', 'Runden', 'Waffen', 'Duelle', 'Utility', 'Momente', 'Heatmap'];   // Nummern wie in FragDesk
+const HEAT = 7;   // eigene Schnittstelle (/api/v1/match kennt nur 0–6)
+const PER_PLAYER = [true, false, true, true, true, false, false, false];   // Bereiche mit „Werte von …“
+const SKEL = [[34, 430, 150, 200], [62, 430, 430], [34, 640], [34, 400, 280, 230], [34, 300, 640], [520], [40, 74, 74, 74], [100, 360, 150]];
 const heads = new Map();   // Kopf je Match aus der letzten Antwort
 let live = [];             // sichtbare sortierbare Tabellen (die beiden Teams im Scoreboard sortieren gemeinsam)
 
@@ -18,7 +21,8 @@ export async function render(ctx) {
   try { id = decodeURIComponent(id); } catch (e) { /* so lassen */ }
   const n = Number(ctx.params[1] || 0);
   const nav = {id, tab: Number.isInteger(n) && n >= 0 && n < TABS.length ? n : 0, player: ctx.query.get('player') || ''};
-  const path = `/api/v1/match/${encodeURIComponent(id)}?tab=${nav.tab}` + (nav.player ? '&player=' + encodeURIComponent(nav.player) : '');
+  const path = nav.tab === HEAT ? heatPath('match', 'match=' + encodeURIComponent(id))
+    : `/api/v1/match/${encodeURIComponent(id)}?tab=${nav.tab}` + (nav.player ? '&player=' + encodeURIComponent(nav.player) : '');
   const known = heads.get(id);
   ctx.title(known ? known.title : 'Match');
   const old = ctx.fresh ? null : api.cached(path);
@@ -303,7 +307,12 @@ function momentItem(nav, m, all) {
   return row;
 }
 
-const PAGES = [overviewTab, scoreboardTab, roundsTab, weaponsTab, duelsTab, utilityTab, momentsTab];
+// ---- Heatmap (wie tabHeatmap in FragDesk; Auswahl, Karte und Legende zeichnet heatmap.js) ------------------------------
+function heatTab(ctx, nav, d) {
+  return [heatView(d, {kind: 'match', base: 'match=' + encodeURIComponent(nav.id)})];
+}
+
+const PAGES = [overviewTab, scoreboardTab, roundsTab, weaponsTab, duelsTab, utilityTab, momentsTab, heatTab];
 
 // ---- Tabellen: waagerecht blätternd, erste Spalte bleibt stehen; Sortieren wie in FragDesk ------------------------------
 const TONES = {good: 'good', bad: 'bad', win: 'win', loss: 'loss', draw: 'draw', muted: 'tone-muted', dim: 'm-dim', t: 'm-t', ct: 'm-ct', acc: 'm-acc'};
