@@ -23,6 +23,7 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -102,6 +103,57 @@ def synth_match(i, rnd):
             'rounds': rounds, 'players': players, 'kills': kills, 'clutches': [], 'highlights': highlights}
 
 
+# Kartenwerte wie src/core/radar_maps.inc: linke obere Ecke, Breite, Grenze zur unteren Ebene (None = nur eine Ebene)
+RADARS = {'de_mirage': (-3230, 1713, 5120, None), 'de_inferno': (-2087, 3870, 5017.6, None), 'de_ancient': (-2953, 2164, 5120, None),
+          'de_nuke': (-3453, 2887, 7168, -495)}
+
+
+def synth_heat(m, rnd):
+    """Gültige Heatmap-Datei (FDHM, siehe src/core/heat.h) zu einem künstlichen Match: Kills aus dem Match, je Runde vier
+    Granaten und jede Sekunde alle Spieler – zufällig auf dem Radarbild verteilt, auf Karten mit zwei Ebenen die Hälfte
+    unten."""
+    def s(text):
+        b = text.encode('utf-8')
+        return struct.pack('<H', len(b)) + b
+    pos_x, pos_y, span, lower_z = RADARS[m['match']['map']]
+    players = m['players']
+    index = {p['steamId']: i for i, p in enumerate(players)}
+
+    def where(slot):
+        x = pos_x + rnd.uniform(0.25, 0.75) * span
+        y = pos_y - rnd.uniform(0.25, 0.75) * span
+        z = 0 if lower_z is None else lower_z + (-250 if slot % 2 else 250)
+        return struct.pack('<hhh', int(x), int(y), int(z))
+
+    def ct(slot, r):   # Team A beginnt als CT
+        return (players[slot]['team'] == 'A') == (r['sideA'] == 'CT')
+    rounds = {r['n']: r for r in m['rounds']}
+    out = bytearray(b'FDHM') + struct.pack('<HHf', 1, 0, 64.0) + s(m['match']['map'])
+    out += struct.pack('<H', len(players)) + b''.join(struct.pack('<Q', int(p['steamId'])) + s(p['name']) for p in players)
+    out += struct.pack('<H', 2) + s('') + s('AK-47')
+    out += struct.pack('<I', len(m['kills']))
+    for k in m['kills']:
+        r, ki, vi = rounds[k['r']], index[k['k']], index[k['v']]
+        flags = (1 if ct(ki, r) else 0) | (2 if ct(vi, r) else 0) | (4 if k['hs'] else 0)
+        out += struct.pack('<iBBBB', k['t'], ki, vi, flags, 1) + where(ki) + where(vi)
+    out += struct.pack('<I', 4 * len(m['rounds']))
+    for r in m['rounds']:
+        for g in range(4):
+            thrower = (r['n'] + g) % len(players)
+            out += struct.pack('<iiBBB', r['freezeEnd'] + 200 + g * 100, r['freezeEnd'] + 280 + g * 100, (1, 2, 4, 3)[g], thrower,
+                               1 if ct(thrower, r) else 0) + where(thrower) + where(thrower)
+    frames = bytearray()
+    count = 0
+    for r in m['rounds']:
+        for tick in range(r['freezeEnd'], r['end'], 64):
+            frames += struct.pack('<iB', tick, len(players))
+            for slot in range(len(players)):
+                frames += struct.pack('<BB', slot, 1 if ct(slot, r) else 0) + where(slot)
+            count += 1
+    out += struct.pack('<II', count, len(frames)) + frames + b'END!'
+    return bytes(out)
+
+
 def make_data(out):
     out = pathlib.Path(out)
     rnd = random.Random(7)
@@ -110,7 +162,8 @@ def make_data(out):
     for i in range(12):
         m = synth_match(i, rnd)
         (out / 'matches' / f"{m['checksum']}.json").write_text(json.dumps(m), encoding='utf-8')
-    (out / 'matches' / 'synth000.heat').write_bytes(b'FDHM\x01\x00\x00\x00' + bytes(rnd.randrange(256) for _ in range(20000)))
+        if i in (0, 3, 4):   # Heatmaps: zweimal Mirage, einmal Nuke (zwei Ebenen)
+            (out / 'matches' / f"{m['checksum']}.heat").write_bytes(synth_heat(m, rnd))
     clips = []
     for i, size in enumerate((1_300_000, 2_100_000, 2_900_000)):
         mp4 = out / 'videos' / f'Clip {i}.mp4'
@@ -408,6 +461,7 @@ def flow(srv, anon, port, matches, clips, data_dir):
         check(PA.get(f'/api/v1/match/{first}?tab={tab}').status == 200, f'match Tab {tab}')
     for tab in range(11):
         check(PA.get(f'/api/v1/stats?tab={tab}').status == 200, f'stats Tab {tab}')
+    heat_checks(PA, anon, matches, names)
     mo = PA.get('/api/v1/moments').json()
     vids = {v['id'] for v in mo['videos']['items']}
     check(vids == {v['id'] for v in clips} and mo['blocked'] == '', 'moments: eigene Videos, nie blockiert')
@@ -432,6 +486,7 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(info.get('matches') == 3 and info['me']['id'] == FRIEND, 'Freund: 3 Matches')
     check(sorted(m['id'] for m in PB.get('/api/v1/matches').json()['items']) == sorted(b_names), 'Freund: nur seine Matches')
     check(PB.get(f'/api/v1/match/{first}?tab=0').status == 404, 'Freund: fremdes Match 404')
+    check(PB.get(f'/api/v1/heat?match={first}').status == 404, 'Freund: fremde Heatmap 404')
     check(PB.get(f"/media/clip/{v0['id']}.mp4").status == 404 and PB.get(f"/media/thumb/{v0['id']}.jpg").status == 404, 'Freund: fremdes Video 404')
     check(PB.get('/api/v1/moments').json()['videos']['items'] == [], 'Freund: keine Videos')
     check(PA.get('/api/v1/info').json()['matches'] == len(names), 'A unverändert')
@@ -444,7 +499,9 @@ def flow(srv, anon, port, matches, clips, data_dir):
                 errors.append(path)
 
     threads = [threading.Thread(target=hammer, args=(PA, '/api/v1/stats?tab=0', 200)), threading.Thread(target=hammer, args=(PB, '/api/v1/overview', 200)),
-               threading.Thread(target=hammer, args=(PA, '/api/v1/matches', 200))]
+               threading.Thread(target=hammer, args=(PA, '/api/v1/matches', 200)),
+               threading.Thread(target=hammer, args=(PA, '/api/v1/heat?mode=0&period=2&layers=127&marks=1', 200)),
+               threading.Thread(target=hammer, args=(PA, f'/api/v1/heat?match={first}&layers=3', 200))]
     for t in threads:
         t.start()
     check(B.req('PUT', f'/api/v1/sync/match/{names[0]}/json', body=matches[names[0]]['json']).status == 200, 'Upload während Ansichten')
@@ -570,6 +627,44 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(A.req('DELETE', f"/api/v1/sync/clip/{v0['id']}").status == 200, 'Video löschen')
     check(PA.get(f"/media/clip/{v0['id']}.mp4").status == 404 and v0['id'] not in A.get('/api/v1/sync/state').json()['clips'], 'Video weg')
     check(A.req('POST', '/api/v1/account/logout').status == 200 and A.get('/api/v1/sync/state').status == 401, 'Admin meldet FragDesk ab')
+
+
+def heat_checks(PA, anon, matches, names):
+    """Heatmaps über fragdesk-server: ein Match, alle Schichten mit Punkten, Radarbild (ETag/304), untere Ebene, alle
+    Matches einer Map – die .heat-Dateien liest der Server im Thread der Anfrage."""
+    info = {c: json.loads(matches[c]['json']) for c in names}
+    with_heat = [c for c in names if matches[c]['heat'] and info[c].get('schema', 0) >= 2]
+    if not check(with_heat, 'Testdaten: Matches mit Heatmap'):
+        return
+    c = with_heat[0]
+    r = PA.get(f'/api/v1/heat?match={c}')
+    d = r.json() or {}
+    if not check(r.status == 200 and d.get('scope') == 'match' and d.get('empty') is None and d.get('grid', {}).get('n') == 128 and d['grid']['layers']
+                 and d['legend']['items'][0]['label'] == 'Aufenthalt' and d['head']['map'], f'heat: ein Match ({r.status} {r.body[:200]!r})'):
+        return
+    r = PA.get(f'/api/v1/heat?match={c}&layers=127&marks=1&throws=1')
+    d2 = r.json() or {}
+    check(r.status == 200 and len(d2.get('legend', {}).get('items', [])) == 7 and d2.get('marks') and d2['matches'][0]['id'] == c,
+          'heat: alle Schichten mit Punkten')
+    img = PA.get(d['radar']['image'])
+    check(img.status == 200 and img.header('Content-Type') == 'image/png' and img.body[:8] == b'\x89PNG\r\n\x1a\n', 'Radarbild')
+    check(PA.get(d['radar']['image'], headers={'If-None-Match': img.header('ETag')}).status == 304, 'Radarbild: 304 mit ETag')
+    check(anon.get(d['radar']['image']).status == 401 and anon.get(f'/api/v1/heat?match={c}').status == 401, 'Heatmap und Radarbild nur gekoppelt')
+    check(PA.get('/api/v1/heat?match=gibtsnicht').status == 404, 'heat: unbekanntes Match 404')
+    nuke = [x for x in with_heat if info[x]['match']['map'] == 'de_nuke']
+    if nuke:
+        r = PA.get(f'/api/v1/heat?match={nuke[0]}&lower=1&who=7')   # alle Spieler (künstlich: „Ich“ ist oben)
+        d3 = r.json() or {}
+        check(r.status == 200 and d3['filter']['lower'] is True and d3['ui']['levels'] == ['Obere Ebene', 'Untere Ebene'] and d3['grid']['layers']
+              and PA.get(d3['radar']['lowerImage']).status == 200, 'heat: untere Ebene (Nuke)')
+    # alle Matches einer Map (Statistiken): Matches mit mir und Heatmap-Daten auf dieser Map
+    m = info[c]['match']['map']
+    n = sum(1 for x in with_heat if info[x]['match']['map'] == m and any(p['steamId'] == ME for p in info[x]['players']))
+    r = PA.get(f'/api/v1/heat?mode=0&period=2&pick={m}')
+    d4 = r.json() or {}
+    want = f"{n} {'Match' if n == 1 else 'Matches'} auf"
+    check(r.status == 200 and d4.get('scope') == 'stats' and d4.get('map') == m and want in (d4.get('foot') or '') and any(x['id'] == m for x in d4['maps']),
+          f'heat: alle Matches einer Map ({d4.get("foot")!r}, erwartet {want!r})')
 
 
 def main():
