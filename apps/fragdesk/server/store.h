@@ -29,7 +29,7 @@ namespace fdsrv {
 constexpr int64_t kGiB = int64_t(1024) * 1024 * 1024;
 constexpr int64_t kDefaultLimit = 15 * kGiB;     // eingeladene Konten; Admins: 0 = unbegrenzt
 constexpr int64_t kMaxMatchFile = 4 << 20;        // .json und .heat
-constexpr int64_t kMaxReplayFile = 32 << 20;      // .replay (ein Match hat 0,5–3 MB)
+constexpr int64_t kMaxReplayFile = 16 << 20;      // .replay (ein Match hat 0,5–3 MB; Caddy nimmt laut install.sh bis 16 MB)
 constexpr int64_t kMaxChunk = 8 << 20;            // ein Stück eines Videos
 constexpr int64_t kMaxThumb = 1 << 20;
 constexpr int64_t kMaxClip = 4 * kGiB;            // ein Video insgesamt

@@ -23,6 +23,7 @@
 #include "mobile_host.h"
 #include "net.h"
 #include "recorder.h"
+#include "replay_maker.h"
 
 namespace fdw {
 
@@ -30,6 +31,7 @@ namespace {
 
 constexpr size_t kChunk = 4u << 20;          // Stück eines Videos (der Server nimmt bis 8 MB)
 constexpr int64_t kMaxMatchFile = 4 << 20;   // .json und .heat höchstens 4 MB
+constexpr int64_t kMaxReplayFile = 16 << 20;   // .replay höchstens 16 MB (ein Match hat 0,5–3 MB)
 constexpr size_t kMaxThumb = 1u << 20;       // Vorschaubild höchstens 1 MB
 constexpr ULONGLONG kPausePoll = 15000;      // in der Pause so oft nachsehen, ob CS2 noch läuft
 constexpr ULONGLONG kCs2Check = 2000;        // die Prozessliste höchstens alle 2 s ansehen
@@ -63,9 +65,10 @@ struct SyncClip {
 struct Snapshot {
     uint64_t epoch = 0;
     std::string url, token;
-    bool videos = true;
+    bool videos = true, replays = true;
     std::string name, steamId, profile;   // Profil jetzt und zuletzt gemeldet
     std::vector<std::string> matches;     // Prüfsummen, neueste zuerst
+    std::vector<std::wstring> demos;      // Demo je Match (für fehlende 2D-Daten)
     std::vector<SyncClip> clips;          // neueste zuerst
     std::vector<std::string> gone;        // in FragDesk gelöscht ("m:…", "c:…"), auf dem Server noch zu löschen
 };
@@ -93,6 +96,7 @@ struct Shared {
     std::atomic<HWND> hwnd{nullptr};
     std::atomic<bool> quit{false}, recording{false};
     std::atomic<bool> videos{true};   // „Videos hochladen“ – ausgeschaltet hört ein laufendes Video nach dem Stück auf
+    std::atomic<bool> replays{true};  // „2D-Ansicht hochladen“ – ausgeschaltet bricht auch das Erstellen ab
     std::atomic<uint64_t> epoch{1};   // ändert sich mit Modus und Konto: ein laufender Abgleich hört dann auf
     std::mutex mu;                    // schützt die Felder bis „finished“
     std::condition_variable cv;
@@ -211,17 +215,28 @@ struct RemoteClip {
     bool complete = false, thumb = false;
 };
 
+struct RemoteMatch {
+    int64_t json = -1, heat = -1, replay = 0;   // Bytes (replay 0 = fehlt)
+    bool noreplay = false;                      // FragDesk hat gemeldet: keine 2D-Daten möglich
+};
+
 struct Remote {
-    std::map<std::string, std::pair<int64_t, int64_t>> matches;   // Prüfsumme -> Bytes (.json, .heat)
+    std::map<std::string, RemoteMatch> matches;   // Prüfsumme ->
     std::map<std::string, RemoteClip> clips;
     int64_t used = -1, limit = 0;
+    bool replays = false;   // nimmt 2D-Daten an (ältere Server sagen dazu nichts)
 };
 
 bool parseState(const std::string& body, Remote& out) {
     json::Value v;
     if (!json::parse(body, v) || !v.isObject()) return false;
-    for (const auto& kv : v["matches"].obj)
-        out.matches[kv.first] = {int64_t(kv.second.getNumber("json", -1)), int64_t(kv.second.getNumber("heat", -1))};
+    for (const auto& kv : v["matches"].obj) {
+        RemoteMatch& m = out.matches[kv.first];
+        m.json = int64_t(kv.second.getNumber("json", -1));
+        m.heat = int64_t(kv.second.getNumber("heat", -1));
+        m.replay = int64_t(kv.second.getNumber("replay", 0));   // ältere Server kennen keine 2D-Daten: 0
+        m.noreplay = kv.second.getBool("noreplay");
+    }
     for (const auto& kv : v["clips"].obj) {
         RemoteClip c;
         c.size = int64_t(kv.second.getNumber("size"));
@@ -234,6 +249,7 @@ bool parseState(const std::string& body, Remote& out) {
         out.used = int64_t(q.getNumber("used", -1));
         out.limit = int64_t(q.getNumber("limit", 0));
     }
+    out.replays = v.getBool("replays");
     return true;
 }
 
@@ -254,8 +270,10 @@ public:
 private:
     struct LocalMatch {
         std::string checksum;
-        int64_t json = 0, heat = 0;
-        bool jsonOk = false, heatOk = false;
+        std::wstring demo;
+        int64_t json = 0, heat = 0, replay = 0;   // replay: lokale .replay (0 = keine)
+        int64_t remoteReplay = 0;
+        bool jsonOk = false, heatOk = false, noreplay = false;
     };
     struct LocalClip {
         const SyncClip* clip;
@@ -277,6 +295,14 @@ private:
     Fail profile();
     Fail removeGone(const Remote& rem);
     Fail uploadMatches(std::vector<LocalMatch>& todo);
+    Fail uploadReplays(std::vector<LocalMatch>& all);
+    Fail uploadReplay(LocalMatch& m);
+    Fail makeReplays(std::vector<LocalMatch>& all);
+    Fail markNoReplay(LocalMatch& m, const char* reason);
+    bool newRequest() {   // ein neuer Anstoß wartet (z. B. frisch ausgewertetes Match): Erstellen unterbrechen
+        std::lock_guard<std::mutex> lk(sh_.mu);
+        return sh_.pending;
+    }
     Fail uploadClip(const SyncClip& c, int64_t size, const RemoteClip* e, int index, int count);
     void uploadThumb(const SyncClip& c);
     void account();
@@ -359,22 +385,41 @@ Fail Pass::run() {
     }
     st.used = rem.used;
     st.limit = rem.limit;
+    // 2D-Daten nur, wenn der Server sie annimmt – sonst würde FragDesk sie umsonst aus den Demos erstellen und hochschicken
+    const bool replays = s_.replays && rem.replays;
+    st.replaysOld = s_.replays && !rem.replays;
+    if (st.replaysOld && sh_.rejected.insert("server.replays").second)
+        logLine(L"Server: kennt noch keine 2D-Daten – auf dem Server den Installationsbefehl noch einmal ausführen (aktualisiert)");
 
     // Was liegt hier, was fehlt dort?
-    std::vector<LocalMatch> todo;
-    for (const auto& cs : s_.matches) {
+    std::vector<LocalMatch> all;
+    for (size_t i = 0; i < s_.matches.size(); ++i) {
+        const std::string& cs = s_.matches[i];
         LocalMatch m;
         m.checksum = cs;
+        m.demo = i < s_.demos.size() ? s_.demos[i] : std::wstring();
         m.json = fileSize(Library::matchFile(cs));
         if (m.json <= 0) continue;   // gerade gelöscht
         m.heat = fileSize(heatFile(cs));
+        m.replay = std::max<int64_t>(0, fileSize(replayFile(cs)));
         auto it = rem.matches.find(cs);
-        m.jsonOk = it != rem.matches.end() && it->second.first == m.json;
-        m.heatOk = m.heat <= 0 || (it != rem.matches.end() && it->second.second == m.heat);
+        m.jsonOk = it != rem.matches.end() && it->second.json == m.json;
+        m.heatOk = m.heat <= 0 || (it != rem.matches.end() && it->second.heat == m.heat);
+        if (it != rem.matches.end()) {
+            m.remoteReplay = it->second.replay;
+            m.noreplay = it->second.noreplay;
+        }
         ++st.matchesTotal;
         if (m.jsonOk) ++st.matchesDone;
-        if (!m.jsonOk || !m.heatOk) todo.push_back(m);
+        if (replays && !(m.noreplay && m.replay <= 0)) {
+            ++st.replaysTotal;
+            if (m.remoteReplay > 0) ++st.replaysDone;
+        }
+        all.push_back(m);
     }
+    std::vector<LocalMatch> todo;
+    for (const auto& m : all)
+        if (!m.jsonOk || !m.heatOk) todo.push_back(m);
     std::vector<LocalClip> clips;
     if (s_.videos)
         for (const auto& c : s_.clips) {
@@ -392,6 +437,13 @@ Fail Pass::run() {
     if (f != Fail::None) return f;
     f = uploadMatches(todo);
     if (f != Fail::None) return f;
+    for (auto& m : all)   // was gerade hochgeladen wurde, ist jetzt auch dort
+        for (const auto& t : todo)
+            if (t.checksum == m.checksum) m.jsonOk = t.jsonOk;
+    if (replays) {   // 2D-Daten, die es in FragDesk schon gibt (klein, schnell)
+        f = uploadReplays(all);
+        if (f != Fail::None) return f;
+    }
     int count = st.clipsTotal - st.clipsDone, index = 0;
     for (const auto& lc : clips) {
         if (!sh_.videos) break;
@@ -402,6 +454,10 @@ Fail Pass::run() {
             continue;
         }
         f = uploadClip(*lc.clip, lc.size, e, ++index, count);
+        if (f != Fail::None) return f;
+    }
+    if (replays) {   // zum Schluss: fehlende 2D-Daten aus den Demos erstellen (langsam, deshalb nach den Videos)
+        f = makeReplays(all);
         if (f != Fail::None) return f;
     }
     if (changed_) account();
@@ -499,6 +555,111 @@ Fail Pass::uploadMatches(std::vector<LocalMatch>& todo) {
             changed_ = true;
         }
         progress();
+    }
+    return Fail::None;
+}
+
+// 2D-Daten, die in FragDesk liegen und auf dem Server fehlen (oder anders groß sind)
+Fail Pass::uploadReplays(std::vector<LocalMatch>& all) {
+    for (auto& m : all) {
+        if (!sh_.replays) break;
+        if (!m.jsonOk || m.replay <= 0 || m.replay == m.remoteReplay) continue;
+        Fail f = uploadReplay(m);
+        if (f != Fail::None) return f;
+    }
+    return Fail::None;
+}
+
+Fail Pass::uploadReplay(LocalMatch& m) {
+    std::string key = m.checksum + ".replay|" + std::to_string(m.replay);
+    if (sh_.rejected.count(key)) return Fail::None;
+    if (m.replay > kMaxReplayFile) {
+        logLine(L"Server: %hs ist zu groß (%lld Bytes) – bleibt nur in FragDesk", key.c_str(), static_cast<long long>(m.replay));
+        sh_.rejected.insert(key);
+        return Fail::None;
+    }
+    std::string body;
+    if (!readFile(replayFile(m.checksum), body, size_t(kMaxReplayFile)) || body.empty()) return Fail::None;   // gerade weg: beim nächsten Mal
+    st.current = L"2D-Ansicht " + std::to_wstring(st.replaysDone + 1) + L" von " + std::to_wstring(st.replaysTotal) + L" · lädt hoch …";
+    progress();
+    HttpResponse r = call(L"PUT", "api/v1/sync/match/" + m.checksum + "/replay", body, "application/octet-stream", true);
+    Fail f = check(r);
+    if (f == Fail::Item) {
+        logLine(L"Server: %hs abgelehnt – %ls", key.c_str(), text.c_str());
+        sh_.rejected.insert(key);
+        return Fail::None;
+    }
+    if (f != Fail::None) return f;
+    if (m.remoteReplay <= 0) ++st.replaysDone;
+    if (m.noreplay) {   // der Server hat die Markierung mit den 2D-Daten verworfen
+        m.noreplay = false;
+        ++st.replaysTotal;
+    }
+    m.remoteReplay = m.replay;
+    ++uploads;
+    changed_ = true;
+    progress();
+    return Fail::None;
+}
+
+// Dem Server melden, dass es für dieses Match keine 2D-Daten geben wird (die Handy-App sagt dann, warum)
+Fail Pass::markNoReplay(LocalMatch& m, const char* reason) {
+    fdapi::JsonW j;
+    j.obj().kv("reason", reason).end();
+    HttpResponse r = call(L"PUT", "api/v1/sync/match/" + m.checksum + "/noreplay", j.str(), "application/json");
+    Fail f = check(r);
+    if (f == Fail::Item) {   // ältere Server kennen das nicht: egal
+        sh_.rejected.insert(m.checksum + ".noreplay");
+        return Fail::None;
+    }
+    if (f != Fail::None) return f;
+    m.noreplay = true;
+    --st.replaysTotal;
+    progress();
+    return Fail::None;
+}
+
+// Fehlende 2D-Daten aus den Demos erstellen und hochladen: neueste Matches zuerst, eins nach dem anderen, mit niedrigster
+// Priorität. Startet CS2 oder nimmt FragDesk auf, bricht fdanalyze ab (Pause, später geht es weiter); wartet ein neuer
+// Anstoß, kommt erst der dran.
+Fail Pass::makeReplays(std::vector<LocalMatch>& all) {
+    int missing = 0, done = 0;
+    for (const auto& m : all)
+        if (m.jsonOk && m.remoteReplay <= 0 && m.replay <= 0 && !m.noreplay) ++missing;
+    for (auto& m : all) {
+        if (!m.jsonOk || m.remoteReplay > 0 || m.replay > 0 || m.noreplay || sh_.rejected.count(m.checksum + ".make")) continue;
+        if (!sh_.replays || newRequest()) break;
+        if (cancelled()) return Fail::Cancel;
+        if (blocked()) return Fail::Paused;
+        if (m.demo.empty() || !fileExists(m.demo)) {   // Demo weg (gelöscht, anderer PC, Laufwerk ab)
+            sh_.rejected.insert(m.checksum + ".make");
+            if (sh_.rejected.count(m.checksum + ".noreplay")) continue;
+            Fail f = markNoReplay(m, "demo");
+            if (f != Fail::None) return f;
+            continue;
+        }
+        st.current = L"2D-Ansicht " + std::to_wstring(++done) + L" von " + std::to_wstring(missing) + L" · wird aus der Demo erstellt …";
+        progress(true);
+        ULONGLONG t0 = GetTickCount64();
+        std::string code = makeReplay(m.demo, replayFile(m.checksum), IDLE_PRIORITY_CLASS, [this] { return cancelled() || blocked() || !sh_.replays; });
+        if (code == "CANCELLED") {
+            if (cancelled()) return Fail::Cancel;
+            if (blocked()) return Fail::Paused;
+            break;   // „2D-Ansicht hochladen“ ausgeschaltet
+        }
+        if (!code.empty()) {
+            logLine(L"Server: 2D-Daten für %ls gehen nicht (%hs)", m.demo.c_str(), code.c_str());
+            sh_.rejected.insert(m.checksum + ".make");   // in dieser Sitzung nicht noch einmal
+            if (!replayErrorFinal(code) && code != "NOT_FOUND") continue;   // vielleicht später (z. B. fdanalyze fehlt)
+            Fail f = markNoReplay(m, code == "NOT_FOUND" ? "demo" : "failed");
+            if (f != Fail::None) return f;
+            continue;
+        }
+        logLine(L"Server: 2D-Daten erstellt in %.1f s: %hs", (GetTickCount64() - t0) / 1000.0, m.checksum.c_str());
+        m.replay = std::max<int64_t>(0, fileSize(replayFile(m.checksum)));
+        if (m.replay <= 0) continue;
+        Fail f = uploadReplay(m);
+        if (f != Fail::None) return f;
     }
     return Fail::None;
 }
@@ -689,8 +850,8 @@ void runOnce(Shared& sh, const Snapshot& s) {
             }
             st.state = SyncStatus::Idle;
             if (pass.uploads || pass.deletes || sh.lastLogged != SyncStatus::Idle)
-                logLine(L"Server: abgeglichen – %d von %d Matches, %d von %d Videos (%d hochgeladen, %d gelöscht)", st.matchesDone, st.matchesTotal,
-                        st.clipsDone, st.clipsTotal, pass.uploads, pass.deletes);
+                logLine(L"Server: abgeglichen – %d von %d Matches, %d von %d Videos, 2D-Daten %d von %d (%d hochgeladen, %d gelöscht)",
+                        st.matchesDone, st.matchesTotal, st.clipsDone, st.clipsTotal, st.replaysDone, st.replaysTotal, pass.uploads, pass.deletes);
             sh.lastLogged = SyncStatus::Idle;
             auto* e = new SyncEvent();
             e->kind = SyncEvent::Synced;
@@ -928,6 +1089,8 @@ void ServerSync::apply() {
     bool on = ms.server && !d.app.renderMode && validToken(ms.srv.token) && parseServerUrl(ms.srv.url, url);
     std::string key = on ? ms.srv.url + "|" + ms.srv.token : std::string();
     d.sh->hwnd = d.app.hwnd;
+    d.sh->replays = ms.srv.replays;
+    d.app.lib.setWithReplay(on && ms.srv.replays);   // neue Matches: 2D-Daten gleich beim Auswerten
     if (key != d.key) {
         d.key = key;
         ++d.sh->epoch;   // ein laufender Abgleich für das alte Konto hört auf
@@ -960,12 +1123,16 @@ void ServerSync::request(int delayMs, bool manual) {
     snap->url = srv.url;
     snap->token = srv.token;
     snap->videos = srv.videos;
+    snap->replays = srv.replays;
     snap->name = d.app.meName.empty() ? std::string("Spieler") : narrow(d.app.meName);
     snap->steamId = d.app.me;
     snap->profile = srv.profile;
     snap->gone = srv.gone;
     for (const auto& m : d.app.lib.matches)
-        if (safeChecksum(m->checksum)) snap->matches.push_back(m->checksum);
+        if (safeChecksum(m->checksum)) {
+            snap->matches.push_back(m->checksum);
+            snap->demos.push_back(widen(m->demoPath));
+        }
     for (const Clip& c : d.app.clips) {
         SyncClip sc;
         sc.path = c.path;
@@ -979,6 +1146,7 @@ void ServerSync::request(int delayMs, bool manual) {
         snap->clips.push_back(std::move(sc));
     }
     d.sh->videos = srv.videos;
+    d.sh->replays = srv.replays;
     {
         std::lock_guard<std::mutex> lk(d.sh->mu);
         d.sh->snap = snap;
@@ -1075,9 +1243,10 @@ void ServerSync::disconnect() {
         return;
     std::wstring label = serverLabel();
     if (validToken(srv.token)) runJob(d.sh, d.job(Job::Logout));   // Schlüssel auf dem Server ungültig machen
-    bool videos = srv.videos;
+    bool videos = srv.videos, replays = srv.replays;
     srv = ServerSettings();
     srv.videos = videos;
+    srv.replays = replays;
     d.app.saveSettings();
     apply();
     logLine(L"Server: getrennt von %ls", label.c_str());
@@ -1146,6 +1315,9 @@ LRESULT ServerSync::onMessage(WPARAM, LPARAM lp) {
                 next.matchesTotal = d.status.matchesTotal;
                 next.clipsDone = d.status.clipsDone;
                 next.clipsTotal = d.status.clipsTotal;
+                next.replaysDone = d.status.replaysDone;
+                next.replaysTotal = d.status.replaysTotal;
+                next.replaysOld = d.status.replaysOld;
             }
             d.status = next;
             if (next.used >= 0) {   // wird mit dem nächsten Speichern gemerkt
@@ -1183,9 +1355,10 @@ LRESULT ServerSync::onMessage(WPARAM, LPARAM lp) {
         case SyncEvent::Registered: {
             // Die Einladung ist jetzt verbraucht: das Konto immer übernehmen
             d.connecting = false;
-            bool videos = srv.videos;
+            bool videos = srv.videos, replays = srv.replays;
             srv = ServerSettings();
             srv.videos = videos;
+            srv.replays = replays;
             srv.url = e->url;
             srv.token = e->token;
             srv.user = e->user;

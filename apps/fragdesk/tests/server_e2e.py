@@ -381,6 +381,7 @@ def flow(srv, anon, port, matches, clips, data_dir):
     used = sum(len(m['json']) + len(m['heat'] or b'') for m in matches.values())
     check(st['quota']['used'] == used and st['quota']['limit'] == 0, f'sync/state: belegt {st["quota"]["used"]} = {used}')
     check(all(st['matches'][c]['replay'] == 0 and 'noreplay' not in st['matches'][c] for c in names), 'sync/state: noch keine 2D-Daten')
+    check(st.get('replays') is True, 'sync/state: Server nimmt 2D-Daten an')
 
     # 2D-Daten (.replay): ganz geprüft, nur zu Matches auf dem Server; Markierung „keine 2D-Daten möglich“
     rp_name = next((c for c in names if matches[c]['replay']), names[0])
@@ -389,8 +390,8 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=b'GIF89a' + b'x' * 100).status == 400, 'keine 2D-Daten: 400')
     check(A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=rp[:-10]).status == 400, 'abgeschnittene 2D-Daten: 400')
     check(A.req('PUT', '/api/v1/sync/match/nichtda/replay', body=rp).status == 404, '2D-Daten ohne Match: 404')
-    r = A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=b'FDRP' + b'x' * (32 * MB))
-    check(r.status in (0, 413), f'2D-Daten über 32 MB: abgelehnt ({r.status})')
+    r = A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=b'FDRP' + b'x' * (16 * MB))
+    check(r.status in (0, 413), f'2D-Daten über 16 MB: abgelehnt ({r.status})')
     r = A.req('PUT', f'/api/v1/sync/match/{rp_name}/replay', body=rp)
     check(r.status == 200 and r.json()['size'] == len(rp), f'2D-Daten hochladen ({r.status})')
     check(A.req('PUT', f'/api/v1/sync/match/{no_name}/noreplay', body={'reason': 'egal'}).status == 400, 'Markierung: Grund geprüft')

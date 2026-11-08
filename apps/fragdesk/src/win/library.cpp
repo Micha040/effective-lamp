@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "common.h"
+#include "replay_maker.h"
 
 namespace fdw {
 
@@ -312,6 +313,11 @@ void Library::analyzeAll(bool retryFailed) {
         if (d.state == DemoFile::State::New || (retryFailed && d.state == DemoFile::State::Failed)) analyze(d.path);
 }
 
+void Library::setWithReplay(bool on) {
+    std::lock_guard<std::mutex> lock(mu_);
+    withReplay_ = on;
+}
+
 bool Library::busy() const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mu_));
     return !queue_.empty() || !running_.empty();
@@ -356,6 +362,7 @@ void Library::worker() {
     int counter = 0;
     for (;;) {
         std::wstring path;
+        bool withReplay = false;
         {
             std::unique_lock<std::mutex> lock(mu_);
             cv_.wait(lock, [&] { return quit_ || !queue_.empty(); });
@@ -363,6 +370,7 @@ void Library::worker() {
             path = queue_.front();
             queue_.pop_front();
             running_ = path;
+            withReplay = withReplay_;
         }
         auto send = [&](AnalysisEvent::Kind k, const std::wstring& text, std::unique_ptr<fd::Match> m = nullptr) {
             auto* e = new AnalysisEvent();
@@ -378,6 +386,7 @@ void Library::worker() {
         wchar_t tmpName[64];
         swprintf(tmpName, 64, L"tmp-%lu-%d.json", GetCurrentProcessId(), ++counter);
         std::wstring out = joinPath(matchesDir(), tmpName);
+        std::wstring replayTmp = out.substr(0, out.size() - 5) + L".replay";   // 2D-Daten (nur mit withReplay)
 
         std::string code;
         std::wstring failText;
@@ -389,6 +398,7 @@ void Library::worker() {
             CreatePipe(&rd, &wr, &sa, 0);
             SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
             std::wstring cmd = L"\"" + exe + L"\" -demo \"" + path + L"\" -out \"" + out + L"\" -temp \"" + tempDir() + L"\"";
+            if (withReplay) cmd += L" -replay \"" + replayTmp + L"\"";
             STARTUPINFOW si = {};
             si.cb = sizeof si;
             si.dwFlags = STARTF_USESTDHANDLES;
@@ -458,6 +468,9 @@ void Library::worker() {
                     DeleteFileW(heatTmp.c_str());
                     DeleteFileW(heatFinal.c_str());
                 }
+                // 2D-Daten aus demselben Lauf; fehlen sie, bleibt eine vorhandene (dieselbe Demo) stehen
+                if (withReplay && fileExists(replayTmp) && !MoveFileExW(replayTmp.c_str(), replayFile(m->checksum).c_str(), MOVEFILE_REPLACE_EXISTING))
+                    logLine(L"2D-Daten nicht übernommen: %ls", replayTmp.c_str());
                 if (MoveFileExW(out.c_str(), final.c_str(), MOVEFILE_REPLACE_EXISTING)) {
                     logLine(L"Ausgewertet: %ls -> %ls", path.c_str(), final.c_str());
                     send(AnalysisEvent::Done, L"", std::move(m));
@@ -469,6 +482,8 @@ void Library::worker() {
         }
         DeleteFileW(out.c_str());
         DeleteFileW((out.substr(0, out.size() - 5) + L".heat").c_str());   // falls nicht übernommen
+        DeleteFileW(replayTmp.c_str());
+        DeleteFileW((replayTmp + L".part").c_str());
         if (!failText.empty()) send(AnalysisEvent::Failed, failText);
         {
             std::lock_guard<std::mutex> lock(mu_);

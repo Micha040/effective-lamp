@@ -2,8 +2,9 @@
 // Freunde einladen. Spezifikation: FragDesk-Server v1, Abschnitt „FragDesk (Windows)“.
 //
 // Abgleich in einem eigenen Thread mit niedriger Priorität (auch für die Festplatte): /sync/state holen, zuerst löschen,
-// was in FragDesk gelöscht wurde (macht Platz), dann fehlende Matches (.json, .heat) und Videos in Stücken à 4 MB
-// (fortsetzbar), Vorschaubild und „done“. Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder Löschung und alle
+// was in FragDesk gelöscht wurde (macht Platz), dann fehlende Matches (.json, .heat), vorhandene 2D-Daten (.replay),
+// Videos in Stücken à 4 MB (fortsetzbar), Vorschaubild und „done“. Zum Schluss erstellt er fehlende 2D-Daten aus den
+// Demos – eins nach dem anderen, mit niedrigster Priorität, und nie, solange CS2 läuft oder FragDesk aufnimmt. Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder Löschung und alle
 // 15 Minuten. Pause, solange CS2 läuft (nur der Prozessname per Toolhelp) oder FragDesk aufnimmt; bei Fehlern neuer
 // Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen Schnappschuss mit; Ergebnisse kommen als
 // WM_APP_SYNC zurück. Die Aktionen der Einstellungen (verbinden, koppeln, einladen, abmelden) laufen in kurzen eigenen
@@ -27,6 +28,8 @@ struct SyncStatus {
     int64_t retryAt = 0;       // Offline: nächster Versuch (Sekunden seit 1970)
     bool counted = false;      // Zahlen vom Server schon da
     int matchesDone = 0, matchesTotal = 0, clipsDone = 0, clipsTotal = 0;
+    int replaysDone = 0, replaysTotal = 0;   // 2D-Daten auf dem Server (total: ohne die, die es nicht geben kann)
+    bool replaysOld = false;   // der Server ist zu alt für 2D-Daten (kennt „replays“ in /sync/state nicht)
     std::wstring current;      // Running: was gerade hochgeladen wird
     int64_t used = -1, limit = 0;   // Speicher in Bytes (−1 = unbekannt; limit 0 = unbegrenzt)
 };

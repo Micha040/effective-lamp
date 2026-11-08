@@ -178,8 +178,8 @@ Konsolen-Schnittstelle, über die FragDesk es gesteuert hat.
 
 Deine Stats und Clips auf dem Handy – als Web-App, die FragDesk selbst ausliefert: kein App Store, kein Server, keine
 Kosten. Zu sehen ist dasselbe wie in FragDesk, fürs Handy umgebaut: **Übersicht**, **Matches** mit allen Bereichen,
-**Statistiken** samt Verlauf und deine **Momente und Videos**. Heatmaps und die 2D-Ansicht kommen noch. Ansehen und
-Aufnehmen in CS2 bleibt am PC.
+**Statistiken** samt Verlauf, deine **Momente und Videos** und jede Runde in der **2D-Ansicht**. Heatmaps kommen
+noch. Ansehen und Aufnehmen in CS2 bleibt am PC.
 
 Zwei Wege: **Direkt vom PC** (so wie hier beschrieben – der PC muss an sein) oder über einen **[eigenen
 Server](#eigener-server)** (ein paar Euro im Monat; der PC muss nicht an sein, auch mit Freunden teilbar). Umschalten
@@ -202,6 +202,13 @@ offen (minimiert reicht).
 Teilen › „Video sichern“, dann ist es in Fotos. Mit einer HTTPS-Adresse (siehe unten) geht es direkt über „Teilen ›
 Video sichern“, und die App startet auch ohne Verbindung mit den zuletzt geladenen Daten.
 
+**2D-Ansicht auf dem Handy:** Im Match oben auf **2D-Ansicht**, im Bereich *Runden* auf eine Runde oder auf einen
+Moment tippen (der startet 2 Sekunden vorher). Abspielen in ½× bis 4×, Runde wählen, einen Spieler antippen, um ihm zu
+folgen („Nah“ zoomt mit); im Querformat steht die Karte groß neben der Steuerung. Gezeichnet wird nur beim Abspielen
+und solange die App zu sehen ist – angehalten kostet sie nichts. Hat ein Match noch keine 2D-Daten, erstellt FragDesk
+sie beim ersten Öffnen aus der Demo – ein paar Sekunden im Hintergrund, danach geht es von selbst weiter. Ohne Demo
+geht es nicht; das Handy sagt dann, warum.
+
 **Sicherheit:** Aus, bis du es einschaltest. Nur gekoppelte Handys kommen an Daten und Videos: Gekoppelt wird mit einem
 6-stelligen Code, der nur 10 Minuten gilt und nach 5 Fehlversuchen verfällt; danach meldet sich das Handy mit einem
 langen Zufallsschlüssel an. Gekoppelte Handys siehst und entfernst du unter Einstellungen › Handy-App. FragDesk spricht
@@ -209,8 +216,9 @@ dabei nur mit deinem Handy im Heimnetz bzw. über Tailscale, nichts geht ins Int
 Anti-Cheat hat das nichts zu tun.
 
 **Rücksicht aufs Spiel:** Solange CS2 läuft, schickt FragDesk keine Videos (die Stats schon – das sind nur ein paar
-KB), damit dein Ping nicht leidet. Im Leerlauf kostet die Handy-App nichts; Vorschaubilder der Videos entstehen einmal
-und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
+KB), damit dein Ping nicht leidet, und liest keine Demos für die 2D-Ansicht – das Handy zeigt dann „Wird erstellt,
+sobald CS2 zu ist“ und macht danach von selbst weiter. Im Leerlauf kostet die Handy-App nichts; Vorschaubilder der
+Videos entstehen einmal und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
 
 **HTTPS über Tailscale (für Profis):** `tailscale serve --bg 7420` in einer Eingabeaufforderung auf dem PC liefert eine
 Adresse wie `https://dein-pc.dein-tailnet.ts.net`. Adresse kopieren und in FragDesk bei „Adresse fürs Handy“ auf
@@ -227,8 +235,8 @@ nicht an sein und Tailscale brauchst du nicht. Hochgeladen wird **nie, während 
 
 **Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64), einer eigenen IPv4-Adresse und SSH-Zugang als root.
 Klein reicht völlig, z. B. der kleinste netcup-VPS („VPS nano“) für rund 3–4 € im Monat samt IPv4 – Preise ändern
-sich, beim Anbieter nachsehen. Platz: ein Match belegt 100–400 KB (Auswertung und Heatmap), ein Clip 2–10 MB; 60 GB
-reichen für Tausende Matches und mehrere Tausend Clips.
+sich, beim Anbieter nachsehen. Platz: ein Match belegt 100–400 KB (Auswertung und Heatmap) plus 0,5–3 MB für die
+2D-Ansicht, ein Clip 2–10 MB; 60 GB reichen für Tausende Matches und mehrere Tausend Clips.
 
 **Installieren – ein Befehl** (am PC im Terminal `ssh root@<IP-des-Servers>`, dann auf dem Server):
 
@@ -262,6 +270,14 @@ FragDesk neue Matches und Videos hoch (beim Start, nach jeder Auswertung und Auf
 Stücken, ein Abbruch schadet nicht) und zeigt dort Server, Konto, Speicher und Stand. **„Handy verbinden“** zeigt wie
 gewohnt einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“ bleiben Videos auf Wunsch am PC;
 **„Trennen“** meldet FragDesk vom Server ab.
+
+**2D-Ansicht über den Server:** Der Schalter **„2D-Ansicht hochladen“** (an) lädt die Daten der 2D-Ansicht mit hoch,
+rund 2 MB pro Match. Neue Matches bekommen sie gleich beim Auswerten (im selben Durchgang, kaum langsamer); für ältere
+erstellt FragDesk sie nach und nach aus der Demo – eins nach dem anderen, mit niedrigster Priorität und nie, während
+CS2 läuft oder aufgenommen wird. Matches, deren Demo nicht mehr da ist, bleiben ohne 2D-Ansicht; die Handy-App sagt
+dann, warum. Ausgeschaltet bleibt die 2D-Ansicht am PC, und FragDesk erstellt dafür nichts im Hintergrund. Dafür
+braucht der Server eine aktuelle Version – ein älterer nimmt keine 2D-Daten an; FragDesk sagt das dann in den
+Einstellungen, und der Installationsbefehl von oben, noch einmal ausgeführt, aktualisiert ihn.
 
 **Löschen:** Löschst du in FragDesk ein Match oder Video, verschwindet es beim nächsten Abgleich auch vom Server. Fehlt
 etwas nur in FragDesk – neuer PC, Video im Explorer gelöscht, um am PC Platz zu sparen –, bleibt es auf dem Server.
@@ -306,7 +322,9 @@ fragdesk`. Caddy bleibt installiert.
 
 **Ressourcen:** Im Leerlauf schläft der Server (einmal pro Minute räumt er kurz auf) und braucht wenige MB
 Arbeitsspeicher. Die Matches eines Kontos lädt er erst, wenn ein Handy fragt (rund 150 KB pro Match), und gibt sie
-nach 15 Minuten ohne Handy wieder frei. Caddy komprimiert JSON und Text, Videos nicht. Uhrzeiten in der Handy-App
+nach 15 Minuten ohne Handy wieder frei. Für die 2D-Ansicht liest er die Datei des Matches, das gerade ein Handy
+abspielt (eine zur Zeit), und schickt immer nur eine Runde (30–150 KB); auch sie gibt er nach 15 Minuten wieder frei.
+Caddy komprimiert JSON und Text, Videos nicht. Uhrzeiten in der Handy-App
 rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh` Europe/Berlin
 (`--timezone <Zone>` ändert das).
 
@@ -320,8 +338,8 @@ rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `ins
   deinem PC ab und verbindet sich mit keinem Server. Für Matches startest du CS2 danach wie gewohnt neu.
 - Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet. Die [Handy-App](#handy-app)
   (aus, bis du sie einschaltest) verbindet nur Handys, die du selbst gekoppelt hast – im Heimnetz oder über Tailscale.
-  Nur wenn du einen [eigenen Server](#eigener-server) einrichtest, lädt FragDesk Auswertungen und Videos dorthin – und
-  nirgendwo sonst hin.
+  Nur wenn du einen [eigenen Server](#eigener-server) einrichtest, lädt FragDesk Auswertungen, 2D-Daten und Videos
+  dorthin – und nirgendwo sonst hin.
 
 ## Ressourcen
 
@@ -329,10 +347,11 @@ rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `ins
   falls die Handy-App an ist – auf Anfragen vom Handy.
 - Ausgewertet wird in einem eigenen Prozess (`fdanalyze.exe`) mit niedriger Priorität: ein paar Sekunden lang
   ca. 150–250 MB Arbeitsspeicher, danach ist er wieder weg. Er liest die Demo dafür zweimal gleichzeitig (Statistiken
-  und Heatmap/Zielen) – auf einem Mehrkern-Prozessor kaum langsamer als einmal.
+  und Heatmap/Zielen, mit eigenem Server auch die 2D-Ansicht) – auf einem Mehrkern-Prozessor kaum langsamer als einmal.
 - Ausgewertete Matches liegen als kleine JSON-Dateien (50–200 KB pro Match) in `%LOCALAPPDATA%\FragDesk\matches`,
-  daneben die Heatmap-Daten (30–200 KB) und die Daten der 2D-Ansicht für die Matches, die du dir so angesehen hast. Die Demo selbst brauchst du danach nur
-  noch zum Ansehen und Aufnehmen in CS2.
+  daneben die Heatmap-Daten (30–200 KB) und die Daten der 2D-Ansicht (0,5–3 MB) für die Matches, die du dir am PC
+  oder Handy angesehen hast – mit eigenem Server und „2D-Ansicht hochladen“ für alle. Die Demo selbst brauchst du
+  danach nur noch zum Ansehen und Aufnehmen in CS2.
 - Die 2D-Ansicht zeichnet nur, solange sie abspielt und das Fenster zu sehen ist (rund 30 Bilder pro Sekunde),
   angehalten oder minimiert kostet sie nichts. Heatmaps rechnet FragDesk nur, wenn sich die Auswahl ändert; die
   Daten vieler Matches liest es im Hintergrund.

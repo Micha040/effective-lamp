@@ -433,8 +433,9 @@ function roundStrip(v) {
     if (on) sel = b;
   }
   if (sel) {
-    const want = sel.offsetLeft - (strip.clientWidth - sel.offsetWidth) / 2;
-    if (sel.offsetLeft < strip.scrollLeft || sel.offsetLeft + sel.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = want;
+    // Lage relativ zur Leiste (offsetLeft hängt im Querformat am Raster, nicht an der Leiste)
+    const sr = strip.getBoundingClientRect(), br = sel.getBoundingClientRect();
+    if (br.left < sr.left || br.right > sr.right) strip.scrollLeft += br.left - sr.left - (sr.width - br.width) / 2;
   }
 }
 
@@ -840,8 +841,8 @@ function draw(v, dt) {
     for (let i = lo; i < R.shotT.length && R.shotT[i] <= t; i++) shot.add(R.shotP[i]);
   }
 
-  // Spieler (die auf der anderen Ebene nur als blasser Ring)
-  const hits = [];
+  // Spieler (die auf der anderen Ebene nur als blasser Ring); Namen erst danach, damit kein Punkt sie verdeckt
+  const hits = [], tags = [];
   const pulse = reduceMotion.matches ? 0.5 : 0.5 + 0.5 * Math.sin(t / tr * 8);
   for (const p of ps) {
     const info = R.players.get(p.p);
@@ -884,8 +885,9 @@ function draw(v, dt) {
     }
     if (p.fl & F_BOMB) rect(g, x + rad - 2, y - rad - 4, 8, 6, 1.5, '#e5483b');
     if (p.fl & (F_DEFUSING | F_PLANTING)) ring(g, x, y, rad + 6 + pulse * 3, 'rgba(255,210,90,0.86)', 1.6);
-    if (v.names || focus) label(g, shortName(info.name, 12), x, y + rad + 2, focus ? '#ffffff' : '#e6eaf0', 11);
+    if (v.names || focus) tags.push({text: shortName(info.name, 12), x, y, focus, me});
   }
+  placeLabels(g, tags, rad);
   v.hits = hits;
   const empty = !ps.length && (t >= r.freeze || !R.ticks.length);
   if (v.el.empty.classList.contains('hidden') === empty) v.el.empty.classList.toggle('hidden', !empty);
@@ -916,6 +918,29 @@ function rect(g, x, y, w, hh, r, fill) {
   else g.rect(x, y, w, hh);
   g.fillStyle = fill;
   g.fill();
+}
+
+// Namen ohne Überlappung (beim Spawn stehen alle beieinander): der verfolgte Spieler zuerst, dann du, dann der Rest.
+// Passt ein Name weder unter noch über seinen Punkt, fällt er weg – Antippen oder „Nah“ zeigt ihn.
+const textW = new Map();
+function placeLabels(g, tags, rad) {
+  if (!tags.length) return;
+  const size = 11, th = size + 2;
+  g.font = `600 ${size}px ${FONT}`;
+  tags.sort((a, b) => (b.focus - a.focus) || (b.me - a.me));
+  const used = [];
+  for (const t of tags) {
+    let w = textW.get(t.text);
+    if (w === undefined) textW.set(t.text, w = g.measureText(t.text).width + 2);
+    const x0 = t.x - w / 2, free = y => !used.some(u => x0 < u.x1 && x0 + w > u.x0 && y < u.y1 && y + th > u.y0);
+    let y0 = [t.y + rad + 2, t.y - rad - 2 - th].find(free);
+    if (y0 === undefined) {
+      if (!t.focus) continue;
+      y0 = t.y + rad + 2;
+    }
+    used.push({x0, x1: x0 + w, y0, y1: y0 + th});
+    label(g, t.text, t.x, y0, t.focus ? '#ffffff' : '#e6eaf0', size);
+  }
 }
 
 // Text mit dunklem Schatten (auf der Karte lesbar)

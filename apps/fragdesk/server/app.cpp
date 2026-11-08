@@ -431,6 +431,7 @@ void App::sync(const Request& req, Response& res) {
             j.key(kv.first.c_str()).obj().ki("size", c.mp4 >= 0 ? c.mp4 : std::max<int64_t>(0, c.part)).kb("complete", c.complete()).kb("thumb", c.thumb >= 0).end();
         }
         j.end().key("quota").obj().ki("used", store_.used(u)).ki("limit", store_.limit(u)).end();
+        j.kb("replays", true);   // nimmt 2D-Daten an – fehlt bei älteren Servern, dann lädt FragDesk keine hoch
         j.end();
         res.body = j.take();
         return;
@@ -466,7 +467,7 @@ void App::sync(const Request& req, Response& res) {
         std::string marker;   // NoReplay: nur der Grund, sonst der Körper der Anfrage (ohne Kopie)
         const std::string& body = mp == MatchPart::NoReplay ? marker : req.body;
         if (mp == MatchPart::Replay) {   // 2D-Ansicht: ganz lesen – was hier liegt, muss die Handy-App auch zeigen können
-            if (int64_t(body.size()) > kMaxReplayFile) return res.error(413, "Die Datei ist zu groß (höchstens 32 MB).");
+            if (int64_t(body.size()) > kMaxReplayFile) return res.error(413, "Die Datei ist zu groß (höchstens 16 MB).");
             if (body.size() < 8 || body.compare(0, 4, "FDRP") != 0) return res.error(400, "Das sind keine 2D-Daten von FragDesk.");
             fd::Replay r;
             std::string err;
