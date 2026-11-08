@@ -1,5 +1,6 @@
-// FragDesk – Handy-App: ein Match (wie page_match.cpp). Pro Anfrage ein Bereich plus der Kopf des Matches; ohne
-// Heatmap, 2D-Ansicht und die Knöpfe, die nur am PC gehen (Aufnehmen, In CS2 ansehen, Neu auswerten, Ordner).
+// FragDesk – Handy-App: ein Match (wie page_match.cpp). Pro Anfrage ein Bereich plus der Kopf des Matches; die
+// Heatmap (Tab 7) liefert view_heat.cpp, die 2D-Ansicht view_replay.cpp. Ohne die Knöpfe, die nur am PC gehen
+// (Aufnehmen, In CS2 ansehen, Neu auswerten, Ordner).
 //
 //   GET /api/v1/match/<Prüfsumme>?tab=<0–6>&player=<SteamID>
 //

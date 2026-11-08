@@ -1,5 +1,5 @@
-// FragDesk – Handy-App: Statistiken (wie page_stats.cpp). Gebaut wird nur der gewählte Tab (tab=0–10 wie in FragDesk,
-// die Heatmaps fehlen noch). Ein Tab ist eine Liste von Blöcken, die die App der Reihe nach zeigt:
+// FragDesk – Handy-App: Statistiken (wie page_stats.cpp). Gebaut wird nur der gewählte Tab (tab=0–10 wie in FragDesk;
+// Tab 11, die Heatmaps, liefert view_heat.cpp). Ein Tab ist eine Liste von Blöcken, die die App der Reihe nach zeigt:
 //   group  – Kennzahlen einer Gruppe mit Gesamt, als T und als CT (wie statTable)
 //   table  – Tabelle (Waffen, Maps): Spalten, Zellen mit Text und Rohwert zum Sortieren, Sortierung wie in FragDesk
 //   bars   – Balkenliste (wie barList)

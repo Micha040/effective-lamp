@@ -341,8 +341,8 @@ int main() {
     if (mk.size() == 2) {
         CHECK(mk[0].arr.size() == 8 && std::fabs(mk[0].arr[0].num - 3422) <= 1 && std::fabs(mk[0].arr[1].num - 2633) <= 1 &&
               mk[0].arr[2].num == fd::HlKills && mk[0].arr[3].num == 1 && mk[0].arr[4].num == 0 && mk[0].arr[5].num == 1 &&
-              mk[0].arr[6].num == 2000 - 128 && mk[0].arr[7].str == "Runde 1 · 0:15\nMicha tötet Gegner (AK-47, Kopfschuss)");
-        CHECK(mk[1].arr.size() == 10 && mk[1].arr[2].num == fd::HlSmoke && mk[1].arr[3].num == 7 && mk[1].arr[6].num == 1200 - 128 &&
+              mk[0].arr[6].num == 2000 && mk[0].arr[7].str == "Runde 1 · 0:15\nMicha tötet Gegner (AK-47, Kopfschuss)");
+        CHECK(mk[1].arr.size() == 10 && mk[1].arr[2].num == fd::HlSmoke && mk[1].arr[3].num == 7 && mk[1].arr[6].num == 1200 &&
               mk[1].arr[7].str == "Runde 1 · 0:04\nSmoke von Micha");
     }
     CHECK(h2["matches"].arr.size() == 1 && h2["matches"].arr[0].getString("id") == "n1" && h2.getString("marksNote").empty());

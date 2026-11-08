@@ -21,7 +21,7 @@
 //         beide Ebenen wie in FragDesk.
 //   marks: [u, v, Schicht, Art, Match, Runde, Tick, Tipp, wu, wv] – u, v in 1/10000 des Radarbilds; Art: 1 Punkt auf
 //         dieser Ebene (antippbar, mit Tipp), 2 Wurfstelle auf dieser Ebene (dann wu, wv), 4 Wurflinie; Match: Index in
-//         matches [{id, label}]; Tick: Start der 2D-Ansicht, 2 s vor dem Ereignis (wie App::openReplayAt).
+//         matches [{id, label}]; Tick: Zeitpunkt des Ereignisses (die 2D-Ansicht startet 2 s davor, wie App::openReplayAt).
 //
 // Ressourcen: Im Thread der Daten (FragDesk: UI-Thread, Host::withSource) wird nur zusammengestellt, was billig ist –
 // Matches, Runden, Pfade. Die .heat-Dateien liest und rechnet der Thread der Anfrage, immer nur eine Auswertung zur
@@ -80,7 +80,6 @@ struct HeatData {
     fd::HeatSet set;                // die Tipps stehen nicht in set.marks, sondern in tips: ein Block statt Tausender kleiner
     std::string tips;
     std::vector<uint32_t> tipAt;    // Beginn je Punkt, am Ende das Ende des letzten
-    std::vector<double> tickrate;   // je Match (Sprung in die 2D-Ansicht)
     size_t bytes = 0;               // ungefährer Speicherbedarf
 
     std::string tip(size_t i) const { return tips.substr(tipAt[i], tipAt[i + 1] - tipAt[i]); }
@@ -374,7 +373,6 @@ std::shared_ptr<HeatData> build(Host& host, const Plan& p, const std::vector<int
         fd::addMatchHeat(one, f.info, h, *p.radar, p.me);
         const int mi = int(d->set.matches.size());
         d->set.matches.push_back({f.info.checksum, f.label});
-        d->tickrate.push_back(f.info.tickrate);
         d->set.hasMe = d->set.hasMe || one.hasMe;
         d->set.points.insert(d->set.points.end(), one.points.begin(), one.points.end());
         for (fd::HeatMark& mk : one.marks) {
@@ -601,8 +599,7 @@ void writeData(JsonW& j, const Plan& p, const HeatData& d, const Params& prm) {
     j.key("marks").arr();
     for (const auto& [i, kind] : list) {
         const fd::HeatMark& m = set.marks[i];
-        double tr = m.match >= 0 && size_t(m.match) < d.tickrate.size() ? d.tickrate[size_t(m.match)] : 64;
-        int tick = std::max(0, m.tick - int(2 * (tr > 0 ? tr : 64)));   // kurz davor, wie App::openReplayAt
+        int tick = std::max(0, m.tick);   // Zeitpunkt des Ereignisses – die 2D-Ansicht beginnt selbst 2 s davor (replay.js)
         j.arr().integer(coord(m.u)).integer(coord(m.v)).integer(m.layer).integer(kind).integer(m.match).integer(m.round).integer(tick);
         j.str(kind & 1 ? d.tip(i) : std::string());
         if (kind & 2) j.integer(coord(m.fu)).integer(coord(m.fv));

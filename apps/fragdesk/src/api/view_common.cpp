@@ -196,7 +196,7 @@ void viewInfo(ViewCtx& c, Response& res) {
     for (const auto& kv : count)
         j.obj().kv("id", kv.first).kv("name", fd::mapName(kv.first)).kv("color", hexColor(fd::mapColor(kv.first))).ki("count", kv.second).end();
     j.end();
-    j.key("features").obj().kb("heatmaps", false).kb("replay", false).end();
+    j.key("features").obj().kb("heatmaps", true).kb("replay", true).end();
     j.end();
     res.body = j.take();
 }
