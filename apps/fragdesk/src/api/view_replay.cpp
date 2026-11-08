@@ -545,8 +545,9 @@ void noReplay(Host& host, Response& res, const MatchInfo& mi, const std::string&
                            0);
         if (reason == "failed") return message(res, false, kImpossible, "FragDesk konnte aus der Demo dieses Matches keine 2D-Daten erstellen.", 0);
         return message(res, false, "2D-Ansicht noch nicht da",
-                       "Die 2D-Daten dieses Matches lädt FragDesk noch hoch – sobald dein PC an ist und CS2 nicht läuft. Für ältere Matches "
-                       "erstellt FragDesk sie dafür aus der Demo (Einstellungen › Handy-App › „2D-Ansicht hochladen“).",
+                       "Die 2D-Daten dieses Matches lädt FragDesk am PC noch hoch – sobald FragDesk dort offen ist und CS2 nicht läuft. "
+                       "Für ältere Matches erstellt FragDesk sie dafür aus der Demo (Einstellungen › Handy-App › „2D-Ansicht hochladen“ "
+                       "muss an sein).",
                        0, "Nochmal nachsehen");
     }
     ReplayState st = host.prepareReplay(mi.checksum, mi.demo, broken, retry);
