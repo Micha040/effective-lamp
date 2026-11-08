@@ -1,8 +1,10 @@
 #!/bin/sh
 # Baut FragDesk.exe (MinGW-w64, x64, statisch gelinkt) und fdanalyze.exe (Go, für Windows übersetzt).
-# Aufruf: ./build.sh            beides bauen
-#         ./build.sh app        nur FragDesk.exe
-#         ./build.sh analyzer   nur fdanalyze.exe
+# Aufruf: ./build.sh                  beides bauen
+#         ./build.sh app              nur FragDesk.exe
+#         ./build.sh analyzer         nur fdanalyze.exe
+#         ./build.sh analyzer-linux   fdanalyze für Linux x86_64 (build/fdanalyze-linux-x64, statisch) – für
+#                                     „Demos automatisch laden“ auf dem eigenen Server (lädt install.sh aus dem Release)
 set -e
 cd "$(dirname "$0")"
 OUT=build
@@ -37,4 +39,14 @@ if [ "$WHAT" = all ] || [ "$WHAT" = analyzer ]; then
   # Lizenztexte aller eingebauten Go-Module (liegt dem Paket bei)
   python3 tools/notices.py $OUT/THIRD-PARTY-NOTICES.txt
   ls -la $OUT/fdanalyze.exe
+fi
+
+if [ "$WHAT" = analyzer-linux ]; then
+  command -v go >/dev/null || { echo "FEHLER: Go fehlt (https://go.dev/dl/, Version laut analyzer/go.mod)" >&2; exit 1; }
+  cd analyzer
+  if [ ! -f go.sum ] && [ -z "$GOFLAGS" ]; then go mod download && go mod tidy; fi
+  # ohne cgo: eine statische Datei, die auf jedem Linux x86_64 läuft (Debian, Ubuntu …)
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o ../$OUT/fdanalyze-linux-x64 .
+  cd ..
+  ls -la $OUT/fdanalyze-linux-x64
 fi

@@ -4,15 +4,19 @@
 Startet den Server auf einem freien Port (7451–7459, oder FD_TEST_PORT) und spielt den ganzen Ablauf durch:
 Einladung über die Befehlszeile, Registrieren, Matches, 2D-Daten und Videos hochladen (in Stücken, fortsetzen, 409),
 Kontingent (507), Handy koppeln, Ansichten nur mit den Daten des eigenen Kontos, zwei Konten getrennt,
-Admin (Einladen, Limit, Entfernen), Grenzen gegen Raten, Abmelden, Neustart mit allen Daten.
+Admin (Einladen, Limit, Entfernen), Grenzen gegen Raten, Abmelden, Neustart mit allen Daten – und „Demos automatisch
+laden“: Handy-Einstellungen, Steam-Bot (Admin), ein nachgebauter Helfer (wie fragdesk-fetch, ohne Steam) holt den
+Auftrag, meldet die Anmeldung und lädt Ergebnisse hoch.
 
   python3 tests/server_e2e.py --bin build/fragdesk-server-linux-x64 --data <Testdaten> --tmp <leerer Ordner>
+          [--analyzer build/fdanalyze-linux-x64 --demo <Demo>]   der Helfer lädt echte Auswertungen dieser Demo hoch
   python3 tests/server_e2e.py --make-data <Ordner>   künstliche Testdaten (matches/, clips.json, videos/) erzeugen
 
 Testdaten wie bei tests/mobile_dev.cpp: matches/*.json (+ .heat, .replay), clips.json mit path/title/match/highlight/map/
 created/seconds, daneben je ein .jpg zum .mp4, settings.json mit der eigenen SteamID.
 """
 import argparse
+import bz2
 import hashlib
 import http.client
 import json
@@ -266,10 +270,12 @@ class Server:
     def __init__(self, binary, data, port, log):
         self.binary, self.data, self.port, self.log, self.proc = binary, data, port, log, None
 
-    def start(self):
+    def start(self, fetch='on'):
+        """fetch: FRAGDESK_FETCH wie in /etc/default/fragdesk (on = Helfer eingerichtet, node = Node.js fehlt …)"""
         logf = open(self.log, 'ab')
+        env = dict(os.environ, FRAGDESK_FETCH=fetch)
         self.proc = subprocess.Popen([self.binary, 'serve', '--data', self.data, '--listen', f'127.0.0.1:{self.port}',
-                                      '--url', f'http://127.0.0.1:{self.port}/', '--min-free', '1'], stdout=logf, stderr=logf)
+                                      '--url', f'http://127.0.0.1:{self.port}/', '--min-free', '1'], stdout=logf, stderr=logf, env=env)
         for _ in range(100):
             if Client(self.port).get('/api/v1/health').status == 200:
                 return
@@ -335,6 +341,350 @@ def upload_clip(c, clip, chunk=MB):
     return c.req('POST', f"/api/v1/sync/clip/{clip['id']}/done", body=dict(meta, total=total))
 
 
+# ---- Demos automatisch laden: nachgebauter Helfer ---------------------------------------------------------------------
+OPTS = {}   # --analyzer, --demo
+AUTH = 'ABCD-EFGHI-12AB'                         # Authentifizierungscode (geheim)
+MASK = '•' * 4 + '-' + '•' * 5 + '-12AB'
+SHARE = 'CSGO-rfymV-6yTRU-kvN6S-mkOYF-XTkDA'     # Freigabecodes
+SHARE2 = 'CSGO-qAQS4-hUAmk-eOzmO-BzS7q-m3LHA'
+SHARE3 = 'CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE'
+FRIEND_AUTH = 'WXYZ-12345-ABCD'
+BOT_PASSWORD = 'Pa55-geheim!'
+BOT_TOKEN = 'eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiI3NjU2MTE5OTAwMDAwMDAwMSIsImV4cCI6MTk5OTk5OTk5OX0.c2lnbmF0dXJlLWZ1ZXItdGVzdHM'
+BOT_KEY = '0123456789abcdef0123456789abcdef'
+GUARD = 'ab1cd'
+
+
+class FakeHelper:
+    """Spricht wie fragdesk-fetch mit dem Server: nur über 127.0.0.1, mit dem Schlüssel aus local.key (ohne X-FragDesk)."""
+
+    def __init__(self, port, data_dir):
+        self.c = Client(port)
+        self.key = (pathlib.Path(data_dir) / 'local.key').read_text().strip()
+
+    def req(self, method, sub, body=None, key=None, headers=None):
+        h = {'X-FragDesk-Local': self.key if key is None else key}
+        h.update(headers or {})
+        return self.c.req(method, '/api/v1/local/fetch/' + sub, body=body, headers=h, fd=False)
+
+    def job(self):
+        r = self.req('GET', 'job')
+        return (r.json() or {}) if r.status == 200 else {'status': r.status}
+
+    def post(self, sub, body):
+        return self.req('POST', sub, body=body)
+
+    def upload(self, account, checksum, files):
+        """Ergebnisse eines Matches: json, heat, replay – fehlende Dateien sind kein Fehler"""
+        return {what: self.req('PUT', f'{account}/match/{checksum}/{what}', body=files[what]).status
+                for what in ('json', 'heat', 'replay') if files.get(what)}
+
+
+def analyzed_match(tmp):
+    """Auswertung wie im Helfer: fdanalyze (Linux) mit niedrigster Priorität und GOMEMLIMIT auf eine .dem.bz2 – eine Kopie
+    der Test-Demo, das Original wird nur gelesen. Ohne --analyzer/--demo ein künstliches Match."""
+    analyzer, demo = OPTS.get('analyzer'), OPTS.get('demo')
+    if analyzer and demo:
+        work = pathlib.Path(tmp) / 'fetch-work'
+        (work / 'tmp').mkdir(parents=True, exist_ok=True)
+        packed = work / 'match.dem.bz2'
+        if demo.endswith('.bz2'):
+            shutil.copyfile(demo, packed)
+        else:
+            with open(demo, 'rb') as fin, bz2.open(packed, 'wb', compresslevel=1) as fout:
+                shutil.copyfileobj(fin, fout, 4 * MB)
+        t = time.time()
+        r = subprocess.run(['nice', '-n', '19', analyzer, '-demo', str(packed), '-out', str(work / 'out.json'), '-replay', str(work / 'out.replay'),
+                            '-temp', str(work / 'tmp')], capture_output=True, text=True, timeout=900, env=dict(os.environ, GOMEMLIMIT='512MiB'))
+        print(f'  fdanalyze: {time.time() - t:.1f} s für {os.path.getsize(packed) // MB} MB (.dem.bz2)', flush=True)
+        if check(r.returncode == 0 and 'DONE' in r.stdout, f'fdanalyze wertet die Demo aus ({r.stdout[-300:]!r} {r.stderr[-300:]!r})'):
+            files = {'json': (work / 'out.json').read_bytes()}
+            for what, name in (('heat', 'out.heat'), ('replay', 'out.replay')):
+                files[what] = (work / name).read_bytes() if (work / name).exists() else None
+            shutil.rmtree(work)   # wie der Helfer: Demo und Zwischendateien weg
+            return json.loads(files['json'])['checksum'], files
+    rnd = random.Random(99)
+    m = synth_match(40, rnd)
+    m['checksum'] = 'autodl040'
+    return m['checksum'], {'json': json.dumps(m).encode(), 'heat': synth_heat(m, rnd), 'replay': synth_replay(m['match']['map'])}
+
+
+def autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp):
+    """Demos automatisch laden: Handy (jedes Konto), Steam-Bot (Admin), Helfer (127.0.0.1 mit local.key)."""
+    H = FakeHelper(port, data_dir)
+    fetch_dir = pathlib.Path(data_dir) / 'fetch'
+    wake = fetch_dir / 'wake'
+    steam_json = pathlib.Path(data_dir) / 'steam.json'
+    stamp = lambda: wake.stat().st_mtime_ns if wake.exists() else 0
+    a_id, b_id = ja['user']['id'], jb['user']['id']
+    check(fetch_dir.is_dir() and os.stat(fetch_dir).st_mode & 0o777 == 0o700, 'fetch/ angelegt (0700)')
+
+    # Handy: Ausgangslage ohne Bot
+    r = PA.get('/api/v1/me/autodl')
+    d = r.json() or {}
+    keys = {'enabled', 'authCodeMasked', 'knownCode', 'steamId', 'lastCheck', 'lastNew', 'lastError', 'fetched', 'botReady', 'status'}
+    check(r.status == 200 and keys <= set(d) and d['enabled'] is False and d['botReady'] is False and d['steamId'] == ME and d['authCodeMasked'] == '',
+          f'me/autodl: Felder ({d})')
+    check('Server verwalten › Steam-Bot' in d.get('status', ''), f'me/autodl (Admin): Bot einrichten ({d.get("status")})')
+    d = PB.get('/api/v1/me/autodl').json() or {}
+    check(d.get('status', '').startswith('Der Admin muss erst den Steam-Bot einrichten'), f'me/autodl (Freund): Admin muss erst … ({d.get("status")})')
+    check(anon.get('/api/v1/me/autodl').status == 401 and Client(port, token=A.token).get('/api/v1/me/autodl').status == 401, 'me/autodl nur mit Handy')
+    check(PA.req('PUT', '/api/v1/me/autodl', body={'authCode': AUTH, 'knownCode': SHARE, 'enabled': True}, fd=False).status == 403, 'me/autodl: X-FragDesk nötig')
+    for body, what in (({'authCode': 'ABCD-EFGH-12AB', 'knownCode': SHARE, 'enabled': True}, 'Authentifizierungscode'),
+                       ({'authCode': AUTH, 'knownCode': 'CSGO-abc', 'enabled': True}, 'Freigabecode'),
+                       ({'authCode': AUTH, 'knownCode': 'CSGO-abcde-FGHIJ-23456-kmnop-QRSTU', 'enabled': True}, 'Freigabecode mit I (gibt es nicht)'),
+                       ({'enabled': True}, 'Codes fehlen')):
+        r = PA.req('PUT', '/api/v1/me/autodl', body=body)
+        check(r.status == 400 and (r.json() or {}).get('error'), f'me/autodl: {what} geprüft ({r.status} {r.body[:120]!r})')
+    # Konto ohne Spieler (keine SteamID): 400 mit Hinweis
+    inv = A.req('POST', '/api/v1/admin/invite', body={}).json()
+    rd = anon.req('POST', '/api/v1/account/register', body={'invite': inv['code'], 'name': 'Ohne Spieler', 'steamId': ''}).json() or {}
+    pd = Client(port, token=rd.get('token')).req('POST', '/api/v1/sync/pairing').json() or {}
+    r = anon.req('POST', '/api/v1/pair', body={'code': pd.get('code')})
+    PD = Client(port, cookie=(r.header('Set-Cookie') or '').split(';')[0].split('=', 1)[-1])
+    r = PD.req('PUT', '/api/v1/me/autodl', body={'authCode': AUTH, 'knownCode': SHARE, 'enabled': True})
+    check(r.status == 400 and 'Spieler wählen' in (r.json() or {}).get('error', ''), f'me/autodl ohne SteamID: 400 ({r.body[:120]!r})')
+    check('Spieler wählen' in (PD.get('/api/v1/me/autodl').json() or {}).get('status', ''), 'me/autodl ohne SteamID: Hinweis')
+    check(A.req('DELETE', f"/api/v1/admin/users/{rd['user']['id']}").status == 200, 'Konto ohne Spieler wieder entfernt')
+
+    # Einschalten (klein geschrieben, mit Leerzeichen): gespeichert, Code nur maskiert
+    r = PA.req('PUT', '/api/v1/me/autodl', body={'authCode': ' abcd-efghi-12ab ', 'knownCode': SHARE, 'enabled': True})
+    d = r.json() or {}
+    check(r.status == 200 and d.get('enabled') is True and d['authCodeMasked'] == MASK and d['knownCode'] == SHARE and AUTH.encode() not in r.body,
+          f'me/autodl: eingeschaltet, Code maskiert ({d})')
+    check(AUTH.encode() not in PA.get('/api/v1/me/autodl').body, 'me/autodl: Code nie im Klartext')
+    check(stamp() == 0, 'ohne Bot: Helfer nicht geweckt')
+    check(PA.req('POST', '/api/v1/me/autodl/check').status == 409, 'Jetzt prüfen ohne Bot: 409')
+
+    # Admin: Steam-Bot einrichten
+    r = PA.get('/api/v1/admin/steam')
+    s = r.json() or {}
+    check(r.status == 200 and s['bot']['loggedIn'] is False and s['apiKeySet'] is False and s['login']['state'] == 'idle' and s['accounts'] == 1
+          and s['lastRun']['at'] == 0 and s.get('helper') == '', f'admin/steam: Ausgangslage ({s})')
+    check(PB.get('/api/v1/admin/steam').status == 403 and B.get('/api/v1/admin/steam').status == 403, 'admin/steam nur für Admins')
+    check(PA.req('PUT', '/api/v1/admin/steam/apikey', body={'key': 'zu-kurz'}).status == 400, 'API-Schlüssel geprüft')
+    r = PA.req('PUT', '/api/v1/admin/steam/apikey', body={'key': BOT_KEY})
+    check(r.status == 200 and r.json()['apiKeySet'] is True and BOT_KEY.upper().encode() not in r.body, 'API-Schlüssel gespeichert (nicht in der Antwort)')
+    check(steam_json.exists() and os.stat(steam_json).st_mode & 0o777 == 0o600 and BOT_KEY.upper() in steam_json.read_text(), 'steam.json (0600) mit dem Schlüssel')
+    check(PA.req('POST', '/api/v1/admin/steam/code', body={'code': GUARD}).status == 409, 'Code ohne Anmeldung: 409')
+    check(PA.req('POST', '/api/v1/admin/steam/login', body={'user': '', 'password': 'x'}).status == 400, 'Anmeldung: Benutzer nötig')
+    check(PA.req('POST', '/api/v1/admin/steam/login', body={'user': 'meinbot', 'password': ''}).status == 400, 'Anmeldung: Passwort nötig')
+    r = PA.req('POST', '/api/v1/admin/steam/login', body={'user': 'meinbot', 'password': BOT_PASSWORD})
+    s = r.json() or {}
+    check(r.status == 200 and s.get('login', {}).get('state') == 'working' and BOT_PASSWORD.encode() not in r.body, f'Anmeldung angefragt ({s.get("login")})')
+    check(stamp() > 0 and re.fullmatch(r'\d{10}\.\d{3}\n', wake.read_text()), f'Helfer geweckt (fetch/wake: {wake.read_text() if wake.exists() else None!r})')
+    check(PA.req('POST', '/api/v1/admin/steam/code', body={'code': GUARD}).status == 409, 'Code, bevor Steam einen will: 409')
+
+    # Helfer: nur 127.0.0.1 mit Schlüssel; Passwort und Code je genau einmal
+    check(H.req('GET', 'job', key='falsch').status == 403, 'Helfer: falscher Schlüssel 403')
+    check(H.req('GET', 'job', headers={'X-Forwarded-For': '192.0.2.1'}).status == 404, 'Helfer: nicht über Caddy')
+    job = H.job()
+    lg = job.get('login') or {}
+    check(lg.get('user') == 'meinbot' and lg.get('password') == BOT_PASSWORD and 'code' in lg and lg['code'] is None, 'Auftrag: Anmeldung mit Passwort')
+    check(job.get('bot') == {'refreshToken': '', 'apiKey': BOT_KEY.upper()}, f'Auftrag: Bot ohne Token, mit Schlüssel ({job.get("bot")})')
+    check(job.get('accounts') == [{'id': a_id, 'steamId': ME, 'authCode': AUTH, 'knownCode': SHARE}], f'Auftrag: nur eingeschaltete Konten ({job.get("accounts")})')
+    lg = H.job().get('login') or {}
+    check(lg.get('user') == 'meinbot' and 'password' in lg and lg['password'] is None, 'Passwort nur einmal herausgegeben')
+    check(H.post('login', {'state': 'bogus'}).status == 400, 'login: state geprüft')
+    check(H.post('login', {'state': 'need-code', 'hint': '', 'codeType': 'email'}).status == 200, 'Helfer: need-code (E-Mail)')
+    s = PA.get('/api/v1/admin/steam').json()['login']
+    check(s['state'] == 'need-code' and s['codeType'] == 'email' and s['hint'], f'Admin sieht need-code ({s})')
+    check(PA.req('POST', '/api/v1/admin/steam/code', body={'code': 'abc'}).status == 400, 'Code: 5 Zeichen')
+    r = PA.req('POST', '/api/v1/admin/steam/code', body={'code': GUARD})
+    check(r.status == 200 and r.json()['login']['state'] == 'working' and GUARD.upper().encode() not in r.body, 'Code geschickt')
+    lg = H.job().get('login') or {}
+    check(lg.get('code') == GUARD.upper() and lg.get('password') is None, f'Code für den Helfer bereit ({lg.get("code")!r})')
+    check((H.job().get('login') or {}).get('code', 'x') is None, 'Code nur einmal herausgegeben')
+    r = H.post('login', {'state': 'need-confirm', 'hint': 'In der Steam-App bestätigen.'})
+    check(r.status == 200 and PA.get('/api/v1/admin/steam').json()['login']['state'] == 'need-confirm', 'need-confirm')
+    r = H.post('login', {'state': 'done', 'hint': '', 'refreshToken': BOT_TOKEN, 'botName': 'meinbot', 'botSteamId': '76561199000000001',
+                         'tokenUntil': 1999999999000})   # Millisekunden (Date.now()) rechnet der Server um
+    check(r.status == 200, f'Helfer: Anmeldung fertig ({r.status} {r.body[:100]!r})')
+    s = PA.get('/api/v1/admin/steam').json()
+    check({k: s['bot'][k] for k in ('name', 'steamId', 'loggedIn', 'tokenUntil')} == {'name': 'meinbot', 'steamId': '76561199000000001', 'loggedIn': True, 'tokenUntil': 1999999999}
+          and s['bot'].get('needsLogin') is False and s['login']['state'] == 'done'
+          and 'meinbot' in s['login']['hint'] and s['ready'] is True, f'Bot angemeldet ({s})')
+    check(BOT_TOKEN in steam_json.read_text() and BOT_TOKEN not in (pathlib.Path(data_dir) / 'server.json').read_text(), 'Token nur in steam.json')
+    job = H.job()
+    check(job.get('login') is None and job.get('bot') == {'refreshToken': BOT_TOKEN, 'apiKey': BOT_KEY.upper()}, 'Auftrag: Bot fertig, keine Anmeldung mehr')
+    check(H.post('login', {'state': 'need-code', 'codeType': 'app'}).status == 409, 'nach der Anmeldung keine Zwischenstände mehr')
+
+    # Handy: bereit; „Jetzt prüfen“ weckt den Helfer (höchstens alle 30 s)
+    d = PA.get('/api/v1/me/autodl').json()
+    check(d['botReady'] is True and d.get('ready') is True and d['status'] == 'Eingeschaltet – die erste Prüfung kommt gleich.', f'bereit ({d["status"]})')
+    before = stamp()
+    time.sleep(0.02)
+    r = PA.req('POST', '/api/v1/me/autodl/check')
+    check(r.status == 200 and stamp() > before and r.json()['status'].startswith('Prüft gleich'), f'Jetzt prüfen weckt den Helfer ({r.body[:150]!r})')
+    before = stamp()
+    check(PA.req('POST', '/api/v1/me/autodl/check').status == 200 and stamp() == before, 'Jetzt prüfen: nicht öfter als alle 30 s')
+
+    # Ein Lauf: echte Auswertung hochladen – erscheint sofort beim richtigen Konto
+    check(H.post('run', {'phase': 'start', 'text': ''}).status == 200 and H.post('run', {'phase': 'mitte'}).status == 400, 'run start (phase geprüft)')
+    H.job()
+    check(PA.get('/api/v1/me/autodl').json()['status'].startswith('Prüft gerade'), 'Handy: Prüft gerade …')
+    checksum, files = analyzed_match(tmp)
+    info0 = PA.get('/api/v1/info').json()['matches']
+    st = H.upload(a_id, checksum, files)
+    check(st.get('json') == 200 and all(v == 200 for v in st.values()), f'Ergebnisse hochgeladen ({st})')
+    check(PA.get('/api/v1/info').json()['matches'] == info0 + 1, 'neues Match sofort in der Handy-App (neue Generation)')
+    check(checksum in [m['id'] for m in PA.get('/api/v1/matches').json()['items']], 'Match in der Liste')
+    check(PA.get(f'/api/v1/match/{checksum}?tab=0').status == 200 and PA.get(f'/api/v1/match/{checksum}?tab=2').status == 200, 'Match-Ansicht')
+    if files.get('heat'):
+        r = PA.get(f'/api/v1/heat?match={checksum}')
+        check(r.status == 200 and (r.json() or {}).get('scope') == 'match', f'Heatmap des Matches ({r.status})')
+    if files.get('replay'):
+        r = PA.get(f'/api/v1/replay/{checksum}?round=1')
+        check(r.status == 200 and (r.json() or {}).get('frames'), f'2D-Ansicht des Matches ({r.status})')
+    check(PB.get(f'/api/v1/match/{checksum}?tab=0').status == 404 and checksum not in [m['id'] for m in PB.get('/api/v1/matches').json()['items']],
+          'Freund sieht das Match nicht')
+    sync = A.get('/api/v1/sync/state').json()['matches'].get(checksum, {})
+    check(sync.get('json') == len(files['json']) and (not files.get('replay') or sync.get('replay') == len(files['replay'])), f'sync/state: FragDesk sieht es ({sync})')
+    # dieselben Prüfungen wie beim Hochladen aus FragDesk
+    check(H.req('PUT', f'{a_id}/match/{checksum}/json', body=b'{"schema": 99}').status == 400, 'Helfer: kaputtes Match 400')
+    check(H.req('PUT', f'{a_id}/match/andere/json', body=files['json']).status == 400, 'Helfer: Prüfsumme muss passen')
+    check(H.req('PUT', f'{a_id}/match/nichtda/replay', body=files.get('replay') or synth_replay()).status == 404, 'Helfer: 2D-Daten ohne Match 404')
+    check(H.req('PUT', f'{a_id}/match/{checksum}/heat', body=b'GIF89a').status == 400, 'Helfer: falsche Heatmap 400')
+    r = H.req('PUT', f'{a_id}/match/{checksum}/json', body=b'x' * (4 * MB + 1))
+    check(r.status in (0, 413), f'Helfer: über 4 MB abgelehnt ({r.status})')
+    check(H.req('PUT', f'ffffffff/match/{checksum}/json', body=files['json']).status == 404, 'Helfer: unbekanntes Konto 404')
+    r = H.req('PUT', f'{a_id}/match/{checksum}/json', body=files['json'], key='falsch')   # großer Körper: schon vor dem Lesen abgelehnt
+    check(r.status in (0, 403, 413) and H.req('PUT', f'{a_id}/match/{checksum}/heat', body=b'FDHM1234', key='falsch').status == 403,
+          f'Helfer: Hochladen nur mit Schlüssel ({r.status})')
+    # Stand melden (Zeit auch in Millisekunden)
+    r = H.post(f'{a_id}/state', {'knownCode': SHARE2, 'lastCheck': int(time.time() * 1000), 'lastNew': int(time.time()), 'lastError': '', 'fetched': 1})
+    check(r.status == 200 and r.json() == {'ok': True, 'ignored': False}, f'state ({r.body[:100]!r})')
+    check(H.post(f'{a_id}/state', {'knownCode': 'kaputt', 'lastCheck': 1}).status == 400, 'state: Freigabecode geprüft')
+    check(H.post('run', {'phase': 'end', 'text': '1 neues Match geladen'}).status == 200, 'run end')
+    d = PA.get('/api/v1/me/autodl').json()
+    check(d['knownCode'] == SHARE2 and d['fetched'] == 1 and d['lastNew'] > 0 and 0 < d['lastCheck'] < 4e9
+          and d['status'] == 'Prüft alle 15\u00a0Minuten · zuletzt gerade eben · 1\u00a0Match geladen', f'Handy: Stand nach dem Lauf ({d})')
+    s = PA.get('/api/v1/admin/steam').json()['lastRun']
+    check(s['at'] > 0 and s['text'] == '1 neues Match geladen' and s['running'] is False, f'admin/steam: letzter Lauf ({s})')
+    H.upload(a_id, checksum, files)
+    check(PA.get('/api/v1/me/autodl').json()['fetched'] == 1, 'dasselbe Match nochmal: zählt nicht doppelt')
+    # Fehler des Helfers erscheint als Satz
+    err = 'Der Freigabecode passt nicht zu deinem Spielverlauf – trag den Code deines letzten Matches neu ein.'
+    check(H.post(f'{a_id}/state', {'knownCode': SHARE2, 'lastCheck': int(time.time()), 'lastError': err}).status == 200, 'state mit Fehler')
+    d = PA.get('/api/v1/me/autodl').json()
+    check(d['lastError'] == err and d['status'].startswith(err) and d.get('tone') == 'error', f'Handy zeigt den Fehler ({d["status"]})')
+    # Freigabecode am Handy geändert, während der Helfer noch mit dem alten Auftrag läuft: dessen Meldung gilt nicht mehr
+    d = PA.req('PUT', '/api/v1/me/autodl', body={'authCode': '', 'knownCode': SHARE3}).json()
+    check(d['knownCode'] == SHARE3 and d['authCodeMasked'] == MASK and d['lastError'] == '' and d['enabled'] is True, f'Freigabecode geändert, Code behalten ({d})')
+    r = H.post(f'{a_id}/state', {'knownCode': SHARE2, 'lastCheck': int(time.time()), 'lastError': ''})
+    check(r.status == 200 and r.json()['ignored'] is True and PA.get('/api/v1/me/autodl').json()['knownCode'] == SHARE3, 'alter Stand des Helfers überschreibt nichts')
+    check(H.job()['accounts'][0]['knownCode'] == SHARE3, 'neuer Auftrag mit dem neuen Freigabecode')
+    # from (wie fragdesk-fetch): der Code, von dem der Helfer ausgeht – passt er nicht, gilt die Meldung nicht
+    r = H.post(f'{a_id}/state', {'knownCode': SHARE2, 'from': SHARE, 'lastCheck': int(time.time()), 'lastError': ''})
+    check(r.status == 200 and r.json()['ignored'] is True and PA.get('/api/v1/me/autodl').json()['knownCode'] == SHARE3, 'from passt nicht: ignoriert')
+    r = H.post(f'{a_id}/state', {'knownCode': SHARE3, 'from': SHARE3, 'lastCheck': int(time.time()), 'lastError': ''})
+    check(r.status == 200 and r.json()['ignored'] is False, 'from passt: angenommen')
+    # von Steam erneuertes Token
+    check(H.post('token', {'refreshToken': BOT_TOKEN + 'x', 'tokenUntil': 1999999998}).status == 200 and H.job()['bot']['refreshToken'] == BOT_TOKEN + 'x',
+          'Token erneuert')
+    check(H.post('token', {'refreshToken': 'kurz'}).status == 400, 'Token geprüft')
+
+    # Freund: eigenes Konto; Speicher fast voll -> nicht im Auftrag, Hochladen 507
+    check(H.req('PUT', f'{b_id}/match/{checksum}/json', body=files['json']).status == 403, 'Helfer: Konto ohne „automatisch laden“ 403 (überspringen)')
+    d = PB.req('PUT', '/api/v1/me/autodl', body={'authCode': FRIEND_AUTH, 'knownCode': SHARE, 'enabled': True}).json() or {}
+    check(d.get('enabled') is True and d['steamId'] == FRIEND and d['knownCode'] == SHARE, 'Freund schaltet ein')
+    b_used = B.get('/api/v1/account').json()['quota']['used']
+    check(A.req('PUT', f'/api/v1/admin/users/{b_id}', body={'limit': b_used + 1024}).status == 200, 'Freund: Limit knapp')
+    check([x['id'] for x in H.job()['accounts']] == [a_id], 'Speicher voll: nicht im Auftrag')
+    r = H.req('PUT', f'{b_id}/match/{checksum}/json', body=files['json'])
+    check(r.status == 507 and 'Speicher' in (r.json() or {}).get('error', ''), f'Helfer: 507, wenn voll ({r.status})')
+    check(checksum not in B.get('/api/v1/sync/state').json()['matches'] and checksum not in [m['id'] for m in PB.get('/api/v1/matches').json()['items']],
+          '507: nichts geschrieben')
+    d = PB.get('/api/v1/me/autodl').json()
+    check('Speicher' in d['status'] and 'voll' in d['status'], f'Freund sieht: Speicher voll ({d["status"]})')
+    check(A.req('PUT', f'/api/v1/admin/users/{b_id}', body={'limit': 15 * 1024 ** 3}).status == 200, 'Freund: Limit zurück')
+    accounts = {x['id']: x for x in H.job()['accounts']}
+    check(set(accounts) == {a_id, b_id} and accounts[b_id]['authCode'] == FRIEND_AUTH and accounts[b_id]['steamId'] == FRIEND,
+          f'Auftrag mit beiden Konten ({accounts})')
+
+    # Befehlszeile und Kontenliste: an/aus, keine Codes
+    rc, out, _ = srv.cli('users')
+    line = next((ln for ln in out.splitlines() if ln.startswith('Micha')), '')
+    check(rc == 0 and 'Demos laden' in out and ' an ' in line and AUTH not in out, f'users: Spalte „Demos laden“ ({line!r})')
+    rows = json.loads(srv.cli('users', '--json')[1])
+    check({u['id']: u['autodl'] for u in rows} == {a_id: True, b_id: True}, 'users --json: autodl')
+    users = PA.get('/api/v1/admin/users').json()
+    check(all('autodl' in u for u in users) and AUTH.encode() not in PA.get('/api/v1/admin/users').body, 'admin/users: autodl ohne Codes')
+
+    # Freund schaltet aus: Codes weg (auch auf der Platte), nicht mehr im Auftrag, Ergebnisse für ihn abgelehnt
+    d = PB.req('DELETE', '/api/v1/me/autodl').json() or {}
+    check(d.get('enabled') is False and d['authCodeMasked'] == '' and d['knownCode'] == '', f'Ausschalten löscht die Codes ({d})')
+    check([x['id'] for x in H.job()['accounts']] == [a_id], 'ausgeschaltet: nicht mehr im Auftrag')
+    check(H.post(f'{b_id}/state', {'knownCode': SHARE, 'lastCheck': 1}).status == 403, 'ausgeschaltet: state 403')
+    check(FRIEND_AUTH not in (pathlib.Path(data_dir) / 'users' / b_id / 'account.json').read_text(), 'Code auch auf der Platte gelöscht')
+    # Schalter aus und wieder an behält die Codes
+    d = PA.req('PUT', '/api/v1/me/autodl', body={'enabled': False}).json()
+    check(d['enabled'] is False and d['authCodeMasked'] == MASK and d['status'].startswith('Ausgeschaltet'), 'Schalter aus: Codes bleiben')
+    check(H.job()['accounts'] == [] and PA.req('POST', '/api/v1/me/autodl/check').status == 409, 'aus: leerer Auftrag, Jetzt prüfen 409')
+    d = PA.req('PUT', '/api/v1/me/autodl', body={'enabled': True}).json()
+    check(d['enabled'] is True and d['knownCode'] == SHARE3, 'Schalter wieder an')
+
+    # zweite Anmeldung schlägt fehl: Fehler sichtbar, der bisherige Bot bleibt
+    check(PA.req('POST', '/api/v1/admin/steam/login', body={'user': 'meinbot', 'password': BOT_PASSWORD + '2'}).status == 200, 'zweite Anmeldung')
+    check((H.job().get('login') or {}).get('password') == BOT_PASSWORD + '2', 'neues Passwort beim Helfer')
+    check(H.post('login', {'state': 'error', 'hint': 'Benutzername oder Passwort falsch.'}).status == 200, 'Helfer meldet Fehler')
+    s = PA.get('/api/v1/admin/steam').json()
+    check(s['login']['state'] == 'error' and s['login']['hint'] == 'Benutzername oder Passwort falsch.' and s['bot']['loggedIn'] is True,
+          f'Fehler sichtbar, alter Bot bleibt ({s["login"]})')
+    check(H.job().get('login') is None, 'nach dem Fehler: keine Anmeldung im Auftrag')
+    # Bestätigen in der App – oder (codeType "app") stattdessen den Code aus der App
+    check(PA.req('POST', '/api/v1/admin/steam/login', body={'user': 'meinbot', 'password': BOT_PASSWORD + '3'}).status == 200, 'dritte Anmeldung')
+    H.job()
+    r = H.post('login', {'state': 'need-confirm', 'codeType': 'app', 'hint': 'In der Steam-App bestätigen – oder den Code aus der Steam-App eingeben.'})
+    s = PA.get('/api/v1/admin/steam').json()['login']
+    check(r.status == 200 and s['state'] == 'need-confirm' and s['codeType'] == 'app', f'need-confirm mit App-Code ({s})')
+    check(PA.req('POST', '/api/v1/admin/steam/code', body={'code': 'K7M2P'}).status == 200 and (H.job().get('login') or {}).get('code') == 'K7M2P',
+          'App-Code statt Bestätigen')
+    check(H.post('login', {'state': 'error', 'hint': 'Code falsch.'}).status == 200 and PA.get('/api/v1/admin/steam').json()['bot']['loggedIn'] is True,
+          'Fehler einer Anmeldung: der bisherige Bot bleibt')
+    # im normalen Lauf (keine Anmeldung offen) lehnt Steam das gespeicherte Token ab: Bot braucht eine neue Anmeldung
+    hint = 'Steam nimmt die Anmeldung des Bots nicht mehr an – bitte neu anmelden.'
+    check(H.post('login', {'state': 'error', 'hint': hint}).status == 200, 'Helfer: Token abgelehnt')
+    s = PA.get('/api/v1/admin/steam').json()
+    check(s['bot']['loggedIn'] is False and s['bot'].get('needsLogin') is True and s['bot'].get('problem') == hint and s['ready'] is False
+          and s['bot']['name'] == 'meinbot', f'Bot braucht neue Anmeldung ({s["bot"]})')
+    check(s['login']['state'] == 'idle', f'altes Ergebnis der Anmeldung verschwindet ({s["login"]})')
+    check(H.job()['bot']['refreshToken'] == '', 'abgelehntes Token geht nicht mehr an den Helfer')
+    d = PA.get('/api/v1/me/autodl').json()
+    check(d['botReady'] is False and d.get('botNeedsLogin') is True and 'neu angemeldet' in d['status'] and d.get('tone') == 'error',
+          f'Handy: Bot muss neu angemeldet werden ({d["status"]})')
+    check(H.post('token', {'refreshToken': BOT_TOKEN + 'x', 'tokenUntil': 1999999998}).status == 200
+          and PA.get('/api/v1/admin/steam').json()['bot']['loggedIn'] is True, 'neues Token: wieder angemeldet')
+
+    # aufräumen, damit der Rest des Ablaufs mit den bisherigen Zahlen weiterläuft (die Einstellung bleibt für den Neustart)
+    check(A.req('DELETE', f'/api/v1/sync/match/{checksum}').status == 200, 'automatisch geladenes Match wieder gelöscht')
+
+
+def autodl_after_restart(srv, port, PA, data_dir):
+    """Nach dem Neustart: Einstellungen und Bot bleiben, die Anmeldung (im Speicher) ist vergessen; Bot abmelden;
+    Server ohne Helfer (Node.js fehlt)."""
+    H = FakeHelper(port, data_dir)
+    d = PA.get('/api/v1/me/autodl').json() or {}
+    check(d.get('enabled') is True and d['knownCode'] == SHARE3 and d['authCodeMasked'] == MASK and d['fetched'] == 1, f'nach Neustart: Einstellung bleibt ({d})')
+    s = PA.get('/api/v1/admin/steam').json() or {}
+    check(s['bot']['name'] == 'meinbot' and s['bot']['loggedIn'] is True and s['apiKeySet'] is True and s['lastRun']['text'] == '1 neues Match geladen'
+          and s['login']['state'] == 'idle', f'nach Neustart: Bot bleibt, Anmeldung vergessen ({s})')
+    job = H.job()
+    check(job['bot']['refreshToken'] == BOT_TOKEN + 'x' and job['login'] is None, 'nach Neustart: Token aus steam.json')
+    s = PA.req('DELETE', '/api/v1/admin/steam').json() or {}
+    check(s['bot']['loggedIn'] is False and s['bot']['name'] == '' and s['apiKeySet'] is True, f'Bot abgemeldet, Schlüssel bleibt ({s.get("bot")})')
+    check(H.job()['bot'] == {'refreshToken': '', 'apiKey': BOT_KEY.upper()} and BOT_TOKEN not in (pathlib.Path(data_dir) / 'steam.json').read_text(), 'Token gelöscht')
+    check(PA.get('/api/v1/me/autodl').json()['botReady'] is False, 'Handy: Bot nicht mehr bereit')
+    # Server ohne Helfer (install.sh: FRAGDESK_FETCH=node)
+    check(srv.stop() == 0, 'Neustart ohne Helfer')
+    srv.start(fetch='node')
+    s = PA.get('/api/v1/admin/steam').json() or {}
+    check('Node.js' in s.get('helper', '') and s['ready'] is False, f'admin/steam: Node.js fehlt ({s.get("helper")!r})')
+    r = PA.req('POST', '/api/v1/admin/steam/login', body={'user': 'meinbot', 'password': 'x'})
+    check(r.status == 409 and 'Node.js' in (r.json() or {}).get('error', ''), 'Anmeldung ohne Helfer: 409 mit Grund')
+    check('Node.js' in PA.get('/api/v1/me/autodl').json()['status'], 'Handy (Admin): Grund sichtbar')
+
+
 # ---- Ablauf -------------------------------------------------------------------------------------------------------------
 def run(args):
     tmp = pathlib.Path(args.tmp)
@@ -346,25 +696,34 @@ def run(args):
     srv = Server(os.path.abspath(args.bin), data_dir, port, tmp / 'server.log')
     matches, clips = load_data(args.data)
     check(len(matches) >= 6 and len(clips) >= 2, 'Testdaten: mindestens 6 Matches und 2 Videos')
+    if args.analyzer and args.demo:
+        OPTS.update(analyzer=os.path.abspath(args.analyzer), demo=os.path.abspath(args.demo))
     srv.start()
     anon = Client(port)
     try:
-        flow(srv, anon, port, matches, clips, data_dir)
+        flow(srv, anon, port, matches, clips, data_dir, tmp)
     finally:
         code = srv.stop()
     check(code == 0, f'Server beendet sich sauber (Code {code})')
     log = (tmp / 'server.log').read_text(encoding='utf-8', errors='replace')
     check('fragdesk-server beendet' in log, 'Protokoll: sauber beendet')
-    print(f'server_e2e: {checks} Prüfungen, {fails} Fehler (Port {port}, {len(matches)} Matches, {len(clips)} Videos)')
+    # Geheimnisse von „Demos automatisch laden“: nie im Protokoll; Passwort und Steam-Guard-Code auch nie auf der Platte
+    for secret, what in ((BOT_PASSWORD, 'Passwort'), (GUARD.upper(), 'Steam-Guard-Code'), (AUTH, 'Authentifizierungscode'),
+                         (FRIEND_AUTH, 'Authentifizierungscode (Freund)'), (BOT_TOKEN, 'Anmelde-Token'), (BOT_KEY.upper(), 'API-Schlüssel')):
+        check(secret not in log, f'Protokoll ohne {what}')
+    blob = b''.join(p.read_bytes() for p in pathlib.Path(data_dir).rglob('*') if p.is_file())
+    check(BOT_PASSWORD.encode() not in blob and (BOT_PASSWORD + '2').encode() not in blob, 'Passwort des Bots nie auf der Platte')
+    print(f'server_e2e: {checks} Prüfungen, {fails} Fehler (Port {port}, {len(matches)} Matches, {len(clips)} Videos'
+          f'{", echte Demo" if OPTS else ""})')
     return 1 if fails else 0
 
 
-def flow(srv, anon, port, matches, clips, data_dir):
+def flow(srv, anon, port, matches, clips, data_dir, tmp):
     r = anon.get('/api/v1/health')
     check(r.status == 200 and r.json()['ok'] is True and r.json()['version'], 'health ohne Anmeldung')
     r = anon.get('/')
     check(r.status == 200 and b'<html' in r.body and r.header('Content-Security-Policy'), 'Handy-App ausgeliefert')
-    for asset in ('js/app.js', 'js/pages/admin.js', 'js/pages/invite.js', 'sw.js'):
+    for asset in ('js/app.js', 'js/pages/admin.js', 'js/pages/invite.js', 'js/pages/autodl.js', 'sw.js'):
         check(anon.get('/' + asset).status == 200, f'App-Datei {asset}')
     check(anon.get('/api/v1/info').status == 401, 'Ansichten nur gekoppelt')
 
@@ -597,6 +956,10 @@ def flow(srv, anon, port, matches, clips, data_dir):
     check(not c_dir.exists() and C.get('/api/v1/account').status == 401, 'entfernt: Ordner weg, Token ungültig')
     check(len(A.get('/api/v1/admin/users').json()) == 2, 'noch 2 Konten')
 
+    # Demos automatisch laden (Handy, Steam-Bot, Helfer)
+    autodl_flow(srv, anon, port, A, PA, B, PB, ja, jb, data_dir, tmp)
+    check(len(A.get('/api/v1/admin/users').json()) == 2, 'danach wieder 2 Konten')
+
     # Profil, Abmelden
     r = A.req('PUT', '/api/v1/account/profile', body={'name': 'Micha K.', 'steamId': ME})
     check(r.status == 200 and r.json()['user']['name'] == 'Micha K.', 'Profil ändern')
@@ -676,6 +1039,7 @@ def flow(srv, anon, port, matches, clips, data_dir):
     st2 = A.get('/api/v1/sync/state').json()
     check(st2 == dict(st, quota=st2['quota']) and st2['quota']['used'] == used, 'nach Neustart: gleicher Stand')
     check(PA.get(f"/media/clip/{clips[-1]['id']}.mp4", headers={'Range': 'bytes=0-9'}).body == clips[-1]['mp4'][:10], 'nach Neustart: Video')
+    autodl_after_restart(srv, port, PA, data_dir)
 
     # Löschen
     check(A.req('DELETE', f'/api/v1/sync/match/{first}').status == 200, 'Match löschen')
@@ -734,6 +1098,8 @@ def main():
     ap.add_argument('--bin')
     ap.add_argument('--data')
     ap.add_argument('--tmp')
+    ap.add_argument('--analyzer', help='fdanalyze für Linux: der nachgebaute Helfer wertet damit --demo aus')
+    ap.add_argument('--demo', help='CS2-Demo (.dem oder .dem.bz2) – wird nur gelesen')
     ap.add_argument('--make-data')
     args = ap.parse_args()
     if args.make_data:

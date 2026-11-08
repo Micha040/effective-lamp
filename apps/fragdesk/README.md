@@ -255,7 +255,8 @@ Das Skript installiert [Caddy](https://caddyserver.com) aus den Paketquellen (HT
 Let's Encrypt, erneuert sich selbst), legt den Benutzer `fragdesk` an, holt `fragdesk-server` aus dem neuesten
 [Release](https://github.com/Micha040/effective-lamp/releases/latest) (geprüft mit `SHA256SUMS.txt`), richtet den
 systemd-Dienst ein, gibt in ufw (falls aktiv) die Ports 80 und 443 frei, startet alles, prüft es – und zeigt zum
-Schluss **deine Einladung als Admin**:
+Schluss **deine Einladung als Admin**. Für [Demos automatisch laden](#demos-automatisch-laden) kommen Node.js (aus
+apt) und zwei Dateien aus dem Release dazu; fehlt Node.js 18, bleibt nur diese Funktion aus.
 
 ```
 Deine Einladung als Admin – gilt 7 Tage und nur einmal:
@@ -302,14 +303,15 @@ einmal und 7 Tage. Öffnet ihn jemand auf dem Handy, erklärt die Seite, dass er
 bekommen 15 GB, Admins unbegrenzt. Unter **Server verwalten** in der Handy-App siehst du alle Konten mit belegtem
 Speicher, änderst das Limit (5, 10, 15, 25, 50 GB oder unbegrenzt) und entfernst Konten samt Daten; die Stats der
 anderen sieht auch der Admin nicht. Ist ein Speicher voll, lädt FragDesk nichts Neues mehr hoch und sagt das – alles,
-was schon oben ist, bleibt zu sehen. Auf dem Server listet `fragdesk-server users` alle Konten.
+was schon oben ist, bleibt zu sehen. Auf dem Server listet `fragdesk-server users` alle Konten (auch, wer „Demos
+automatisch laden“ an hat).
 
 **Aktualisieren:** Denselben Befehl noch einmal ausführen. Er holt das neueste Release; Daten, Domain und Zeitzone
 bleiben (eine neue Admin-Einladung gibt es nur, solange noch niemand Admin ist).
 
-**Deinstallieren:** `curl -fsSL …/install.sh | bash -s -- --uninstall` entfernt Dienst, Programm und den
-Caddy-Eintrag. Die Daten bleiben in `/var/lib/fragdesk` – ganz weg damit: `rm -rf /var/lib/fragdesk && userdel
-fragdesk`. Caddy bleibt installiert.
+**Deinstallieren:** `curl -fsSL …/install.sh | bash -s -- --uninstall` entfernt Dienst, Programm, den Helfer samt
+Timer und den Caddy-Eintrag. Die Daten bleiben in `/var/lib/fragdesk` – ganz weg damit: `rm -rf /var/lib/fragdesk &&
+userdel fragdesk`. Caddy und Node.js bleiben installiert.
 
 **Sicherheit:**
 
@@ -320,7 +322,9 @@ fragdesk`. Caddy bleibt installiert.
 - Gegen Raten: höchstens 5 falsche Einladungen bzw. Kopplungscodes pro 15 Minuten und IP.
 - Der Dienst läuft als eigener Benutzer ohne Rechte, darf nur in `/var/lib/fragdesk` schreiben (0700), keine
   Verbindungen nach außen aufbauen und nur die nötigen Systemaufrufe benutzen (systemd-Härtung).
-- `fragdesk-server invite/users` sprechen über 127.0.0.1 mit dem Dienst und brauchen den Schlüssel aus
+- Ins Internet darf nur der Helfer für „Demos automatisch laden“ (`fragdesk-fetch.service`): genauso gehärtet, schreibt
+  nur in `/var/lib/fragdesk/fetch`, ohne Ausführen von im Speicher erzeugtem Code (Node.js mit `--jitless`).
+- `fragdesk-server invite/users` und der Helfer sprechen über 127.0.0.1 mit dem Dienst und brauchen den Schlüssel aus
   `/var/lib/fragdesk/local.key`; von außen sperrt Caddy diese Befehle.
 - Wer root auf dem Server hat, kann alle Daten lesen – miete den Server selbst und gib den Zugang nicht weiter.
   Sichern: den Ordner `/var/lib/fragdesk` (oder Snapshots beim Anbieter).
@@ -330,9 +334,71 @@ Arbeitsspeicher. Die Matches eines Kontos lädt er erst, wenn ein Handy fragt (r
 nach 15 Minuten ohne Handy wieder frei. Heatmaps rechnet er eine nach der anderen und vergisst sie nach 10 Minuten
 ohne Heatmap-Anfrage. Für die 2D-Ansicht liest er die Datei des Matches, das gerade ein Handy abspielt (eine zur Zeit),
 und schickt immer nur eine Runde (30–150 KB); auch sie gibt er nach 15 Minuten wieder frei. Caddy komprimiert JSON und
-Text, Videos nicht. Uhrzeiten in der Handy-App
-rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh` Europe/Berlin
-(`--timezone <Zone>` ändert das).
+Text, Videos nicht. Der Helfer für „Demos automatisch laden“ läuft nur, solange es etwas zu tun gibt (siehe unten).
+Uhrzeiten in der Handy-App rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `install.sh`
+Europe/Berlin (`--timezone <Zone>` ändert das).
+
+### Demos automatisch laden
+
+Der Server holt neue Matches eines Kontos **selbst bei Valve**, wertet sie aus (Stats, Heatmap, 2D-Ansicht) und legt
+sie ins Konto – ohne PC, ohne Klick in CS2. Neue Matches erscheinen von selbst in der Handy-App. So machen es auch
+Leetify & Co.: Mit deinem Authentifizierungscode fragt der Server bei Steam nach den Freigabecodes deiner neuen Matches,
+ein eigenes Steam-Konto des Servers (der „Bot“) holt dazu die Adresse der Demo, und die Demo kommt von Valve.
+
+**Einmal für den ganzen Server (Admin):** in der Handy-App unter **Server verwalten › Steam-Bot** – dort steht es
+auch Schritt für Schritt:
+
+1. Ein **neues Steam-Konto** nur für den Server anlegen (nicht dein eigenes!), mit eigener E-Mail-Adresse.
+2. **Counter-Strike 2 hinzufügen** – kostenlos, im Steam-Shop bei CS2 „Spielen“ bzw. „Zur Bibliothek hinzufügen“.
+3. **5 € aufladen** (z. B. Steam-Guthabenkarte): Ohne mindestens 5 € Umsatz gibt Valve keinen Web-API-Schlüssel
+   heraus. Das Guthaben bleibt auf dem Konto.
+4. **Steam Guard mit der Steam-App** einrichten (Steam-App aufs Handy, mit dem Bot anmelden, Authenticator).
+5. Den **Web-API-Schlüssel** holen: als Bot auf [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey),
+   als Domain z. B. die Adresse deines Servers, und in der Handy-App eintragen. Nimm den Schlüssel des Bots – der deines
+   eigenen Kontos ginge auch, läge dann aber auf dem Server, und wer ihn erbeutet, kann damit Betrug beim Handeln mit
+   Skins versuchen.
+6. **Bot anmelden:** Benutzername und Passwort des Bots, dann den Code aus der E-Mail bzw. der Steam-App eingeben
+   oder in der Steam-App bestätigen.
+
+**Jeder für sich (jedes Konto):** in der Handy-App unter **Einstellungen › Demos automatisch laden** zwei Codes
+eintragen und einschalten. Beide stehen auf derselben
+[Steam-Seite](https://help.steampowered.com/de/wizard/HelpWithGameIssue/?appid=730&issueid=128): der
+**Authentifizierungscode** („Authentifizierungscode erstellen“, Form `AAAA-AAAAA-AAAA`) und der **Freigabecode deines
+letzten Matches** (`CSGO-…`). Dafür muss in FragDesk am PC dein Spieler gewählt sein (die SteamID kommt vom PC).
+„Jetzt prüfen“ schaut sofort nach, sonst prüft der Server alle 15 Minuten; „Ausschalten“ löscht beide Codes vom Server.
+
+**Grenzen:** nur **Premier, Wettkampf und Wingman** – FACEIT nicht (das lädt weiter FragDesk am PC hoch). Valve hebt
+Demos nur etwa **einen Monat** auf; geladen werden jeweils die Matches *nach* dem eingetragenen Freigabecode. Ist eine
+Demo schon gelöscht, überspringt der Server das Match. Das Ganze nutzt Schnittstellen von Valve, die nicht offiziell für
+so etwas gedacht sind – ändert Valve etwas, kann es (wie bei Leetify & Co.) eine Weile nicht gehen. Lädt FragDesk am
+PC dasselbe Match später hoch, ersetzt es einfach die Server-Fassung (gleiche Prüfsumme).
+
+**Was wo liegt:** Passwort und Steam-Guard-Code des Bots bleiben nur im Arbeitsspeicher des Servers (höchstens
+15 Minuten) und landen nie auf der Platte. Gespeichert wird ein Anmelde-Token des Bots wie bei „Angemeldet bleiben“
+und der Web-API-Schlüssel – nur in `/var/lib/fragdesk/steam.json` (0600, nur für `fragdesk` lesbar). Der
+Authentifizierungscode jedes Kontos liegt in dessen `account.json` (die Handy-App zeigt ihn nur gekürzt, ins Protokoll
+kommt er nie); mit ihm lässt sich nur der Spielverlauf abfragen, keine Anmeldung. Name, SteamID und Ablauf des Tokens
+des Bots stehen in `server.json`. „Bot abmelden“ löscht das Token, „Ausschalten“ die Codes eines Kontos.
+
+**So läuft es:** Den Weg nach außen hat nur der Helfer `fragdesk-fetch` (Node.js, eigener systemd-Dienst
+`fragdesk-fetch.service`, als Benutzer `fragdesk`, darf nur in `/var/lib/fragdesk/fetch` schreiben). Ein Timer startet
+ihn alle 15 Minuten, und der Server weckt ihn sofort, wenn er darum bittet (`fetch/wake`, z. B. bei „Jetzt prüfen“). Er
+arbeitet ab, was ansteht, und beendet sich – im Leerlauf läuft kein Prozess. Je Match lädt er die Demo (meist
+50–200 MB), wertet sie mit `fdanalyze` aus (mit niedrigster Priorität: ein paar Sekunden, rund 200 MB Arbeitsspeicher),
+gibt die Ergebnisse dem Server (dieselben Prüfungen und dasselbe Speicherlimit wie beim Hochladen aus FragDesk) und
+löscht die Demo wieder. Immer nur ein Match zur Zeit; ein volles Konto lässt er aus, bis wieder Platz ist.
+
+**Wenn es nicht geht:** Die Handy-App zeigt, was der Server zuletzt gemeldet hat (z. B. „Authentifizierungscode passt
+nicht“). Auf dem Server:
+
+```sh
+journalctl -u fragdesk-fetch -n 200 --no-pager                                          # Protokoll des Helfers
+runuser -u fragdesk -- node --jitless /usr/local/lib/fragdesk/fragdesk-fetch.js check   # Umgebung prüfen
+```
+
+(mit sudo statt als root: `sudo -u fragdesk node --jitless /usr/local/lib/fragdesk/fragdesk-fetch.js check`).
+Node.js 18 oder neuer gibt es in apt z. B. bei Debian 12/13 und Ubuntu 24.04; bei älteren Systemen (Ubuntu 22.04)
+meldet `install.sh` das und lässt nur diese Funktion aus.
 
 ## Anti-Cheat und Sicherheit
 
@@ -345,7 +411,9 @@ rechnet der Server in seine Zeitzone um – steht der Server auf UTC, nimmt `ins
 - Alles bleibt auf deinem PC: Es wird nichts hochgeladen, FragDesk braucht kein Internet. Die [Handy-App](#handy-app)
   (aus, bis du sie einschaltest) verbindet nur Handys, die du selbst gekoppelt hast – im Heimnetz oder über Tailscale.
   Nur wenn du einen [eigenen Server](#eigener-server) einrichtest, lädt FragDesk Auswertungen, 2D-Daten und Videos
-  dorthin – und nirgendwo sonst hin.
+  dorthin – und nirgendwo sonst hin. Mit [Demos automatisch laden](#demos-automatisch-laden) holt der Server Demos
+  selbst bei Valve – über ein eigenes Steam-Konto (den Bot), nie über deins; dein Authentifizierungscode erlaubt nur,
+  deinen Spielverlauf abzufragen.
 
 ## Ressourcen
 

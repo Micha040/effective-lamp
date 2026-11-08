@@ -7,7 +7,8 @@ Aufruf (im Repo-Hauptordner, nachdem tools/build-all.sh gelaufen ist):
 
 Ergebnis in dist/:
     EfficientLamp.exe, DeskCats.zip, SnowDesk.zip, TriggerSwitch.zip, WaveMuteSync.zip, FragDesk.zip, catalog.json,
-    fragdesk-server-linux-x64 (eigener Server für FragDesk, lädt server/install.sh), SHA256SUMS.txt
+    fragdesk-server-linux-x64 (eigener Server für FragDesk, lädt server/install.sh), für „Demos automatisch laden“
+    fdanalyze-linux-x64, fragdesk-fetch.js und fragdesk-fetch-NOTICES.txt (lädt install.sh ebenfalls), SHA256SUMS.txt
 
 Die ZIPs sind reproduzierbar (feste Zeitstempel, feste Reihenfolge): gleicher Quellstand -> gleiche Prüfsumme.
 Vorher wird geprüft, dass jede Versionsnummer in app.json mit den Quelltexten übereinstimmt.
@@ -25,6 +26,9 @@ import zipfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REPO = 'Micha040/effective-lamp'
 SERVER_FILE = 'fragdesk-server-linux-x64'
+ANALYZER_FILE = 'fdanalyze-linux-x64'                               # Demos automatisch laden: Auswertung auf dem Server
+FETCH_FILES = ('fragdesk-fetch.js', 'fragdesk-fetch-NOTICES.txt')   # … und der Helfer (Node.js) samt Lizenztexten
+FETCH_SRC = ROOT / 'apps/fragdesk/server/fetch'
 CRLF_SUFFIXES = {'.ps1', '.cmd', '.bat'}
 BOM_SUFFIXES = {'.ps1', '.cs'}   # Windows PowerShell 5.1 liest UTF-8 nur mit BOM richtig
 ZIP_TIME = (2026, 1, 1, 12, 0, 0)
@@ -75,8 +79,8 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def copy_server(src, out):
-    """fragdesk-server: nur ein statisch gelinktes Linux-Programm für x86_64 (install.sh lädt es aus dem Release)."""
+def copy_linux(src, out, name):
+    """Statisch gelinktes Linux-Programm für x86_64 (fragdesk-server, fdanalyze – install.sh lädt sie aus dem Release)."""
     if not src.is_file():
         fail(f'{src.relative_to(ROOT)} fehlt – erst tools/build-all.sh ausführen')
     data = src.read_bytes()
@@ -84,8 +88,26 @@ def copy_server(src, out):
         fail(f'{src.name} ist kein Linux-Programm für x86_64')
     if b'/lib64/ld-linux' in data:
         fail(f'{src.name} ist nicht statisch gelinkt')
-    shutil.copyfile(src, out / SERVER_FILE)
-    (out / SERVER_FILE).chmod(0o755)
+    shutil.copyfile(src, out / name)
+    (out / name).chmod(0o755)
+
+
+def copy_server(src, out):
+    copy_linux(src, out, SERVER_FILE)
+
+
+def copy_fetch(analyzer, fetch_dir, out):
+    """Demos automatisch laden: fdanalyze für Linux und der gebündelte Helfer fragdesk-fetch (eine Datei für Node ≥ 18)
+    mit den Lizenztexten der gebündelten Pakete. Solange es den Helfer im Quelltext noch nicht gibt, fehlt er auch hier."""
+    copy_linux(analyzer, out, ANALYZER_FILE)
+    if not FETCH_SRC.is_dir():
+        print('Hinweis: apps/fragdesk/server/fetch fehlt – Release ohne fragdesk-fetch (install.sh lässt die Funktion dann aus)')
+        return
+    for name in FETCH_FILES:
+        src = fetch_dir / name
+        if not src.is_file() or src.stat().st_size == 0:
+            fail(f'{src} fehlt – erst tools/build-all.sh ausführen (baut fragdesk-fetch mit server/fetch/build.sh)')
+        shutil.copyfile(src, out / name)
 
 
 def write_notes(path, tag, base, launcher_version, apps):
@@ -105,7 +127,8 @@ def write_notes(path, tag, base, launcher_version, apps):
         lines.append(f"| {a['name']} – {a['tagline']} | {a['version']} | [{d['file']}]({d['url']}) |")
     lines += ['', 'Einzelne Programme: ZIP entpacken und `Setup.cmd` doppelklicken. Prüfsummen: `SHA256SUMS.txt`.', '',
               f'**Eigener Server für FragDesk** (Linux, x86_64): [{SERVER_FILE}]({base}{SERVER_FILE}) – installiert mit einem Befehl, '
-              f'siehe [FragDesk › Eigener Server](https://github.com/{REPO}/tree/main/apps/fragdesk#eigener-server).', '']
+              f'siehe [FragDesk › Eigener Server](https://github.com/{REPO}/tree/main/apps/fragdesk#eigener-server). '
+              f'Für „Demos automatisch laden“ holt `install.sh` dazu {ANALYZER_FILE} und fragdesk-fetch.js (samt Prüfsumme).', '']
     path.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -116,6 +139,8 @@ def main():
     ap.add_argument('--base-url', help='Download-Adresse der Release-Dateien (Standard: GitHub-Release des Tags)')
     ap.add_argument('--launcher', default=str(ROOT / 'launcher/build/EfficientLamp.exe'))
     ap.add_argument('--server', default=str(ROOT / 'apps/fragdesk/build' / SERVER_FILE))
+    ap.add_argument('--analyzer-linux', default=str(ROOT / 'apps/fragdesk/build' / ANALYZER_FILE), help='fdanalyze für Linux')
+    ap.add_argument('--fetch-dir', default=str(ROOT / 'apps/fragdesk/build'), help='Ordner mit fragdesk-fetch.js und -NOTICES.txt')
     ap.add_argument('--notes', help='Release-Notizen (Markdown) in diese Datei schreiben')
     args = ap.parse_args()
 
@@ -140,6 +165,7 @@ def main():
         fail(f'{launcher_src} fehlt – erst tools/build-all.sh ausführen')
     shutil.copyfile(launcher_src, out / 'EfficientLamp.exe')
     copy_server(pathlib.Path(args.server), out)
+    copy_fetch(pathlib.Path(args.analyzer_linux), pathlib.Path(args.fetch_dir), out)
 
     apps = []
     for app_json in sorted(ROOT.glob('apps/*/app.json')):

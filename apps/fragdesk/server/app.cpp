@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <iostream>
 
 #include "../src/api/jsonw.h"
 #include "../src/api/views.h"
@@ -143,6 +144,7 @@ void writeEntry(JsonW& j, const UserInfo& i) {   // Zeile der Kontenliste (Admin
         .ki("created", i.created)
         .ki("lastSeen", i.lastSeen)
         .ki("devices", int64_t(i.devices.size()))
+        .kb("autodl", i.autodl)   // Demos automatisch laden an (ohne Codes)
         .end();
 }
 
@@ -244,8 +246,9 @@ void App::handle(const Request& req, Response& res) {
     if (startsWith(p, "/api/")) {
         res.set("Cache-Control", "no-store");
         bool read = req.method == "GET" || req.method == "HEAD";
-        // Schreibende Anfragen nur mit eigenem Kopf (Schutz gegen fremde Seiten im selben Browser)
-        if (!read && req.header("x-fragdesk") != "1") return res.error(403, "Nicht erlaubt");
+        // Schreibende Anfragen nur mit eigenem Kopf (Schutz gegen fremde Seiten im selben Browser) – /api/v1/local/*
+        // prüft stattdessen den Schlüssel aus local.key (stärker; den kennt keine Webseite)
+        if (!read && req.header("x-fragdesk") != "1" && !startsWith(p, "/api/v1/local/")) return res.error(403, "Nicht erlaubt");
         if (p == "/api/v1/health") return health(req, res);
         if (p == "/api/v1/account/register") return registerAccount(req, res);
         if (p == "/api/v1/account" || startsWith(p, "/api/v1/account/")) return account(req, res);
@@ -261,6 +264,7 @@ void App::handle(const Request& req, Response& res) {
         if (p == "/api/v1/pair") return pair(req, res);
         if (p == "/api/v1/me") return me(req, res);
         if (p == "/api/v1/me/relink") return relink(req, res);
+        if (p == "/api/v1/me/autodl" || startsWith(p, "/api/v1/me/autodl/")) return meAutodl(req, res);
         if (p == "/api/v1/logout") return phoneLogout(req, res);
         return phone(req, res);   // info, overview, matches, match, stats, moments, session
     }
@@ -278,10 +282,18 @@ int64_t App::bodyLimit(const Request& head) {
         if (startsWith(p, "/api/v1/sync/match/") && endsWith(p, "/replay")) return kMaxReplayFile;
         if (startsWith(p, "/api/v1/sync/match/")) return kMaxMatchFile;
     }
+    // Ergebnisse des Helfers: genauso, nur mit local.key (127.0.0.1, nicht über Caddy)
+    if (head.method == "PUT" && startsWith(p, "/api/v1/local/fetch/") && p.find("/match/") != std::string::npos && localKeyOk(head))
+        return endsWith(p, "/replay") ? kMaxReplayFile : kMaxMatchFile;
     return kMaxJson;
 }
 
+bool App::localKeyOk(const Request& req) {
+    return loopback(req.remote) && req.header("x-forwarded-for").empty() && sameSecret(req.header("x-fragdesk-local"), store_.localKey());
+}
+
 void App::maintain() {
+    login_.expire(nowEpoch());   // Passwort und Code nie länger als 15 Minuten im Speicher
     store_.maintain();
     views_.unloadIdle(idleUnload);
     if (fdapi::dropIdleReplay(idleUnload)) malloc_trim(0);   // zuletzt gelesene 2D-Daten (1–4 MB) nicht ewig behalten
@@ -460,39 +472,7 @@ void App::sync(const Request& req, Response& res) {
             if (!f.ok()) return fail(res, f);
             return ok(res);
         }
-        const std::string& what = part[2];
-        MatchPart mp = what == "heat" ? MatchPart::Heat : what == "replay" ? MatchPart::Replay : what == "noreplay" ? MatchPart::NoReplay : MatchPart::Json;
-        if (mp == MatchPart::Json && what != "json") return res.error(404, "Unbekannte Anfrage");
-        if (m != "PUT") return res.error(405, "Nur PUT");
-        std::string marker;   // NoReplay: nur der Grund, sonst der Körper der Anfrage (ohne Kopie)
-        const std::string& body = mp == MatchPart::NoReplay ? marker : req.body;
-        if (mp == MatchPart::Replay) {   // 2D-Ansicht: ganz lesen – was hier liegt, muss die Handy-App auch zeigen können
-            if (int64_t(body.size()) > kMaxReplayFile) return res.error(413, "Die Datei ist zu groß (höchstens 16 MB).");
-            if (body.size() < 8 || body.compare(0, 4, "FDRP") != 0) return res.error(400, "Das sind keine 2D-Daten von FragDesk.");
-            fd::Replay r;
-            std::string err;
-            if (!fd::parseReplay(body, r, err)) return res.error(400, "Die 2D-Daten lassen sich nicht lesen: " + err);
-        } else if (mp != MatchPart::NoReplay && int64_t(body.size()) > kMaxMatchFile) {
-            return res.error(413, "Die Datei ist zu groß (höchstens 4 MB).");
-        } else if (mp == MatchPart::Heat) {
-            if (body.size() < 8 || body.compare(0, 4, "FDHM") != 0) return res.error(400, "Das ist keine Heatmap-Datei von FragDesk.");
-        } else if (mp == MatchPart::NoReplay) {   // {"reason": "demo"|"failed"} – nur der Grund wird gespeichert
-            json::Value v;
-            std::string reason = json::parse(req.body, v) && v.isObject() ? v.getString("reason") : std::string();
-            if (reason != "demo" && reason != "failed") return res.error(400, "reason muss \"demo\" oder \"failed\" sein.");
-            marker = "{\"reason\":\"" + reason + "\"}\n";
-        } else {
-            fd::Match match;
-            std::string err;
-            if (!fd::parseMatch(body, match, err, true)) return res.error(400, "Das Match lässt sich nicht lesen: " + err);
-            if (match.checksum != checksum) return res.error(400, "Die Prüfsumme passt nicht zum Match.");
-        }
-        Fail f = store_.putMatchFile(u, checksum, mp, body);
-        if (!f.ok()) return fail(res, f);
-        if (mp == MatchPart::Json) views_.matchChanged(u, checksum);
-        JsonW j;
-        j.obj().kb("ok", true).ki("size", int64_t(body.size())).end();
-        res.body = j.take();
+        putMatch(req, res, u, checksum, part[2], nullptr);
         return;
     }
     if (part.size() >= 2 && part.size() <= 3 && part[0] == "clip") {
@@ -554,6 +534,55 @@ void App::sync(const Request& req, Response& res) {
     res.error(404, "Unbekannte Anfrage");
 }
 
+bool App::putMatch(const Request& req, Response& res, const UserPtr& u, const std::string& checksum, const std::string& what, bool* isNew) {
+    MatchPart mp = what == "heat" ? MatchPart::Heat : what == "replay" ? MatchPart::Replay : what == "noreplay" ? MatchPart::NoReplay : MatchPart::Json;
+    if (mp == MatchPart::Json && what != "json") {
+        res.error(404, "Unbekannte Anfrage");
+        return false;
+    }
+    if (req.method != "PUT") {
+        res.error(405, "Nur PUT");
+        return false;
+    }
+    auto bad = [&](int status, const std::string& text) {
+        res.error(status, text);
+        return false;
+    };
+    std::string marker;   // NoReplay: nur der Grund, sonst der Körper der Anfrage (ohne Kopie)
+    const std::string& body = mp == MatchPart::NoReplay ? marker : req.body;
+    if (mp == MatchPart::Replay) {   // 2D-Ansicht: ganz lesen – was hier liegt, muss die Handy-App auch zeigen können
+        if (int64_t(body.size()) > kMaxReplayFile) return bad(413, "Die Datei ist zu groß (höchstens 16 MB).");
+        if (body.size() < 8 || body.compare(0, 4, "FDRP") != 0) return bad(400, "Das sind keine 2D-Daten von FragDesk.");
+        fd::Replay r;
+        std::string err;
+        if (!fd::parseReplay(body, r, err)) return bad(400, "Die 2D-Daten lassen sich nicht lesen: " + err);
+    } else if (mp != MatchPart::NoReplay && int64_t(body.size()) > kMaxMatchFile) {
+        return bad(413, "Die Datei ist zu groß (höchstens 4 MB).");
+    } else if (mp == MatchPart::Heat) {
+        if (body.size() < 8 || body.compare(0, 4, "FDHM") != 0) return bad(400, "Das ist keine Heatmap-Datei von FragDesk.");
+    } else if (mp == MatchPart::NoReplay) {   // {"reason": "demo"|"failed"} – nur der Grund wird gespeichert
+        json::Value v;
+        std::string reason = json::parse(req.body, v) && v.isObject() ? v.getString("reason") : std::string();
+        if (reason != "demo" && reason != "failed") return bad(400, "reason muss \"demo\" oder \"failed\" sein.");
+        marker = "{\"reason\":\"" + reason + "\"}\n";
+    } else {
+        fd::Match match;
+        std::string err;
+        if (!fd::parseMatch(body, match, err, true)) return bad(400, "Das Match lässt sich nicht lesen: " + err);
+        if (match.checksum != checksum) return bad(400, "Die Prüfsumme passt nicht zum Match.");
+    }
+    Fail f = store_.putMatchFile(u, checksum, mp, body, isNew);
+    if (!f.ok()) {
+        fail(res, f);
+        return false;
+    }
+    if (mp == MatchPart::Json) views_.matchChanged(u, checksum);   // neue Generation: gleich in der Handy-App
+    JsonW j;
+    j.obj().kb("ok", true).ki("size", int64_t(body.size())).end();
+    res.body = j.take();
+    return true;
+}
+
 // ---- Admin ------------------------------------------------------------------------------------------------------------
 // Einladung (neues Konto) oder mit "user" ein Link „PC neu verbinden“ für dieses Konto (gilt höchstens 1 Tag)
 void App::createInvite(const Request& req, Response& res, const std::string& by) {
@@ -597,6 +626,7 @@ void App::listUsers(Response& res) {
 void App::admin(const Request& req, Response& res, const UserPtr& who, const std::string& sub) {
     const std::string& m = req.method;
     bool get = m == "GET" || m == "HEAD";
+    if (sub == "steam" || startsWith(sub, "steam/")) return adminSteam(req, res, sub);
     if (sub == "invite") return createInvite(req, res, who->id);
     if (sub == "invites") {
         if (!get) return res.error(405, "Nur GET");
@@ -664,10 +694,292 @@ void App::local(const Request& req, Response& res) {
         return res.error(403, "Falscher Schlüssel (local.key).");
     }
     std::string sub = req.path.substr(14);
+    if (startsWith(sub, "fetch/")) return localFetch(req, res, sub.substr(6));
     if (sub == "invite") return createInvite(req, res, std::string());
     if (sub == "users") {
         if (req.method != "GET") return res.error(405, "Nur GET");
         return listUsers(res);
+    }
+    res.error(404, "Unbekannte Anfrage");
+}
+
+// ---- Demos automatisch laden: Handy -------------------------------------------------------------------------------------
+void App::meAutodl(const Request& req, Response& res) {
+    UserPtr u = store_.byDeviceToken(deviceToken(req));
+    if (!u) return res.error(401, kNoDevice);
+    const std::string& m = req.method;
+    int64_t now = nowEpoch();
+    if (req.path == "/api/v1/me/autodl/check") {   // „Jetzt prüfen“
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!store_.autodl(u).enabled) return res.error(409, "„Demos automatisch laden“ ist aus – erst einschalten.");
+        std::string problem = helperProblem(helperEnv);
+        if (!problem.empty()) return res.error(409, problem);
+        if (!store_.steam().ready(now)) return res.error(409, "Der Steam-Bot ist noch nicht eingerichtet.");
+        if (store_.requestCheck(u, now)) store_.wakeHelper();   // höchstens alle 30 s
+        return writeAutodl(res, u);
+    }
+    if (req.path != "/api/v1/me/autodl") return res.error(404, "Unbekannte Anfrage");
+    if (m == "GET" || m == "HEAD") return writeAutodl(res, u);
+    if (m == "DELETE") {   // aus, Codes löschen
+        Fail f = store_.clearAutodl(u);
+        if (!f.ok()) return fail(res, f);
+        std::cerr << "Konto " << u->id << ": Demos automatisch laden aus, Codes gelöscht\n";
+        return writeAutodl(res, u);
+    }
+    if (m != "PUT" && m != "POST") return res.error(405, "Nur GET, PUT oder DELETE");
+    json::Value v;
+    if (!parseBody(req, res, v)) return;
+    if (store_.profileId(u).empty()) return res.error(400, "Erst in FragDesk am PC deinen Spieler wählen.");
+    std::string auth = normAuthCode(v.getString("authCode")), known = normShareCode(v.getString("knownCode"));
+    if (!auth.empty() && !validAuthCode(auth))
+        return res.error(400, "Der Authentifizierungscode sieht so aus: AAAA-AAAAA-AAAA (Buchstaben und Ziffern). Bitte noch einmal kopieren.");
+    if (!known.empty() && !validShareCode(known))
+        return res.error(400, "Der Freigabecode sieht so aus: CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx (ohne 0, 1, I, l und g). Bitte noch einmal kopieren.");
+    const json::Value* en = v.find("enabled");
+    int enabled = en && en->type == json::Value::Bool ? (en->b ? 1 : 0) : -1;
+    bool before = store_.autodl(u).enabled;
+    Fail f = store_.setAutodl(u, auth, known, enabled);
+    if (!f.ok()) return fail(res, f);
+    AutoDl a = store_.autodl(u);
+    if (a.enabled != before) std::cerr << "Konto " << u->id << ": Demos automatisch laden " << (a.enabled ? "an" : "aus") << "\n";
+    if (a.enabled && helperProblem(helperEnv).empty() && store_.steam().ready(now)) store_.wakeHelper();   // gleich prüfen
+    writeAutodl(res, u);
+}
+
+void App::writeAutodl(Response& res, const UserPtr& u) {
+    AutoDl a = store_.autodl(u);
+    UserInfo i = store_.info(u);
+    SteamBot bot = store_.steam();
+    int64_t now = nowEpoch();
+    AutodlFacts f;
+    f.enabled = a.enabled;
+    f.hasAuth = !a.authCode.empty();
+    f.hasKnown = !a.knownCode.empty();
+    f.hasSteamId = !i.steamId.empty();
+    f.botReady = bot.ready(now);
+    f.botNeedsLogin = bot.needsLogin(now);
+    f.admin = i.admin;
+    f.helperProblem = helperProblem(helperEnv);
+    f.lastError = a.lastError;
+    f.lastCheck = a.lastCheck;
+    f.fetched = a.fetched;
+    f.now = now;
+    bool running = bot.running && now - bot.runStart < 2 * 3600;   // ohne Ende: nach 2 h nicht mehr „läuft“
+    f.checking = running && a.jobAt > 0 && a.jobAt + 60 >= bot.runStart;
+    f.soon = !f.checking && a.checkAt > 0 && now - a.checkAt < 90 && a.lastCheck < a.checkAt;
+    f.full = a.enabled && store_.nearlyFull(u);
+    std::string tone, status = autodlStatus(f, tone);
+    JsonW j;
+    j.obj()
+        .kb("enabled", a.enabled)
+        .kv("authCodeMasked", maskAuthCode(a.authCode))
+        .kv("knownCode", a.knownCode)
+        .kv("steamId", i.steamId)
+        .ki("lastCheck", a.lastCheck)
+        .ki("lastNew", a.lastNew)
+        .kv("lastError", a.lastError)
+        .ki("fetched", a.fetched)
+        .kb("botReady", f.botReady)
+        .kv("status", status)
+        // Erweiterungen für die Anzeige
+        .kv("tone", tone)
+        .kb("botNeedsLogin", f.botNeedsLogin)   // Bot war angemeldet, muss neu angemeldet werden
+        .kb("ready", f.botReady && f.helperProblem.empty() && f.hasSteamId)   // alles da, es kann losgehen
+        .kb("checking", f.checking || f.soon)
+        .kb("admin", i.admin)
+        .ki("every", kCheckMinutes)
+        .end();
+    res.body = j.take();
+}
+
+// ---- Demos automatisch laden: Steam-Bot (Admin) ---------------------------------------------------------------------------
+void App::adminSteam(const Request& req, Response& res, const std::string& sub) {
+    const std::string& m = req.method;
+    int64_t now = nowEpoch();
+    if (sub == "steam") {
+        if (m == "GET" || m == "HEAD") return writeSteam(res);
+        if (m != "DELETE") return res.error(405, "Nur GET oder DELETE");
+        login_.cancel();
+        Fail f = store_.forgetSteamBot();
+        if (!f.ok()) return fail(res, f);
+        std::cerr << "Steam-Bot abgemeldet (Token gelöscht)\n";
+        return writeSteam(res);
+    }
+    json::Value v;
+    if (sub == "steam/login") {   // Benutzername und Passwort: nur im Speicher, der Helfer holt sie genau einmal ab
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string user = trim(v.getString("user")), password = v.getString("password");
+        if (!validSteamName(user)) return res.error(400, "Der Benutzername des Bot-Kontos fehlt (so, wie du dich bei Steam anmeldest).");
+        if (password.empty() || password.size() > 512) return res.error(400, "Das Passwort des Bot-Kontos fehlt.");
+        std::string problem = helperProblem(helperEnv);
+        if (!problem.empty()) return res.error(409, problem);
+        login_.start(user, password, now);
+        std::cerr << "Steam-Bot: Anmeldung angefragt – Helfer wird geweckt\n";
+        store_.wakeHelper();
+        return writeSteam(res);
+    }
+    if (sub == "steam/code") {   // Steam-Guard-Code für den Helfer bereithalten
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string code = normGuardCode(v.getString("code")), err;
+        if (!validGuardCode(code)) return res.error(400, "Der Code hat 5 Zeichen (Buchstaben und Ziffern).");
+        if (!login_.code(code, now, err)) return res.error(409, err);
+        return writeSteam(res);
+    }
+    if (sub == "steam/apikey") {   // Web-API-Schlüssel des Bots (leer = entfernen)
+        if (m != "PUT" && m != "POST") return res.error(405, "Nur PUT");
+        if (!parseBody(req, res, v)) return;
+        std::string key = normApiKey(v.getString("key"));
+        if (!key.empty() && !validApiKey(key)) return res.error(400, "Der Web-API-Schlüssel hat 32 Zeichen (0–9 und A–F). Bitte noch einmal kopieren.");
+        Fail f = store_.setSteamKey(key);
+        if (!f.ok()) return fail(res, f);
+        std::cerr << "Steam-Bot: Web-API-Schlüssel " << (key.empty() ? "entfernt" : "gespeichert") << "\n";
+        if (!key.empty() && store_.steam().ready(now) && store_.autodlCount() > 0 && helperProblem(helperEnv).empty()) store_.wakeHelper();
+        return writeSteam(res);
+    }
+    res.error(404, "Unbekannte Anfrage");
+}
+
+void App::writeSteam(Response& res) {
+    SteamBot bot = store_.steam();
+    int64_t now = nowEpoch();
+    SteamLogin::View lv = login_.view(now);
+    std::string hint = lv.hint, problem = helperProblem(helperEnv);
+    if (lv.active && lv.state == "working" && !lv.pickedUp && now - lv.started >= 45)
+        hint = "Der Helfer meldet sich noch nicht – vielleicht lädt er gerade Demos. Dauert es länger: auf dem Server "
+               "„systemctl status fragdesk-fetch.path“ und „journalctl -u fragdesk-fetch“ ansehen.";
+    bool running = bot.running && now - bot.runStart < 2 * 3600;
+    JsonW j;
+    j.obj();
+    j.key("bot").obj().kv("name", bot.name).kv("steamId", bot.steamId).kb("loggedIn", bot.loggedIn(now)).ki("tokenUntil", bot.tokenUntil);
+    // Erweiterung: war angemeldet, gilt aber nicht mehr (Token abgelehnt oder abgelaufen) – mit Grund
+    j.kb("needsLogin", bot.needsLogin(now))
+        .kv("problem", bot.tokenBad ? bot.tokenHint : bot.needsLogin(now) ? std::string("Das Anmelde-Token ist abgelaufen.") : std::string())
+        .end();
+    j.kb("apiKeySet", bot.hasKey);
+    j.key("login").obj().kv("state", lv.state).kv("hint", hint).kv("codeType", lv.codeType).ki("started", lv.started).end();
+    j.key("lastRun").obj().ki("at", bot.lastRunAt).kv("text", bot.lastRunText).kb("running", running).ki("started", running ? bot.runStart : 0).end();
+    j.ki("accounts", store_.autodlCount());
+    j.kb("ready", bot.ready(now) && problem.empty());   // Erweiterungen: alles bereit / was auf dem Server fehlt
+    j.kv("helper", problem);
+    j.end();
+    res.body = j.take();
+}
+
+// ---- Demos automatisch laden: Helfer (über 127.0.0.1 mit local.key) ---------------------------------------------------------
+void App::localFetch(const Request& req, Response& res, const std::string& sub) {
+    const std::string& m = req.method;
+    int64_t now = nowEpoch();
+    json::Value v;
+    if (sub == "job") {   // Auftrag: Bot, Anmeldung (Passwort und Code je genau einmal), eingeschaltete Konten
+        if (m != "GET") return res.error(405, "Nur GET");
+        std::string token, key;
+        store_.steamSecrets(token, key);
+        SteamLogin::Handout h = login_.take(now);
+        std::vector<FetchAccount> accounts = store_.fetchAccounts(now);
+        JsonW j;
+        j.obj();
+        j.key("bot").obj().kv("refreshToken", token).kv("apiKey", key).end();
+        j.key("login");
+        if (!h.active) {
+            j.null();
+        } else {
+            j.obj().kv("user", h.user);
+            if (h.hasPassword) j.kv("password", h.password);
+            else j.key("password").null();
+            if (h.hasCode) j.kv("code", h.code);
+            else j.key("code").null();
+            j.end();
+        }
+        j.key("accounts").arr();
+        for (const FetchAccount& a : accounts)
+            j.obj().kv("id", a.id).kv("steamId", a.steamId).kv("authCode", a.authCode).kv("knownCode", a.knownCode).end();
+        j.end().end();
+        res.body = j.take();
+        return;
+    }
+    if (sub == "login") {   // Zwischenstände und Ergebnis der Anmeldung
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string state = v.getString("state"), hint = cleanText(v.getString("hint"), 300), codeType = v.getString("codeType"), err;
+        if (state != "working" && state != "need-code" && state != "need-confirm" && state != "done" && state != "error")
+            return res.error(400, "state muss working, need-code, need-confirm, done oder error sein.");
+        if (state == "done") {
+            std::string token = trim(v.getString("refreshToken"));
+            if (!validRefreshToken(token)) return res.error(400, "refreshToken fehlt oder ist ungültig.");
+            const json::Value* sid = v.find("botSteamId");
+            std::string steamId = sid && sid->isNumber() ? std::to_string(int64_t(sid->num)) : cleanSteamId64(v.getString("botSteamId"));
+            std::string name = cleanText(v.getString("botName"), 64);
+            Fail f = store_.setSteamLogin(token, name, steamId, epochFrom(v.getNumber("tokenUntil")));
+            if (!f.ok()) return fail(res, f);
+            if (hint.empty()) hint = name.empty() ? "Angemeldet." : "Angemeldet als " + name + ".";
+            std::cerr << "Steam-Bot: angemeldet" << (steamId.empty() ? "" : " (SteamID " + steamId + ")") << "\n";
+        }
+        if (state == "error" && !login_.loginError(now)) {
+            // keine Anmeldung offen (auch keine eben abgelaufene): Steam hat im normalen Lauf das gespeicherte Token
+            // abgelehnt – neu anmelden nötig
+            if (store_.steam().hasToken) {
+                store_.steamTokenRejected(hint.empty() ? "Steam hat die Anmeldung des Bots abgelehnt." : hint);
+                std::cerr << "Steam-Bot: Steam lehnt das gespeicherte Token ab – bitte neu anmelden (" << hint << ")\n";
+            }
+            return ok(res);
+        }
+        if (!login_.report(state, hint, codeType, now, err)) return res.error(409, err);
+        if (state == "error") std::cerr << "Steam-Bot: Anmeldung hat nicht geklappt – " << hint << "\n";
+        return ok(res);
+    }
+    if (sub == "token") {   // von Steam erneuertes Token
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string token = trim(v.getString("refreshToken"));
+        if (!validRefreshToken(token)) return res.error(400, "refreshToken fehlt oder ist ungültig.");
+        Fail f = store_.setSteamToken(token, epochFrom(v.getNumber("tokenUntil")));
+        if (!f.ok()) return fail(res, f);
+        return ok(res);
+    }
+    if (sub == "run") {   // Lauf beginnt / ist zu Ende (für die Admin-Anzeige)
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string phase = v.getString("phase");
+        if (phase != "start" && phase != "end") return res.error(400, "phase muss \"start\" oder \"end\" sein.");
+        store_.runPhase(phase == "start", cleanText(v.getString("text"), 300), now);
+        return ok(res);
+    }
+    // <konto>/state, <konto>/match/<prüfsumme>/<teil>
+    std::vector<std::string> part = split(sub);
+    UserPtr u = validUserId(part[0]) ? store_.byId(part[0]) : nullptr;
+    if (!u || u->deleted) return res.error(404, "Dieses Konto gibt es nicht (mehr).");
+    if (part.size() == 2 && part[1] == "state") {
+        if (m != "POST") return res.error(405, "Nur POST");
+        if (!parseBody(req, res, v)) return;
+        std::string known = normShareCode(v.getString("knownCode"));
+        if (!validShareCode(known)) return res.error(400, "knownCode fehlt oder ist kein Freigabecode (CSGO-…).");
+        int64_t lastCheck = epochFrom(v.getNumber("lastCheck"));
+        const json::Value* le = v.find("lastError");
+        std::string lastError = le && le->isString() ? cleanText(le->str, 300) : std::string();
+        bool ignored = false;
+        // fetched zählt der Server selbst (je neu importiertem Match) – so zählt nichts doppelt; from (optional): der
+        // Freigabecode, von dem der Helfer ausgeht
+        Fail f = store_.fetchState(u, known, normShareCode(v.getString("from")), lastCheck > 0 ? lastCheck : now, epochFrom(v.getNumber("lastNew")),
+                                   le && le->isString() ? &lastError : nullptr, ignored);
+        if (!f.ok()) return fail(res, f);
+        JsonW j;
+        j.obj().kb("ok", true).kb("ignored", ignored).end();
+        res.body = j.take();
+        return;
+    }
+    if (part.size() == 4 && part[1] == "match") {   // Ergebnisse: wie /api/v1/sync/match
+        const std::string& checksum = part[2];
+        if (!validChecksum(checksum)) return res.error(400, "Ungültige Prüfsumme.");
+        if (!store_.autodl(u).enabled) return res.error(403, "Für dieses Konto ist „Demos automatisch laden“ aus.");   // Helfer: Konto überspringen
+        bool isNew = false;
+        if (!putMatch(req, res, u, checksum, part[3], &isNew)) return;
+        if (isNew) {
+            store_.fetchedMatch(u, now);
+            std::cerr << "Konto " << u->id << ": neues Match " << checksum << " automatisch geladen\n";
+        }
+        return;
     }
     res.error(404, "Unbekannte Anfrage");
 }

@@ -85,6 +85,12 @@ jobs:
           go-version: '1.27.x'
           cache: false
 
+      # Node.js (vorinstalliert auf dem Runner): Helfer fragdesk-fetch für „Demos automatisch laden“ (npm ci, esbuild)
+      - name: Node.js prüfen
+        run: |
+          node --version && npm --version
+          [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ] || { echo "::error::fragdesk-fetch braucht Node.js 18 oder neuer"; exit 1; }
+
       - name: Tests (Linux)
         run: |
           sh launcher/tests/run.sh
@@ -93,7 +99,7 @@ jobs:
           sh apps/fragdesk/tests/run.sh   # auch fragdesk-server: Einzelteile, ganzer Ablauf über HTTP, install.sh
           pwsh -NoProfile -File apps/fragdesk/tools/ps_check.ps1 -SetupPath apps/fragdesk/setup/Setup.ps1
 
-      - name: Bauen (Windows-Programme, Launcher, fragdesk-server)
+      - name: Bauen (Windows-Programme, Launcher, fragdesk-server, fdanalyze für Linux, fragdesk-fetch)
         run: sh tools/build-all.sh
 
       - name: Tests (Analyzer von FragDesk)
@@ -106,8 +112,12 @@ jobs:
         run: |
           python3 tools/package.py --tag "$TAG" --notes release-notes.md
           sh launcher/tests/run.sh "$PWD/dist/catalog.json"
-          # fragdesk-server: install.sh lädt releases/latest/download/fragdesk-server-linux-x64 und prüft SHA256SUMS.txt
-          (cd dist && grep ' fragdesk-server-linux-x64$' SHA256SUMS.txt | sha256sum -c - && ./fragdesk-server-linux-x64 version)
+          # fragdesk-server: install.sh lädt releases/latest/download/fragdesk-server-linux-x64 und prüft SHA256SUMS.txt –
+          # ebenso fdanalyze-linux-x64 und fragdesk-fetch.js für „Demos automatisch laden“
+          (cd dist && grep -E ' (fragdesk-server|fdanalyze)-linux-x64$' SHA256SUMS.txt | sha256sum -c - && ./fragdesk-server-linux-x64 version && ./fdanalyze-linux-x64 -version)
+          if [ -f dist/fragdesk-fetch.js ]; then
+            (cd dist && grep -E ' fragdesk-fetch(\.js|-NOTICES\.txt)$' SHA256SUMS.txt | sha256sum -c - && node fragdesk-fetch.js version)
+          fi
 
       - name: Auf GitHub veröffentlichen
         env:

@@ -3,6 +3,7 @@ import {h, icon, card, chips, notice, isIOS, standalone, usageBar, fmtDay} from 
 import * as api from '../api.js';
 import {store, applyTheme} from '../app.js';
 import {relinkSheet} from './admin.js';
+import {autodlSection} from './autodl.js';
 
 const count = (n, one, many) => `${n ?? '–'} ${n === 1 ? one : many}`;
 
@@ -40,9 +41,10 @@ export async function render(ctx) {
   ctx.main.replaceChildren(...out);
 }
 
-// Eigener Server: Konto und Speicher aus /api/v1/me, für Admins der Weg zur Verwaltung
+// Eigener Server: Konto und Speicher aus /api/v1/me, für Admins der Weg zur Verwaltung, Demos automatisch laden
 async function renderServer(ctx, info) {
   let me = api.cached('/api/v1/me');
+  const autodl = autodlSection(ctx);   // lädt sich selbst; bleibt beim zweiten Zeichnen dasselbe Element
   const draw = () => {
     const u = (me && me.user) || {}, q = (me && me.quota) || {}, n = (me && me.counts) || {};
     const out = [
@@ -70,6 +72,7 @@ async function renderServer(ctx, info) {
         h('div', {class: 'main'}, h('b', null, 'Server verwalten'), h('small', null, 'Freunde einladen, Konten und Speicher')),
         icon('chev', 'chev')) : null,
       me && me.user ? relink : null)));
+    out.push(h('div', {class: 'section'}, 'Demos automatisch laden'), autodl);
     out.push(h('div', {class: 'section'}, 'Verbindung'));
     out.push(h('section', {class: 'card flush'}, h('div', {class: 'list'},
       kv('Verbunden mit', 'deinem FragDesk-Server'),

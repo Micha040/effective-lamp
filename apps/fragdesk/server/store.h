@@ -1,9 +1,14 @@
 // fragdesk-server – Konten, Einladungen, Schlüssel und Dateien aller Spieler.
 //
 // Auf der Platte (--data, Standard /var/lib/fragdesk; alles 0600/0700, immer atomar geschrieben):
-//   server.json                 Konten (Admin, Limit), offene Einladungen (nur SHA-256 des Codes), Einstellungen
-//   local.key                   Schlüssel für die Befehle invite/users (sprechen über 127.0.0.1 mit dem Server)
-//   users/<id>/account.json     Profil (name, steamId), Konto-Tokens (FragDesk) und Geräte (Handys), nur als SHA-256
+//   server.json                 Konten (Admin, Limit), offene Einladungen (nur SHA-256 des Codes), Einstellungen,
+//                               "steam": Name, SteamID und Ablauf des Steam-Bots, letzter Lauf des Helfers (nichts Geheimes)
+//   local.key                   Schlüssel für die Befehle invite/users und den Helfer (sprechen über 127.0.0.1 mit dem Server)
+//   steam.json                  Geheimnisse des Steam-Bots: Anmelde-Token und Web-API-Schlüssel (Demos automatisch laden)
+//   fetch/                      Ordner des Helfers fragdesk-fetch: wake (der Server schreibt hinein = Helfer starten),
+//                               tmp/ und lock gehören dem Helfer
+//   users/<id>/account.json     Profil (name, steamId), Konto-Tokens (FragDesk) und Geräte (Handys), nur als SHA-256;
+//                               "autodl": Demos automatisch laden (Authentifizierungscode im Klartext – den braucht der Helfer)
 //   users/<id>/matches/         <Prüfsumme>.json, .heat und .replay (2D-Ansicht) – genau wie in FragDesk; .noreplay:
 //                               FragDesk meldet, dass es für dieses Match keine 2D-Daten geben kann (Grund als JSON)
 //   users/<id>/clips/           <clipId>.mp4, .jpg, .part (unfertig) und clips.json (Titel, Match, Moment …)
@@ -71,6 +76,37 @@ struct DeviceRec {
     int64_t created = 0, lastSeen = 0;
 };
 
+// Demos automatisch laden (account.json "autodl"). authCode ist geheim: nie ins Protokoll, an die Handy-App nur maskiert.
+struct AutoDl {
+    bool enabled = false;
+    std::string authCode, knownCode, lastError;   // knownCode: letzter bekannter Freigabecode
+    int64_t lastCheck = 0, lastNew = 0, fetched = 0;   // fetched: so viele neue Matches hat der Helfer geladen
+    // nur im Speicher
+    int64_t rev = 0, jobRev = -1;   // Codes am Handy geändert (zählt hoch) / Stand, den der Helfer zuletzt bekommen hat
+    int64_t jobAt = 0, checkAt = 0; // zuletzt an den Helfer gegeben / „Jetzt prüfen“ gedrückt
+};
+
+// Steam-Bot des Servers: server.json "steam" (nichts Geheimes) plus Merker für steam.json
+struct SteamBot {
+    std::string name, steamId;        // Kontoname und SteamID64 des Bots
+    int64_t tokenUntil = 0;           // Ablauf des Anmelde-Tokens (aus dem JWT), 0 = unbekannt
+    int64_t lastRunAt = 0;            // Ende des letzten Laufs des Helfers
+    std::string lastRunText;
+    bool tokenBad = false;            // Steam hat das gespeicherte Token abgelehnt: neu anmelden (tokenHint: warum)
+    std::string tokenHint;
+    bool hasToken = false, hasKey = false;
+    bool running = false;             // nur im Speicher: Lauf begonnen, noch nicht beendet
+    int64_t runStart = 0;
+    bool loggedIn(int64_t now) const { return hasToken && !tokenBad && (tokenUntil <= 0 || tokenUntil > now); }
+    bool ready(int64_t now) const { return loggedIn(now) && hasKey; }   // Bot angemeldet und API-Schlüssel da
+    bool needsLogin(int64_t now) const { return hasToken && !loggedIn(now); }   // war angemeldet, gilt nicht mehr
+};
+
+// Ein Konto im Auftrag für den Helfer
+struct FetchAccount {
+    std::string id, steamId, authCode, knownCode;
+};
+
 struct User {
     std::string id;
     std::string name, steamId;            // Profil
@@ -78,6 +114,7 @@ struct User {
     int64_t limit = 0, created = 0, lastSeen = 0;   // limit in Bytes, 0 = unbegrenzt
     std::vector<TokenRec> tokens;
     std::vector<DeviceRec> devices;
+    AutoDl autodl;
     std::map<std::string, MatchRec> matches;   // Prüfsumme ->
     std::map<std::string, ClipRec> clips;      // clipId ->
     int64_t used = 0;                          // Summe aller Dateien
@@ -93,7 +130,7 @@ using UserPtr = std::shared_ptr<User>;
 // Kopie für Antworten (ohne Sperre lesbar)
 struct UserInfo {
     std::string id, name, steamId;
-    bool admin = false;
+    bool admin = false, autodl = false;   // autodl: Demos automatisch laden eingeschaltet
     int64_t limit = 0, used = 0, created = 0, lastSeen = 0;
     int matches = 0, clips = 0;
     std::vector<DeviceRec> devices;
@@ -186,8 +223,8 @@ public:
     std::string matchPath(const std::string& id, const std::string& checksum, const char* ext) const;
     std::string clipPath(const std::string& id, const std::string& clipId, const char* ext) const;
     // Replay/NoReplay nur, wenn das Match schon da ist (404); ein Replay ersetzt die Markierung NoReplay, eine
-    // Markierung neben einem Replay wird nicht gespeichert
-    Fail putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body);
+    // Markierung neben einem Replay wird nicht gespeichert. isNew: das Match (.json) war vorher nicht da
+    Fail putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body, bool* isNew = nullptr);
     Fail deleteMatch(const UserPtr& u, const std::string& checksum);
     Fail appendClip(const UserPtr& u, const std::string& clipId, int64_t offset, int64_t total, const std::string& body, int64_t& size);
     Fail putThumb(const UserPtr& u, const std::string& clipId, const std::string& jpeg);
@@ -201,6 +238,35 @@ public:
     int64_t used(const UserPtr& u) const;
     int64_t limit(const UserPtr& u) const;
 
+    // ---- Demos automatisch laden: Konten -------------------------------------------------------------------------
+    AutoDl autodl(const UserPtr& u) const;   // Kopie (mit dem Authentifizierungscode – nur für den Server selbst)
+    // Codes leer = bisherigen behalten, enabled -1 = unverändert. 400, wenn zum Einschalten etwas fehlt
+    Fail setAutodl(const UserPtr& u, const std::string& authCode, const std::string& knownCode, int enabled);
+    Fail clearAutodl(const UserPtr& u);   // aus, beide Codes löschen
+    bool requestCheck(const UserPtr& u, int64_t now);   // „Jetzt prüfen“: true = Helfer wecken (höchstens alle 30 s)
+    // Auftrag: eingeschaltete Konten mit SteamID und beiden Codes, deren Speicher noch ein Match fasst (älteste zuerst)
+    std::vector<FetchAccount> fetchAccounts(int64_t now);
+    // Meldung des Helfers für ein Konto. lastError nullptr = unverändert; from: der Freigabecode, von dem der Helfer
+    // ausgeht (leer = egal). ignored: die Codes wurden am Handy geändert, seit der Helfer seinen Auftrag geholt hat, oder
+    // from passt nicht mehr – die Meldung gilt dann nicht. 403, wenn das Laden aus ist
+    Fail fetchState(const UserPtr& u, const std::string& knownCode, const std::string& from, int64_t lastCheck, int64_t lastNew,
+                    const std::string* lastError, bool& ignored);
+    void fetchedMatch(const UserPtr& u, int64_t now);   // ein neues Match vom Helfer: fetched zählt hoch, lastNew
+    bool nearlyFull(const UserPtr& u) const;            // passt kein ganzes Match mehr (Kontingent oder Platte)
+    int autodlCount() const;                            // Konten mit eingeschaltetem Laden
+    std::string fetchDir() const { return dir_ + "/fetch"; }
+    bool wakeHelper();   // <data>/fetch/wake neu schreiben (atomar, aktuelle Zeit) – die Path-Unit startet den Helfer
+
+    // ---- Demos automatisch laden: Steam-Bot ----------------------------------------------------------------------
+    SteamBot steam() const;
+    void steamSecrets(std::string& refreshToken, std::string& apiKey) const;
+    Fail setSteamLogin(const std::string& refreshToken, const std::string& name, const std::string& steamId, int64_t until);
+    Fail setSteamToken(const std::string& refreshToken, int64_t until);   // von Steam erneuert
+    Fail setSteamKey(const std::string& apiKey);   // leer = entfernen
+    Fail forgetSteamBot();                          // Token, Name, SteamID weg; der API-Schlüssel bleibt
+    void steamTokenRejected(const std::string& hint);   // Steam lehnt das Token ab: bis zur neuen Anmeldung nicht mehr benutzen
+    void runPhase(bool start, const std::string& text, int64_t now);   // Lauf des Helfers beginnt / ist zu Ende
+
     // Aufräumen (alle paar Minuten): abgelaufene Einladungen und Kopplungen, „zuletzt gesehen“ speichern
     void maintain();
     void flush();   // beim Beenden
@@ -213,8 +279,13 @@ private:
     std::vector<Invite> invites_;
     std::unordered_map<std::string, std::string> accountTokens_, deviceTokens_;   // SHA-256 -> Konto
     bool serverDirty_ = false;
+    SteamBot steam_;
+    std::string refreshToken_, apiKey_;   // steam.json
 
     bool loadServer(std::string& err);
+    void loadSteam();                      // steam.json (beschädigt: Hinweis, der Bot muss neu angemeldet werden)
+    bool saveSteam();                      // mit mu_
+    bool nearlyFullLocked(const User& u, int64_t freeBytes) const;
     bool loadAccount(const UserPtr& u, std::string& err);
     void scanFiles(const UserPtr& u);
     void recount(const UserPtr& u);
