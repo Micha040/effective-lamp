@@ -18,6 +18,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -119,6 +120,7 @@ int serve(const Options& o) {
         store.setUrl(o.url);
     } else if (store.settings().url == Settings().url) store.setUrl("http://" + listen + "/");
     App app(store, kVersion);
+    if (const char* fetch = getenv("FRAGDESK_FETCH")) app.helperEnv = fetch;   // install.sh: Helfer da (on) oder warum nicht
     fdapi::Server server;
     bool started = server.start(
         addr, port, [&](const fdapi::Request& req, fdapi::Response& res) { app.handle(req, res); }, err,
@@ -256,7 +258,8 @@ int cliUsers(const Options& o) {
     }
     std::cout << v.arr.size() << (v.arr.size() == 1 ? " Konto" : " Konten") << "\n";
     if (v.arr.empty()) return 0;
-    std::cout << pad("Name", 22) << pad("ID", 10) << pad("Admin", 7) << pad("Speicher", 26) << pad("Matches", 9) << pad("Videos", 8) << "Zuletzt\n";
+    std::cout << pad("Name", 22) << pad("ID", 10) << pad("Admin", 7) << pad("Speicher", 26) << pad("Matches", 9) << pad("Videos", 8)
+              << pad("Demos laden", 13) << "Zuletzt\n";
     for (const auto& u : v.arr) {
         int64_t used = int64_t(u.getNumber("used")), limit = int64_t(u.getNumber("limit"));
         std::string space = fd::fmtBytes(double(used)) + (limit > 0 ? " von " + fd::fmtBytes(double(limit)) : " (unbegrenzt)");
@@ -264,7 +267,7 @@ int cliUsers(const Options& o) {
         int64_t seen = int64_t(u.getNumber("lastSeen"));
         std::cout << pad(u.getString("name"), 22) << pad(u.getString("id"), 10) << pad(u.getBool("admin") ? "ja" : "–", 7) << pad(space, 26)
                   << pad(std::to_string(int64_t(u.getNumber("matches"))), 9) << pad(std::to_string(int64_t(u.getNumber("clips"))), 8)
-                  << fdapi::dateTimeText(seen) << "\n";
+                  << pad(u.getBool("autodl") ? "an" : "–", 13) << fdapi::dateTimeText(seen) << "\n";
     }
     return 0;
 }

@@ -1,13 +1,16 @@
 // Tests für fragdesk-server (Linux): SHA-256, Prüfungen, Grenzen gegen Raten, Konten, Einladungen, Dateien mit
-// Kontingent, Kopplung, Ansichten pro Konto. Aufruf: server_test <leerer Ordner> <Ordner mit Test-Matches>
+// Kontingent, Kopplung, Ansichten pro Konto, Demos automatisch laden (Codes, Maskieren, Anmeldung des Bots im Speicher,
+// Speichern, Auftrag für den Helfer, wake). Aufruf: server_test <leerer Ordner> <Ordner mit Test-Matches>
 #include <sys/stat.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "../server/app.h"
+#include "../server/autodl.h"
 #include "../server/files.h"
 #include "../server/sha256.h"
 #include "../server/source.h"
@@ -40,6 +43,11 @@ int mode(const std::string& path) {
     return stat(path.c_str(), &st) == 0 ? int(st.st_mode & 0777) : -1;
 }
 
+int64_t inode(const std::string& path) {
+    struct stat st{};
+    return stat(path.c_str(), &st) == 0 ? int64_t(st.st_ino) : -1;
+}
+
 bool grep(const std::string& dir, const std::string& needle) {   // steht needle irgendwo in einer Datei?
     for (const std::string& n : listDir(dir)) {
         std::string p = joinPath(dir, n), text;
@@ -49,6 +57,8 @@ bool grep(const std::string& dir, const std::string& needle) {   // steht needle
 }
 
 }  // namespace
+
+void autodlTests(const std::string& data, const std::string& matchJson, const std::string& checksum);
 
 int main(int argc, char** argv) {
     if (argc < 3) {
@@ -259,7 +269,264 @@ int main(int argc, char** argv) {
     CHECK(app.bodyLimit(head) == kMaxReplayFile);
     head.method = "POST";
     CHECK(app.bodyLimit(head) == 64 * 1024);
+    // Ergebnisse des Helfers: große Körper nur über 127.0.0.1 mit local.key, nicht über Caddy
+    fdapi::Request local;
+    local.method = "PUT";
+    local.path = "/api/v1/local/fetch/" + a2->id + "/match/x/replay";
+    local.remote = "127.0.0.1";
+    CHECK(app.bodyLimit(local) == 64 * 1024);
+    local.headers.push_back({"x-fragdesk-local", again.localKey()});
+    CHECK(app.bodyLimit(local) == kMaxReplayFile);
+    local.path = "/api/v1/local/fetch/" + a2->id + "/match/x/json";
+    CHECK(app.bodyLimit(local) == kMaxMatchFile);
+    local.remote = "192.0.2.1";
+    CHECK(app.bodyLimit(local) == 64 * 1024);
+    local.remote = "127.0.0.1";
+    local.headers.push_back({"x-forwarded-for", "192.0.2.1"});   // über Caddy
+    CHECK(app.bodyLimit(local) == 64 * 1024);
+
+    autodlTests(dir + "/autodl", m1, c1);
 
     std::printf("server_test: %d Prüfungen, %d Fehler\n", checks, fails);
     return fails ? 1 : 0;
+}
+
+// ---- Demos automatisch laden ---------------------------------------------------------------------------------------
+#define NB "\xC2\xA0"   // geschütztes Leerzeichen zwischen Zahl und Einheit
+void autodlTests(const std::string& data, const std::string& matchJson, const std::string& checksum) {
+    // Codes prüfen und vereinheitlichen
+    CHECK(normAuthCode(" abcd-efghi-12ab\n") == "ABCD-EFGHI-12AB" && validAuthCode("ABCD-EFGHI-12AB"));
+    CHECK(normAuthCode("ABCD - EFGHI - 12AB") == "ABCD-EFGHI-12AB" && normAuthCode("AB\xC2\xA0" "CD-EFGHI-12AB") == "ABCD-EFGHI-12AB");
+    CHECK(!validAuthCode("ABCD-EFGH-12AB") && !validAuthCode("ABCD_EFGHI_12AB") && !validAuthCode("abcd-efghi-12ab") && !validAuthCode(""));
+    CHECK(maskAuthCode("ABCD-EFGHI-12AB") == "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2-"
+                                            "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2-12AB");
+    CHECK(maskAuthCode("") == "" && maskAuthCode("ABCD-EFGHI-12AB").find("ABCD") == std::string::npos);
+    const std::string share = "CSGO-rfymV-6yTRU-kvN6S-mkOYF-XTkDA";
+    CHECK(validShareCode(share) && normShareCode(" csgo-rfymV-6yTRU-kvN6S-mkOYF-XTkDA ") == share);
+    CHECK(!validShareCode("CSGO-abcd-FGHIJ-23456-kmnop-QRSTU") && !validShareCode("CSGO-abcde-FGHIJ-23456-kmnop") &&
+          !validShareCode("CSGX-abcde-FGHIJ-23456-kmnop-QRSTU") && !validShareCode(share + "-x") && !validShareCode("CSGO-abcde-FGH!J-23456-kmnop-QRSTU"));
+    // wie Valve: ohne 0, 1, I, l, g und höchstens 144 Bit (sonst lehnt fragdesk-fetch den Code ab)
+    CHECK(!validShareCode("CSGO-abcde-FGHIJ-23456-kmnop-QRSTU") && !validShareCode("CSGO-rfymV-6yTRU-kvN6S-mkOYF-XTk0A") &&
+          !validShareCode("CSGO-ZZZZZ-YYYYY-XXXXX-WWWWW-VVVVV") && validShareCode("CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE"));
+    CHECK(normApiKey("0123456789abcdef0123456789ABCDEF") == "0123456789ABCDEF0123456789ABCDEF" && validApiKey("0123456789ABCDEF0123456789ABCDEF"));
+    CHECK(!validApiKey("0123456789ABCDEF0123456789ABCDE") && !validApiKey("0123456789ABCDEF0123456789ABCDEG"));
+    CHECK(normGuardCode(" ab12c ") == "AB12C" && validGuardCode("AB12C") && !validGuardCode("AB12") && !validGuardCode("AB12C3"));
+    CHECK(validRefreshToken("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJzdGVhbSJ9.c2lnbmF0dXJl") && !validRefreshToken("kurz") &&
+          !validRefreshToken("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJzdGVhbSJ9 c2lnbmF0dXJl"));
+    CHECK(validSteamName("meinserver_bot") && !validSteamName("") && !validSteamName("mit leerzeichen"));
+    CHECK(epochFrom(1762588800) == 1762588800 && epochFrom(1762588800123.0) == 1762588800 && epochFrom(-5) == 0 && epochFrom(0) == 0);
+    CHECK(agoText(5) == "gerade eben" && agoText(185) == "vor 3" NB "min" && agoText(7300) == "vor 2" NB "Std." && agoText(90000) == "vor 1" NB "Tag" &&
+          agoText(4 * 86400) == "vor 4" NB "Tagen");
+    CHECK(matchesText(1) == "1" NB "Match" && matchesText(4) == "4" NB "Matches");
+    CHECK(helperProblem("").empty() && helperProblem("on").empty() && helperProblem("node").find("Node.js") != std::string::npos &&
+          !helperProblem("off").empty());
+
+    // Sätze für die Handy-App
+    AutodlFacts f;
+    std::string tone;
+    f.now = 1762588800;
+    CHECK(autodlStatus(f, tone).find("Spieler wählen") != std::string::npos && tone == "wait");
+    f.hasSteamId = true;
+    CHECK(autodlStatus(f, tone) == "Der Admin muss erst den Steam-Bot einrichten. Deine Codes kannst du schon eintragen." && tone == "wait");
+    f.admin = true;
+    CHECK(autodlStatus(f, tone).find("Server verwalten › Steam-Bot") != std::string::npos);
+    f.helperProblem = helperProblem("node");
+    CHECK(autodlStatus(f, tone) == f.helperProblem);
+    f.admin = false;
+    CHECK(autodlStatus(f, tone).find("Sag dem Admin Bescheid") != std::string::npos);
+    f.helperProblem.clear();
+    f.botReady = true;
+    CHECK(autodlStatus(f, tone).find("trag deine beiden Codes ein") != std::string::npos && tone == "off");
+    f.enabled = f.hasAuth = f.hasKnown = true;
+    CHECK(autodlStatus(f, tone) == "Eingeschaltet – die erste Prüfung kommt gleich." && tone == "ok");
+    f.lastCheck = f.now - 185;
+    f.fetched = 4;
+    CHECK(autodlStatus(f, tone) == "Prüft alle 15" NB "Minuten · zuletzt vor 3" NB "min · 4" NB "Matches geladen" && tone == "ok");
+    f.fetched = 0;
+    CHECK(autodlStatus(f, tone) == "Prüft alle 15" NB "Minuten · zuletzt vor 3" NB "min · noch kein neues Match");
+    f.lastError = "Der Authentifizierungscode passt nicht zu deinem Steam-Konto.";
+    CHECK(autodlStatus(f, tone) == f.lastError + " (vor 3" NB "min)" && tone == "error");
+    f.checking = true;
+    CHECK(autodlStatus(f, tone).rfind("Prüft gerade …", 0) == 0);
+    f.full = true;
+    CHECK(autodlStatus(f, tone).find("Speicher auf dem Server ist voll") != std::string::npos && tone == "error");
+    f.full = f.checking = f.botReady = false;
+    f.botNeedsLogin = true;   // Steam nimmt das Token des Bots nicht mehr
+    CHECK(autodlStatus(f, tone) == "Der Steam-Bot des Servers muss neu angemeldet werden – sag dem Admin Bescheid." && tone == "error");
+    f.enabled = false;
+    CHECK(autodlStatus(f, tone).find("neu angemeldet") != std::string::npos && tone == "wait");   // stört nur, wer es eingeschaltet hat
+    f.admin = true;
+    CHECK(autodlStatus(f, tone) == "Der Steam-Bot muss neu angemeldet werden: Server verwalten › Steam-Bot.");
+
+    // Anmeldung des Bots: Passwort und Code je genau einmal, nach 15 Minuten vergessen
+    SteamLogin login;
+    int64_t t = 1000000;
+    std::string err;
+    CHECK(login.view(t).state == "idle" && !login.take(t).active);
+    CHECK(!login.code("ABCDE", t, err) && !err.empty());   // ohne Anmeldung kein Code
+    login.start("meinbot", "geheim-Passwort-1", t);
+    SteamLogin::View lv = login.view(t);
+    CHECK(lv.state == "working" && lv.active && !lv.pickedUp);
+    SteamLogin::Handout h = login.take(t + 1);
+    CHECK(h.active && h.user == "meinbot" && h.hasPassword && h.password == "geheim-Passwort-1" && !h.hasCode);
+    h = login.take(t + 2);
+    CHECK(h.active && h.user == "meinbot" && !h.hasPassword && h.password.empty() && !h.hasCode);   // nur einmal
+    CHECK(login.view(t + 2).pickedUp);
+    CHECK(!login.code("ABCDE", t + 3, err));   // noch kein need-code
+    CHECK(login.report("need-code", "", "app", t + 4, err));
+    lv = login.view(t + 4);
+    CHECK(lv.state == "need-code" && lv.codeType == "app" && lv.hint.find("Steam-App") != std::string::npos);
+    CHECK(login.code("XY9Z8", t + 5, err));
+    CHECK(login.view(t + 5).state == "working" && login.view(t + 5).hint == "Code wird geprüft …");
+    h = login.take(t + 6);
+    CHECK(h.hasCode && h.code == "XY9Z8" && !h.hasPassword);
+    CHECK(!login.take(t + 7).hasCode);   // auch der Code nur einmal
+    CHECK(login.report("need-code", "Code falsch – bitte den neuen Code eingeben.", "email", t + 8, err));
+    CHECK(login.view(t + 8).codeType == "email" && login.view(t + 8).hint == "Code falsch – bitte den neuen Code eingeben.");
+    CHECK(login.report("need-confirm", "", "", t + 9, err) && login.view(t + 9).state == "need-confirm" && login.view(t + 9).codeType.empty());
+    CHECK(login.report("need-confirm", "", "app", t + 9, err) && login.view(t + 9).codeType == "app");   // auch der App-Code geht
+    CHECK(login.code("QWE2T", t + 9, err) && login.take(t + 9).code == "QWE2T");   // statt Bestätigen: Code aus der App
+    CHECK(!login.report("bogus", "", "", t + 9, err));
+    CHECK(login.report("done", "Angemeldet als meinbot.", "", t + 10, err));
+    lv = login.view(t + 10);
+    CHECK(lv.state == "done" && !lv.active && !login.take(t + 11).active);
+    CHECK(!login.report("need-code", "", "email", t + 12, err));   // nach dem Ende keine Zwischenstände mehr
+    CHECK(login.view(t + 10 + kLoginSeconds).state == "idle");     // Ergebnis verschwindet nach 15 Minuten
+    // Ablauf: offene Anmeldung nach 15 Minuten vergessen
+    login.start("meinbot", "geheim-Passwort-2", t);
+    CHECK(login.report("need-code", "", "email", t + 30, err));
+    CHECK(login.view(t + kLoginSeconds - 1).active);
+    CHECK(!login.take(t + kLoginSeconds).active);
+    lv = login.view(t + kLoginSeconds);
+    CHECK(lv.state == "error" && lv.hint.find("Zeit abgelaufen") != std::string::npos);
+    CHECK(!login.code("ABCDE", t + kLoginSeconds, err) && err.find("Bot anmelden") != std::string::npos);
+    CHECK(login.report("error", "Zeit abgelaufen", "", t + kLoginSeconds + 5, err));   // Ergebnis gilt auch danach
+    login.start("meinbot", "geheim-Passwort-3", t);
+    login.expire(t + kLoginSeconds + 1);
+    CHECK(!login.take(t + kLoginSeconds + 1).hasPassword);
+    login.start("meinbot", "geheim-Passwort-4", t);
+    login.cancel();
+    CHECK(login.view(t).state == "idle" && !login.take(t).active);
+    // "error" vom Helfer ohne offene Anmeldung: verspätet (Anmeldung eben abgelaufen) oder aus dem normalen Lauf
+    SteamLogin late;
+    CHECK(!late.loginError(t));                                  // nie angemeldet: aus dem Lauf (Token abgelehnt)
+    late.start("meinbot", "geheim-Passwort-5", t);
+    CHECK(late.loginError(t + 1));                               // offen: gehört zur Anmeldung
+    CHECK(late.take(t + 2).hasPassword && late.report("need-code", "", "email", t + 3, err));
+    CHECK(late.view(t + kLoginSeconds).state == "error");        // beim Server abgelaufen …
+    CHECK(late.loginError(t + kLoginSeconds + 600));             // … der Helfer meldet sich 10 Minuten später: kein Token-Problem
+    CHECK(late.report("error", "Zeit abgelaufen – bitte noch einmal anmelden.", "", t + kLoginSeconds + 600, err));
+    CHECK(!late.loginError(t + 2 * kLoginSeconds + 1));          // viel später: wieder aus dem Lauf
+    late.start("meinbot", "geheim-Passwort-6", t);
+    CHECK(late.take(t + 1).hasPassword && late.report("done", "Angemeldet als meinbot.", "", t + 20, err));
+    CHECK(late.view(t + 30).state == "done" && !late.loginError(t + 30));   // Token abgelehnt: „angemeldet“ gilt nicht mehr
+    CHECK(late.view(t + 31).state == "idle");
+    late.start("meinbot", "geheim-Passwort-7", t);              // nie abgeholt und abgelaufen: kann nur aus dem Lauf kommen
+    CHECK(late.view(t + kLoginSeconds).state == "error" && !late.loginError(t + kLoginSeconds + 5));
+
+    // Speichern, Auftrag, Meldungen des Helfers
+    removeTree(data);
+    Store s;
+    CHECK(s.open(data, err));
+    CHECK(mode(s.fetchDir()) == 0700);
+    Invite inv;
+    std::string code, ta, tb;
+    UserPtr a, b;
+    CHECK(s.createInvite(true, 7, "", inv, code).ok() && s.registerUser(code, "Micha", "76561190000000001", "", a, ta).ok());
+    CHECK(s.createInvite(false, 7, a->id, inv, code).ok() && s.registerUser(code, "Ohne Spieler", "", "", b, tb).ok());
+    const std::string auth = "ABCD-EFGHI-12AB", known2 = "CSGO-qAQS4-hUAmk-eOzmO-BzS7q-m3LHA";
+    CHECK(s.setAutodl(b, auth, share, 1).status == 400);   // ohne SteamID
+    CHECK(s.setAutodl(a, "", "", 1).status == 400);         // zum Einschalten fehlen die Codes
+    CHECK(s.setAutodl(a, auth, "", 1).status == 400 && s.autodl(a).authCode.empty());   // nichts halb gespeichert
+    CHECK(s.setAutodl(a, auth, share, 1).ok() && s.autodl(a).enabled && s.info(a).autodl && s.autodlCount() == 1);
+    std::string acct;
+    CHECK(readFile(s.userDir(a->id) + "/account.json", acct) && acct.find("\"autodl\":{\"enabled\":true") != std::string::npos &&
+          acct.find(auth) != std::string::npos && mode(s.userDir(a->id) + "/account.json") == 0600);
+    CHECK(s.setAutodl(a, "", "", 0).ok() && !s.autodl(a).enabled && s.autodl(a).authCode == auth);   // aus: Codes bleiben
+    CHECK(s.fetchAccounts(t).empty());
+    CHECK(s.setAutodl(a, "", "", 1).ok());   // wieder an, mit den gespeicherten Codes
+    std::vector<FetchAccount> job = s.fetchAccounts(t);
+    CHECK(job.size() == 1 && job[0].id == a->id && job[0].steamId == "76561190000000001" && job[0].authCode == auth && job[0].knownCode == share);
+    bool ignored = true;
+    std::string none;
+    CHECK(s.fetchState(a, known2, "", t + 5, 0, &none, ignored).ok() && !ignored && s.autodl(a).knownCode == known2 && s.autodl(a).lastCheck == t + 5);
+    std::string e403 = "Der Authentifizierungscode passt nicht.";
+    CHECK(s.fetchState(a, known2, "", t + 6, 0, &e403, ignored).ok() && s.autodl(a).lastError == e403);
+    CHECK(s.fetchState(a, known2, "", t + 7, 0, nullptr, ignored).ok() && s.autodl(a).lastError == e403);   // ohne lastError: bleibt
+    // Codes am Handy geändert, während der Helfer noch mit den alten arbeitet: seine Meldung gilt nicht mehr
+    CHECK(s.setAutodl(a, "", share, -1).ok() && s.autodl(a).lastError.empty() && s.autodl(a).lastCheck == 0);
+    CHECK(s.fetchState(a, known2, "", t + 8, 0, &none, ignored).ok() && ignored && s.autodl(a).knownCode == share);
+    CHECK(s.fetchAccounts(t + 9).size() == 1 && s.fetchState(a, known2, "", t + 9, 0, &none, ignored).ok() && !ignored && s.autodl(a).knownCode == known2);
+    // from: der Helfer geht von einem bestimmten Freigabecode aus – passt er nicht mehr, gilt die Meldung nicht
+    CHECK(s.fetchState(a, share, share, t + 9, 0, &none, ignored).ok() && ignored && s.autodl(a).knownCode == known2);
+    CHECK(s.fetchState(a, known2, known2, t + 9, 0, &none, ignored).ok() && !ignored);
+    // neue Matches zählt der Server selbst
+    bool isNew = false;
+    CHECK(s.putMatchFile(a, checksum, MatchPart::Json, matchJson, &isNew).ok() && isNew);
+    s.fetchedMatch(a, t + 10);
+    CHECK(s.putMatchFile(a, checksum, MatchPart::Json, matchJson, &isNew).ok() && !isNew);   // ersetzt: nicht neu
+    CHECK(s.putMatchFile(a, checksum, MatchPart::Heat, "FDHM1234", &isNew).ok() && !isNew);
+    CHECK(s.autodl(a).fetched == 1 && s.autodl(a).lastNew == t + 10);
+    // Speicher fast voll: das Konto fehlt im Auftrag (nichts umsonst herunterladen)
+    CHECK(s.setLimit(a->id, s.used(a) + (1 << 20)).ok() && s.nearlyFull(a) && s.fetchAccounts(t + 11).empty());
+    CHECK(s.setLimit(a->id, 0).ok() && !s.nearlyFull(a) && s.fetchAccounts(t + 12).size() == 1);
+    // wake: atomar neu geschrieben, aktuelle Zeit
+    CHECK(s.wakeHelper());
+    std::string wake = s.fetchDir() + "/wake", w1, w2;
+    int64_t ino1 = inode(wake);
+    CHECK(readFile(wake, w1) && std::atoll(w1.c_str()) > 1700000000 && w1.find('.') != std::string::npos && mode(wake) == 0600);
+    CHECK(s.wakeHelper() && readFile(wake, w2) && inode(wake) != ino1);   // neue Datei (Path-Unit: PathModified)
+    bool tmpLeft = false;
+    for (const std::string& n : listDir(s.fetchDir())) tmpLeft = tmpLeft || n.find(".tmp-") != std::string::npos;
+    CHECK(!tmpLeft);
+    // „Jetzt prüfen“ höchstens alle 30 s
+    CHECK(s.requestCheck(a, t) && !s.requestCheck(a, t + 29) && s.requestCheck(a, t + 30));
+    // aus und Codes löschen: der Helfer bekommt nichts mehr, Meldungen gelten nicht
+    CHECK(s.clearAutodl(a).ok() && !s.autodl(a).enabled && s.autodl(a).authCode.empty() && s.autodl(a).knownCode.empty());
+    CHECK(s.fetchAccounts(t + 13).empty() && s.fetchState(a, known2, "", t + 13, 0, &none, ignored).status == 403);
+    CHECK(s.autodl(a).fetched == 1);   // gezählte Matches bleiben
+    CHECK(s.setAutodl(a, auth, share, 1).ok());
+
+    // Steam-Bot: Geheimnisse nur in steam.json (0600), server.json nur Name, SteamID, Ablauf
+    const std::string token = "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiI3NjU2MTE5OCJ9.dGVzdC1zaWduYXR1cmU";
+    const std::string key = "0123456789ABCDEF0123456789ABCDEF";
+    CHECK(!s.steam().ready(t) && fileSize(data + "/steam.json") < 0);
+    CHECK(s.setSteamKey(key).ok() && s.steam().hasKey && !s.steam().ready(t) && mode(data + "/steam.json") == 0600);
+    CHECK(s.setSteamLogin(token, "meinbot", "76561199000000001", t + 200 * 86400).ok() && s.steam().ready(t) && !s.steam().ready(t + 201 * 86400));
+    std::string rt, ak, sj, srv;
+    s.steamSecrets(rt, ak);
+    CHECK(rt == token && ak == key);
+    CHECK(readFile(data + "/steam.json", sj) && sj.find(token) != std::string::npos && sj.find(key) != std::string::npos);
+    CHECK(readFile(data + "/server.json", srv) && srv.find("\"botName\":\"meinbot\"") != std::string::npos && srv.find(token) == std::string::npos &&
+          srv.find(key) == std::string::npos);
+    CHECK(s.setSteamToken(token + "x", 0).ok() && s.steam().tokenUntil == t + 200 * 86400);   // ohne neuen Ablauf: bleibt
+    // Steam lehnt das Token im normalen Lauf ab: Bot braucht eine neue Anmeldung, das Token geht nicht mehr an den Helfer
+    s.steamTokenRejected("Steam nimmt das Anmelde-Token nicht mehr an – bitte neu anmelden.");
+    SteamBot sb0 = s.steam();
+    CHECK(!sb0.loggedIn(t) && sb0.needsLogin(t) && !sb0.ready(t) && sb0.tokenHint.find("Steam nimmt") == 0 && sb0.name == "meinbot");
+    s.steamSecrets(rt, ak);
+    CHECK(rt.empty() && ak == key);
+    CHECK(s.setSteamToken(token + "x", 0).ok() && s.steam().loggedIn(t) && !s.steam().needsLogin(t) && s.steam().tokenHint.empty());
+    s.runPhase(true, "", t);
+    CHECK(s.steam().running && s.steam().runStart == t);
+    s.runPhase(false, "2 neue Matches geladen", t + 60);
+    CHECK(!s.steam().running && s.steam().lastRunAt == t + 60 && s.steam().lastRunText == "2 neue Matches geladen");
+    s.flush();
+    {
+        Store again;   // alles wieder da
+        CHECK(again.open(data, err));
+        UserPtr a2 = again.byAccountToken(ta);
+        AutoDl d = a2 ? again.autodl(a2) : AutoDl();
+        CHECK(d.enabled && d.authCode == auth && d.knownCode == share && d.fetched == 1);
+        SteamBot sb = again.steam();
+        CHECK(sb.name == "meinbot" && sb.steamId == "76561199000000001" && sb.hasToken && sb.hasKey && sb.lastRunText == "2 neue Matches geladen");
+        std::string rt2, ak2;
+        again.steamSecrets(rt2, ak2);
+        CHECK(rt2 == token + "x" && ak2 == key);
+        CHECK(again.forgetSteamBot().ok() && !again.steam().hasToken && again.steam().name.empty() && again.steam().hasKey);   // Schlüssel bleibt
+        CHECK(readFile(data + "/steam.json", sj) && sj.find(token) == std::string::npos && sj.find(key) != std::string::npos);
+        CHECK(again.setSteamKey("").ok() && fileSize(data + "/steam.json") < 0);   // nichts Geheimes mehr: Datei weg
+    }
+    // Passwörter der Anmeldung landen nie auf der Platte
+    CHECK(!grep(data, "geheim-Passwort"));
 }

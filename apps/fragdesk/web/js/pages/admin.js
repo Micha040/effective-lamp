@@ -1,7 +1,8 @@
 // FragDesk Handy-App – eigenen Server verwalten (nur Admins): Freunde einladen, Einladungen zurückziehen, Konten mit
-// Speicher, Limit ändern, Konten entfernen
+// Speicher, Limit ändern, Konten entfernen, Steam-Bot für „Demos automatisch laden“
 import {h, icon, card, chips, sheet, closeSheet, toast, skeleton, usageBar, fmtBytes, fmtDay, copyText} from '../ui.js';
 import * as api from '../api.js';
+import {steamBotSection} from './autodl.js';
 
 const GiB = 1024 ** 3;
 const LIMITS = [5, 10, 15, 25, 50, 0];   // GB, 0 = unbegrenzt
@@ -13,15 +14,20 @@ export async function render(ctx) {
   ctx.title('Server verwalten');
   const paths = ['/api/v1/me', '/api/v1/admin/users', '/api/v1/admin/invites'];
   const old = paths.map(p => api.cached(p));
-  if (old.every(Boolean) && !ctx.fresh) draw(ctx, ...old);
+  const steam = steamBotSection(ctx);   // lädt sich selbst, bleibt beim zweiten Zeichnen dasselbe Element
+  if (old.every(Boolean) && !ctx.fresh) draw(ctx, ...old, steam);
   else ctx.main.replaceChildren(h('h1', {class: 'page-title'}, 'Server'), h('div', {class: 'page-sub'}, location.host), ...skeleton(190, 120, 260));
   const [me, users, invites] = await Promise.all(paths.map(p => api.get(p)));
   if (!ctx.current()) return;
   if (lastInvite && !invites.some(i => i.id === lastInvite.id)) lastInvite = null;   // eingelöst oder zurückgezogen
-  draw(ctx, me, users, invites);
+  draw(ctx, me, users, invites, steam);
+  if (ctx.query.get('steam')) {   // aus den Einstellungen: „Steam-Bot einrichten“
+    const head = ctx.main.querySelector('#steam-bot');
+    if (head) requestAnimationFrame(() => head.scrollIntoView({block: 'start'}));
+  }
 }
 
-function draw(ctx, me, users, invites) {
+function draw(ctx, me, users, invites, steam) {
   const used = users.reduce((s, u) => s + u.used, 0);
   const out = [
     h('h1', {class: 'page-title'}, 'Server'),
@@ -65,6 +71,7 @@ function draw(ctx, me, users, invites) {
   }))));
   out.push(h('p', {class: 'muted', style: {fontSize: '12.5px', textAlign: 'center', marginTop: '18px'}},
     'Jeder sieht nur sein eigenes Konto. Eingeladene Konten bekommen 15 GB, Admins unbegrenzt – das Limit änderst du hier pro Konto.'));
+  out.push(h('div', {class: 'section', id: 'steam-bot'}, 'Steam-Bot – Demos automatisch laden'), steam);
   ctx.main.replaceChildren(...out);
 }
 

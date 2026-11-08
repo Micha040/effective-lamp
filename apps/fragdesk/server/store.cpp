@@ -1,6 +1,8 @@
 // fragdesk-server – Konten, Einladungen, Schlüssel und Dateien (siehe store.h)
 #include "store.h"
 
+#include <time.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -9,6 +11,7 @@
 #include "../src/api/jsonw.h"
 #include "../src/core/format.h"
 #include "../src/core/json.h"
+#include "autodl.h"
 #include "files.h"
 #include "sha256.h"
 
@@ -110,6 +113,7 @@ bool Store::open(const std::string& dataDir, std::string& err) {
         err = "Der Datenordner " + dir_ + " lässt sich nicht anlegen: " + lastError();
         return false;
     }
+    if (!makeDirs(fetchDir(), 0700)) std::cerr << "Hinweis: " << fetchDir() << " lässt sich nicht anlegen: " << lastError() << "\n";
     std::string keyPath = joinPath(dir_, "local.key"), key;
     if (readFile(keyPath, key, 4096)) key = trim(key);
     if (key.size() != 64 || !hexOnly(key)) {
@@ -122,6 +126,7 @@ bool Store::open(const std::string& dataDir, std::string& err) {
     localKey_ = key;
     std::lock_guard<std::mutex> lk(mu_);
     if (!loadServer(err)) return false;
+    loadSteam();
     for (const std::string& n : listDir(dir_))
         if (n.find(".tmp-") != std::string::npos) removeFile(joinPath(dir_, n));   // Reste eines Absturzes
     for (auto& kv : users_) {
@@ -157,6 +162,16 @@ bool Store::loadServer(std::string& err) {
         settings_.url = s.getString("url", settings_.url);
         settings_.listen = s.getString("listen", settings_.listen);
         settings_.defaultLimit = int64_t(s.getNumber("defaultLimit", double(kDefaultLimit)));
+    }
+    const json::Value& st = v["steam"];
+    if (st.isObject()) {
+        steam_.name = st.getString("botName");
+        steam_.steamId = st.getString("botSteamId");
+        steam_.tokenUntil = int64_t(st.getNumber("tokenUntil"));
+        steam_.lastRunAt = int64_t(st.getNumber("lastRunAt"));
+        steam_.lastRunText = st.getString("lastRunText");
+        steam_.tokenBad = st.getBool("tokenBad");
+        steam_.tokenHint = st.getString("tokenHint");
     }
     for (const auto& e : v["users"].arr) {
         std::string id = e.getString("id");
@@ -226,7 +241,47 @@ bool Store::loadAccount(const UserPtr& u, std::string& err) {
         deviceTokens_[r.hash] = u->id;
         u->devices.push_back(r);
     }
+    const json::Value& a = v["autodl"];
+    if (a.isObject()) {
+        AutoDl& d = u->autodl;
+        d.authCode = normAuthCode(a.getString("authCode"));
+        d.knownCode = normShareCode(a.getString("knownCode"));
+        if (!validAuthCode(d.authCode)) d.authCode.clear();
+        if (!validShareCode(d.knownCode)) d.knownCode.clear();
+        d.enabled = a.getBool("enabled") && !d.authCode.empty() && !d.knownCode.empty();
+        d.lastCheck = int64_t(a.getNumber("lastCheck"));
+        d.lastNew = int64_t(a.getNumber("lastNew"));
+        d.lastError = a.getString("lastError");
+        d.fetched = std::max<int64_t>(0, int64_t(a.getNumber("fetched")));
+    }
     return true;
+}
+
+// steam.json: {"refreshToken", "apiKey"} – fehlt sie, ist der Bot einfach nicht eingerichtet
+void Store::loadSteam() {
+    std::string path = joinPath(dir_, "steam.json"), text;
+    if (fileSize(path) < 0) return;
+    json::Value v;
+    if (!readFile(path, text, 1 << 20) || !json::parse(text, v) || !v.isObject()) {
+        std::cerr << "Hinweis: steam.json lässt sich nicht lesen – den Steam-Bot unter Server verwalten neu anmelden.\n";
+        return;
+    }
+    refreshToken_ = v.getString("refreshToken");
+    apiKey_ = v.getString("apiKey");
+    if (!validRefreshToken(refreshToken_)) refreshToken_.clear();
+    if (!validApiKey(apiKey_)) apiKey_.clear();
+    steam_.hasToken = !refreshToken_.empty();
+    steam_.hasKey = !apiKey_.empty();
+}
+
+bool Store::saveSteam() {
+    std::string path = joinPath(dir_, "steam.json");
+    if (refreshToken_.empty() && apiKey_.empty()) return removeFile(path);   // nichts Geheimes mehr da
+    JsonW j;
+    j.obj().ki("format", 1).kv("refreshToken", refreshToken_).kv("apiKey", apiKey_).end();
+    bool ok = writeAtomic(path, j.take() + "\n", 0600);
+    if (!ok) std::cerr << "Fehler: steam.json lässt sich nicht speichern: " << lastError() << "\n";
+    return ok;
 }
 
 void Store::scanFiles(const UserPtr& u) {
@@ -295,6 +350,16 @@ bool Store::saveServer() {
     JsonW j;
     j.obj().ki("format", 1);
     j.key("settings").obj().kv("url", settings_.url).kv("listen", settings_.listen).ki("defaultLimit", settings_.defaultLimit).end();
+    j.key("steam")
+        .obj()
+        .kv("botName", steam_.name)
+        .kv("botSteamId", steam_.steamId)
+        .ki("tokenUntil", steam_.tokenUntil)
+        .ki("lastRunAt", steam_.lastRunAt)
+        .kv("lastRunText", steam_.lastRunText)
+        .kb("tokenBad", steam_.tokenBad)
+        .kv("tokenHint", steam_.tokenHint)
+        .end();
     j.key("users").arr();
     for (const auto& kv : users_) {
         const User& u = *kv.second;
@@ -322,7 +387,19 @@ bool Store::saveAccount(const UserPtr& u) {
     j.key("devices").arr();
     for (const DeviceRec& d : u->devices)
         j.obj().kv("id", d.id).kv("hash", d.hash).kv("name", d.name).ki("created", d.created).ki("lastSeen", d.lastSeen).end();
-    j.end().end();
+    j.end();
+    const AutoDl& a = u->autodl;
+    j.key("autodl")
+        .obj()
+        .kb("enabled", a.enabled)
+        .kv("authCode", a.authCode)
+        .kv("knownCode", a.knownCode)
+        .ki("lastCheck", a.lastCheck)
+        .ki("lastNew", a.lastNew)
+        .kv("lastError", a.lastError)
+        .ki("fetched", a.fetched)
+        .end();
+    j.end();
     bool ok = writeAtomic(joinPath(userDir(u->id), "account.json"), j.take() + "\n");
     if (ok) u->dirty = false;
     else std::cerr << "Fehler: account.json von " << u->id << " lässt sich nicht speichern: " << lastError() << "\n";
@@ -433,6 +510,7 @@ UserInfo Store::info(const UserPtr& u) const {
     i.name = u->name;
     i.steamId = u->steamId;
     i.admin = u->admin;
+    i.autodl = u->autodl.enabled;
     i.limit = u->limit;
     i.used = u->used;
     i.created = u->created;
@@ -790,13 +868,15 @@ Fail Store::checkSpace(const User& u, int64_t grow) const {
     return Fail();
 }
 
-Fail Store::putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body) {
+Fail Store::putMatchFile(const UserPtr& u, const std::string& checksum, MatchPart part, const std::string& body, bool* isNew) {
     std::lock_guard<std::mutex> fl(u->fileMu);
     bool extra = part == MatchPart::Replay || part == MatchPart::NoReplay;
+    if (isNew) *isNew = false;
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (!alive(u)) return Fail::make(401, kGone);
         auto it = u->matches.find(checksum);
+        if (isNew) *isNew = part == MatchPart::Json && (it == u->matches.end() || it->second.json < 0);
         if (extra && (it == u->matches.end() || it->second.json < 0)) return Fail::make(404, "Das Match ist (noch) nicht auf dem Server.");
         if (part == MatchPart::NoReplay && it->second.replay >= 0) return Fail();   // die 2D-Daten sind schon da: nichts zu merken
         if (it == u->matches.end() && u->matches.size() >= kMaxMatches)
@@ -997,6 +1077,231 @@ int64_t Store::used(const UserPtr& u) const {
 int64_t Store::limit(const UserPtr& u) const {
     std::lock_guard<std::mutex> lk(mu_);
     return u->limit;
+}
+
+// ---- Demos automatisch laden: Konten ----------------------------------------------------------------------------
+namespace {
+const int64_t kMatchRoom = 4 << 20;   // so viel muss frei sein, damit der Helfer ein Match holt (JSON, Heatmap, 2D-Daten)
+const char* kAutodlOff = "Für dieses Konto ist „Demos automatisch laden“ aus.";
+}  // namespace
+
+AutoDl Store::autodl(const UserPtr& u) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return u->autodl;
+}
+
+Fail Store::setAutodl(const UserPtr& u, const std::string& authCode, const std::string& knownCode, int enabled) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!alive(u)) return Fail::make(401, kGone);
+    if (u->steamId.empty()) return Fail::make(400, "Erst in FragDesk am PC deinen Spieler wählen.");
+    AutoDl next = u->autodl;
+    bool codes = (!authCode.empty() && authCode != next.authCode) || (!knownCode.empty() && knownCode != next.knownCode);
+    if (!authCode.empty()) next.authCode = authCode;
+    if (!knownCode.empty()) next.knownCode = knownCode;
+    if (enabled >= 0) next.enabled = enabled == 1;
+    if (next.enabled && next.authCode.empty()) return Fail::make(400, "Der Authentifizierungscode fehlt.");
+    if (next.enabled && next.knownCode.empty()) return Fail::make(400, "Der Freigabecode deines letzten Matches fehlt.");
+    if (codes) {   // neue Codes: alte Fehlermeldung gilt nicht mehr, ein laufender Helfer arbeitet mit den alten
+        next.lastError.clear();
+        next.lastCheck = 0;
+        ++next.rev;
+    }
+    AutoDl old = u->autodl;
+    u->autodl = next;
+    if (!saveAccount(u)) {
+        u->autodl = old;
+        return Fail::make(500, "Die Einstellung lässt sich auf dem Server nicht speichern.");
+    }
+    return Fail();
+}
+
+Fail Store::clearAutodl(const UserPtr& u) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!alive(u)) return Fail::make(401, kGone);
+    AutoDl old = u->autodl;
+    AutoDl& a = u->autodl;
+    a.enabled = false;
+    a.authCode.clear();
+    a.knownCode.clear();
+    a.lastError.clear();
+    a.lastCheck = 0;
+    ++a.rev;
+    if (!saveAccount(u)) {
+        u->autodl = old;
+        return Fail::make(500, "Die Einstellung lässt sich auf dem Server nicht speichern.");
+    }
+    return Fail();
+}
+
+bool Store::requestCheck(const UserPtr& u, int64_t now) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!alive(u) || now - u->autodl.checkAt < 30) return false;
+    u->autodl.checkAt = now;
+    return true;
+}
+
+bool Store::nearlyFullLocked(const User& u, int64_t free) const {
+    if (u.limit > 0 && u.used + kMatchRoom > u.limit) return true;
+    return free >= 0 && free - kMatchRoom < minFree;
+}
+
+bool Store::nearlyFull(const UserPtr& u) const {
+    int64_t free = freeBytes(dir_);
+    std::lock_guard<std::mutex> lk(mu_);
+    return nearlyFullLocked(*u, free);
+}
+
+std::vector<FetchAccount> Store::fetchAccounts(int64_t now) {
+    int64_t free = freeBytes(dir_);
+    std::lock_guard<std::mutex> lk(mu_);
+    std::vector<UserPtr> list;
+    for (const auto& kv : users_) list.push_back(kv.second);
+    std::stable_sort(list.begin(), list.end(), [](const UserPtr& a, const UserPtr& b) { return a->created < b->created; });
+    std::vector<FetchAccount> out;
+    for (const UserPtr& u : list) {
+        AutoDl& a = u->autodl;
+        if (u->deleted || !a.enabled || u->steamId.empty() || a.authCode.empty() || a.knownCode.empty()) continue;
+        if (nearlyFullLocked(*u, free)) continue;   // voll: gar nicht erst herunterladen (der Freigabecode bleibt stehen)
+        a.jobRev = a.rev;
+        a.jobAt = now;
+        out.push_back(FetchAccount{u->id, u->steamId, a.authCode, a.knownCode});
+    }
+    return out;
+}
+
+Fail Store::fetchState(const UserPtr& u, const std::string& knownCode, const std::string& from, int64_t lastCheck, int64_t lastNew,
+                       const std::string* lastError, bool& ignored) {
+    ignored = false;
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!alive(u)) return Fail::make(404, kGone);
+    AutoDl& a = u->autodl;
+    if (!a.enabled) return Fail::make(403, kAutodlOff);
+    // am Handy geändert, seit der Helfer seinen Auftrag hat, oder er geht von einem anderen Code aus: Stand veraltet
+    if (a.jobRev != a.rev || (!from.empty() && from != a.knownCode)) {
+        ignored = true;
+        return Fail();
+    }
+    a.knownCode = knownCode;
+    if (lastCheck > 0) a.lastCheck = lastCheck;
+    if (lastNew > a.lastNew) a.lastNew = lastNew;
+    if (lastError) a.lastError = *lastError;
+    if (!saveAccount(u)) return Fail::make(500, "Der Stand lässt sich auf dem Server nicht speichern.");
+    return Fail();
+}
+
+void Store::fetchedMatch(const UserPtr& u, int64_t now) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!alive(u)) return;
+    ++u->autodl.fetched;
+    u->autodl.lastNew = now;
+    u->dirty = true;   // speichert die nächste Meldung des Helfers (oder maintain)
+}
+
+int Store::autodlCount() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    int n = 0;
+    for (const auto& kv : users_) n += kv.second->autodl.enabled ? 1 : 0;
+    return n;
+}
+
+bool Store::wakeHelper() {
+    timespec ts{};
+    clock_gettime(CLOCK_REALTIME, &ts);
+    char b[40];
+    snprintf(b, sizeof b, "%lld.%03ld\n", static_cast<long long>(ts.tv_sec), ts.tv_nsec / 1000000);
+    // neu schreiben statt ändern: die Path-Unit (PathModified) bemerkt beides, der Helfer sieht nie eine halbe Datei
+    bool ok = makeDirs(fetchDir(), 0700) && writeAtomic(joinPath(fetchDir(), "wake"), b, 0600);
+    if (!ok) std::cerr << "Fehler: " << fetchDir() << "/wake lässt sich nicht schreiben: " << lastError() << "\n";
+    return ok;
+}
+
+// ---- Demos automatisch laden: Steam-Bot -------------------------------------------------------------------------
+SteamBot Store::steam() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return steam_;
+}
+
+void Store::steamSecrets(std::string& refreshToken, std::string& apiKey) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    refreshToken = steam_.tokenBad ? std::string() : refreshToken_;   // abgelehntes Token nicht wieder versuchen lassen
+    apiKey = apiKey_;
+}
+
+void Store::steamTokenRejected(const std::string& hint) {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!steam_.hasToken || (steam_.tokenBad && steam_.tokenHint == hint)) return;
+    steam_.tokenBad = true;
+    steam_.tokenHint = hint;
+    saveServer();
+}
+
+Fail Store::setSteamLogin(const std::string& refreshToken, const std::string& name, const std::string& steamId, int64_t until) {
+    std::lock_guard<std::mutex> lk(mu_);
+    refreshToken_ = refreshToken;
+    steam_.hasToken = true;
+    steam_.tokenBad = false;
+    steam_.tokenHint.clear();
+    steam_.name = name;
+    steam_.steamId = steamId;
+    steam_.tokenUntil = until;
+    bool ok = saveSteam();
+    ok = saveServer() && ok;
+    if (!ok) return Fail::make(500, "Die Anmeldung des Bots lässt sich auf dem Server nicht speichern.");
+    return Fail();
+}
+
+Fail Store::setSteamToken(const std::string& refreshToken, int64_t until) {
+    std::lock_guard<std::mutex> lk(mu_);
+    refreshToken_ = refreshToken;
+    steam_.hasToken = true;
+    steam_.tokenBad = false;
+    steam_.tokenHint.clear();
+    if (until > 0) steam_.tokenUntil = until;
+    bool ok = saveSteam();
+    ok = saveServer() && ok;
+    if (!ok) return Fail::make(500, "Das neue Token lässt sich auf dem Server nicht speichern.");
+    return Fail();
+}
+
+Fail Store::setSteamKey(const std::string& apiKey) {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string old = apiKey_;
+    apiKey_ = apiKey;
+    steam_.hasKey = !apiKey_.empty();
+    if (!saveSteam()) {
+        apiKey_ = old;
+        steam_.hasKey = !apiKey_.empty();
+        return Fail::make(500, "Der Schlüssel lässt sich auf dem Server nicht speichern.");
+    }
+    return Fail();
+}
+
+Fail Store::forgetSteamBot() {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::fill(refreshToken_.begin(), refreshToken_.end(), '\0');
+    refreshToken_.clear();
+    steam_.hasToken = false;
+    steam_.tokenBad = false;
+    steam_.tokenHint.clear();
+    steam_.name.clear();
+    steam_.steamId.clear();
+    steam_.tokenUntil = 0;
+    bool ok = saveSteam();
+    ok = saveServer() && ok;
+    if (!ok) return Fail::make(500, "Das lässt sich auf dem Server nicht speichern.");
+    return Fail();
+}
+
+void Store::runPhase(bool start, const std::string& text, int64_t now) {
+    std::lock_guard<std::mutex> lk(mu_);
+    steam_.running = start;
+    if (start) {
+        steam_.runStart = now;
+        return;
+    }
+    steam_.lastRunAt = now;
+    steam_.lastRunText = text;
+    serverDirty_ = true;   // speichert maintain() (einmal pro Minute) – nicht bei jedem Lauf sofort
 }
 
 // ---- Aufräumen ----------------------------------------------------------------------------------------------------

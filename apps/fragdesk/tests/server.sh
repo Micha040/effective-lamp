@@ -5,6 +5,8 @@
 #   install_test.sh  install.sh in einem Schein-Wurzelordner (Installieren, Aktualisieren, --dry-run)
 # Testdaten: FD_TEST_DATA=<Ordner mit matches/*.json, clips.json und videos/> (z. B. von make_testdata.py) –
 # ohne erzeugt server_e2e.py kleine künstliche Matches und Videos.
+# FD_TEST_DEMO=<CS2-Demo>: der nachgebaute Helfer (Demos automatisch laden) wertet diese Demo wirklich aus – mit
+# build/fdanalyze-linux-x64 (sh build.sh analyzer-linux); ohne lädt er ein künstliches Match hoch.
 # Aufruf: sh tests/server.sh   (läuft auch am Ende von tests/run.sh)
 set -e
 cd "$(dirname "$0")/.."
@@ -23,5 +25,9 @@ if [ -z "$DATA" ]; then
   python3 tests/server_e2e.py --make-data "$DATA"
 fi
 ./build/tests/server_test "$TMP/unit" "$DATA/matches"
-python3 tests/server_e2e.py --bin build/fragdesk-server-linux-x64 --data "$DATA" --tmp "$TMP/e2e"
+if [ -n "$FD_TEST_DEMO" ] && [ -x build/fdanalyze-linux-x64 ]; then
+  python3 tests/server_e2e.py --bin build/fragdesk-server-linux-x64 --data "$DATA" --tmp "$TMP/e2e" --analyzer build/fdanalyze-linux-x64 --demo "$FD_TEST_DEMO"
+else
+  python3 tests/server_e2e.py --bin build/fragdesk-server-linux-x64 --data "$DATA" --tmp "$TMP/e2e"
+fi
 sh tests/install_test.sh "$TMP/install"

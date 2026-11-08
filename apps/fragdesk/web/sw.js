@@ -4,7 +4,7 @@ const CACHE = 'fragdesk-1.5.0';
 const SHELL = ['./', 'index.html', 'app.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'js/app.js', 'js/api.js', 'js/ui.js',
   'js/chart.js', 'js/filters.js', 'js/radar.js', 'js/pages/pair.js', 'js/pages/overview.js', 'js/pages/matches.js', 'js/pages/match.js', 'js/pages/stats.js',
   'js/pages/moments.js', 'js/pages/settings.js', 'js/pages/player.js', 'js/pages/admin.js', 'js/pages/invite.js', 'css/match.css', 'css/stats.css',
-  'js/heatmap.js', 'css/heat.css', 'js/pages/replay.js', 'css/replay.css'];
+  'js/heatmap.js', 'css/heat.css', 'js/pages/replay.js', 'css/replay.css', 'js/pages/autodl.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
