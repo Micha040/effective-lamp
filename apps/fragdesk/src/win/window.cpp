@@ -102,6 +102,7 @@ private:
     void* backBits_ = nullptr;
     int backW_ = 0, backH_ = 0;
     bool animTimer_ = false;                      // 2D-Ansicht läuft (Timer aktiv)
+    bool iconic_ = false;                         // minimiert (für „während der Aufnahme zurückgeholt“)
     std::function<void(float, float)> dragFn_;   // gerade gezogene Fläche (Zeitleiste)
 
     LRESULT handle(UINT msg, WPARAM wp, LPARAM lp);
@@ -560,7 +561,16 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_PAINT: onPaint(); return 0;
         case WM_ERASEBKGND: return 1;
-        case WM_SIZE: InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+        case WM_SIZE:
+            // Holst du FragDesk während einer Aufnahme zurück (etwa zum Abbrechen), hält es CS2 nicht mehr obenauf – sonst
+            // bliebe FragDesk hinter dem Aufnahme-Fenster versteckt
+            if (wp == SIZE_MINIMIZED) iconic_ = true;
+            else if (iconic_) {
+                iconic_ = false;
+                if (app_.recording()) app_.recorder->releaseTopmost();
+            }
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
         case WM_GETMINMAXINFO: {
             auto* mm = reinterpret_cast<MINMAXINFO*>(lp);
             mm->ptMinTrackSize.x = LONG(1000 * scale_);

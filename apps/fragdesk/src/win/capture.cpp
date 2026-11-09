@@ -13,6 +13,8 @@
 #include <mmdeviceapi.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "common.h"
@@ -101,11 +103,37 @@ static HRESULT setupWriter(IMFSinkWriter* w, int width, int height, int fps, int
     return hr;
 }
 
+// Sink Writer ohne Finalize aufgeben: erst die Senke schließen – sonst bleibt die Datei offen, und der nächste Versuch
+// (etwa der Windows-Encoder nach dem der Grafikkarte) scheitert mit „Datei wird verwendet“ (0x80070020)
+static void discardWriter(IMFSinkWriter*& w) {
+    if (!w) return;
+    IMFMediaSink* sink = nullptr;
+    if (SUCCEEDED(w->GetServiceForStream(MF_SINK_WRITER_MEDIASINK, GUID_NULL, __uuidof(IMFMediaSink), reinterpret_cast<void**>(&sink))) && sink) {
+        sink->Shutdown();
+        sink->Release();
+    }
+    release(w);
+}
+
 bool Mp4Writer::open(const std::wstring& path, int width, int height, int fps, int bitrate, bool withAudio, std::wstring& err) {
     std::lock_guard<std::mutex> lock(mu_);
     w_ = width & ~1;
     h_ = height & ~1;
     fps_ = fps;
+#ifdef FRAGDESK_TESTHOOKS
+    // Nur im Test-Build für Wine (kann kein H.264): statt des Videos je Bild eine Zeile „Zeit Anteil-Ladebildschirm“ –
+    // die CS2-Attrappe malt ihren Ladebildschirm lila (170, 30, 160)
+    wchar_t flag[8];
+    if (GetEnvironmentVariableW(L"FRAGDESK_TEST_FRAMES", flag, 8)) {
+        test_ = _wfopen((path + L".frames.txt").c_str(), L"w");
+        testShot_ = path + L".first.ppm";
+        if (FILE* f = _wfopen(path.c_str(), L"wb")) fclose(f);
+        hasAudio_ = false;
+        started_ = test_ != nullptr;
+        if (!started_) err = L"Testdatei kann nicht angelegt werden";
+        return started_;
+    }
+#endif
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET);
     if (FAILED(hr)) {
         err = hrText(L"Media Foundation startet nicht (Windows N: „Media Feature Pack“ installieren)", hr);
@@ -140,7 +168,7 @@ bool Mp4Writer::open(const std::wstring& path, int width, int height, int fps, i
             if (!t.hw || t.audio != withAudio) logLine(L"MP4: %ls-Encoder%ls", t.hw ? L"Hardware" : L"Windows", t.audio ? L"" : L", ohne Ton");
             return true;
         }
-        release(writer_);
+        discardWriter(writer_);
         DeleteFileW(path.c_str());   // keine leere Datei zurücklassen
         lastErr = e.empty() ? hrText(L"Videoaufnahme kann nicht beginnen", hr) : e;
         logLine(L"MP4-Versuch (Hardware %d, Ton %d) gescheitert: %ls", int(t.hw), int(t.audio), lastErr.c_str());
@@ -151,6 +179,34 @@ bool Mp4Writer::open(const std::wstring& path, int width, int height, int fps, i
 
 bool Mp4Writer::writeFrame(const uint8_t* bgra, int stride, int64_t t) {
     std::lock_guard<std::mutex> lock(mu_);
+#ifdef FRAGDESK_TESTHOOKS
+    if (test_) {
+        int64_t n = 0, lila = 0, sum[3] = {0, 0, 0};
+        for (int y = 0; y < h_; y += 4)
+            for (int x = 0; x < w_; x += 4, ++n) {
+                const uint8_t* p = bgra + size_t(y) * stride + size_t(x) * 4;
+                if (std::abs(p[2] - 170) < 24 && std::abs(p[1] - 30) < 24 && std::abs(p[0] - 160) < 24) ++lila;
+                for (int c = 0; c < 3; ++c) sum[c] += p[2 - c];
+            }
+        if (n == 0) n = 1;
+        fprintf(test_, "%lld %.3f rgb(%lld,%lld,%lld)\n", static_cast<long long>(t), double(lila) / double(n), static_cast<long long>(sum[0] / n),
+                static_cast<long long>(sum[1] / n), static_cast<long long>(sum[2] / n));
+        if (!testShot_.empty()) {   // erstes Bild als PPM daneben (zum Ansehen)
+            if (FILE* f = _wfopen(testShot_.c_str(), L"wb")) {
+                fprintf(f, "P6 %d %d 255\n", w_, h_);
+                for (int y = 0; y < h_; ++y)
+                    for (int x = 0; x < w_; ++x) {
+                        const uint8_t* p = bgra + size_t(y) * stride + size_t(x) * 4;
+                        uint8_t rgb[3] = {p[2], p[1], p[0]};
+                        fwrite(rgb, 1, 3, f);
+                    }
+                fclose(f);
+            }
+            testShot_.clear();
+        }
+        return true;
+    }
+#endif
     if (!writer_ || !started_) return false;
     DWORD size = DWORD(w_ * 4 * h_);
     IMFMediaBuffer* buf = nullptr;
@@ -196,6 +252,14 @@ bool Mp4Writer::writeAudio(const int16_t* samples, size_t frames, int64_t t) {
 bool Mp4Writer::close() {
     std::lock_guard<std::mutex> lock(mu_);
     bool ok = true;
+#ifdef FRAGDESK_TESTHOOKS
+    if (test_) {
+        fclose(test_);
+        test_ = nullptr;
+        started_ = false;
+        return true;
+    }
+#endif
     if (writer_) {
         if (started_) ok = SUCCEEDED(writer_->Finalize());
         release(writer_);
@@ -214,7 +278,63 @@ void ScreenCapture::close() {
     release(dup_);
     release(ctx_);
     release(dev_);
+    if (memDc_) {
+        if (oldBmp_) SelectObject(memDc_, oldBmp_);
+        DeleteDC(memDc_);
+    }
+    if (bmp_) DeleteObject(bmp_);
+    if (screenDc_) ReleaseDC(nullptr, screenDc_);
+    memDc_ = screenDc_ = nullptr;
+    bmp_ = nullptr;
+    oldBmp_ = nullptr;
+    bits_ = nullptr;
+    gdi_ = false;
     haveImage_ = false;
+}
+
+bool ScreenCapture::fitArea(const RECT& bounds, std::wstring& err) {
+    RECT r;
+    IntersectRect(&r, &area_, &bounds);
+    int w = (r.right - r.left) & ~1, h = (r.bottom - r.top) & ~1;
+    if (w < 64 || h < 64) {
+        err = L"CS2-Fenster liegt nicht sichtbar auf dem Bildschirm";
+        return false;
+    }
+    if (sized_ && (w != w_ || h != h_)) {   // nach einem Wechsel der Auflösung: das Video hat eine feste Größe
+        err = L"Die Bildgröße hat sich während der Aufnahme geändert (Auflösung oder Vollbild gewechselt)";
+        return false;
+    }
+    w_ = w;
+    h_ = h;
+    sized_ = true;
+    area_ = {r.left, r.top, r.left + w_, r.top + h_};
+    return true;
+}
+
+bool ScreenCapture::openGdi(std::wstring& err) {
+    close();
+    RECT screen = {GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0};
+    screen.right = screen.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    screen.bottom = screen.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (!fitArea(screen, err)) return false;
+    screenDc_ = GetDC(nullptr);
+    memDc_ = screenDc_ ? CreateCompatibleDC(screenDc_) : nullptr;
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = w_;
+    bi.bmiHeader.biHeight = -h_;   // von oben nach unten
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    bmp_ = memDc_ ? CreateDIBSection(memDc_, &bi, DIB_RGB_COLORS, &bits_, nullptr, 0) : nullptr;
+    if (!bmp_ || !bits_) {
+        close();
+        err = L"Bildschirmaufnahme nicht möglich (kein Zwischenspeicher)";
+        return false;
+    }
+    oldBmp_ = SelectObject(memDc_, bmp_);
+    gdi_ = true;
+    return true;
 }
 
 bool ScreenCapture::open(const RECT& area, std::wstring& err) {
@@ -223,12 +343,15 @@ bool ScreenCapture::open(const RECT& area, std::wstring& err) {
 }
 
 bool ScreenCapture::reopen(std::wstring& err) {
+    if (gdi_) return openGdi(err);   // einmal auf GDI gewechselt: dabei bleiben
     close();
+    // Desktop Duplication fehlt: GDI versuchen
+    auto fallback = [&](const std::wstring& why) {
+        logLine(L"Bildschirmaufnahme per GDI – %ls", why.c_str());
+        return openGdi(err);
+    };
     IDXGIFactory1* factory = nullptr;
-    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))) {
-        err = L"DXGI nicht verfügbar";
-        return false;
-    }
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))) return fallback(L"DXGI nicht verfügbar");
     POINT center = {(area_.left + area_.right) / 2, (area_.top + area_.bottom) / 2};
     IDXGIAdapter1* adapter = nullptr;
     IDXGIOutput* output = nullptr;
@@ -247,49 +370,29 @@ bool ScreenCapture::reopen(std::wstring& err) {
         if (!output) release(adapter);
     }
     release(factory);
-    if (!output) {
-        err = L"Bildschirm des CS2-Fensters nicht gefunden";
-        return false;
-    }
+    if (!output) return fallback(L"kein DXGI-Bildschirm für das CS2-Fenster");
     D3D_FEATURE_LEVEL fl;
     HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &dev_, &fl,
                                    &ctx_);
     release(adapter);
     if (FAILED(hr)) {
         release(output);
-        err = hrText(L"Direct3D 11 nicht verfügbar", hr);
-        return false;
+        return fallback(hrText(L"Direct3D 11 nicht verfügbar", hr));
     }
     IDXGIOutput1* out1 = nullptr;
     hr = output->QueryInterface(__uuidof(IDXGIOutput1), reinterpret_cast<void**>(&out1));
     release(output);
-    if (FAILED(hr)) {
-        err = L"Bildschirmaufnahme wird nicht unterstützt (Windows 8 oder neuer nötig)";
-        return false;
-    }
+    if (FAILED(hr)) return fallback(L"Windows ohne Desktop Duplication");
     hr = out1->DuplicateOutput(dev_, &dup_);
     release(out1);
     if (FAILED(hr)) {
-        err = hr == E_ACCESSDENIED ? L"Bildschirmaufnahme gerade nicht erlaubt (Sperrbildschirm oder UAC?)"
-                                   : hrText(L"Bildschirmaufnahme nicht möglich", hr);
-        return false;
+        if (hr == E_ACCESSDENIED) {   // Sperrbildschirm/UAC: GDI sähe auch nur Schwarz
+            err = L"Bildschirmaufnahme gerade nicht erlaubt (Sperrbildschirm oder UAC?)";
+            return false;
+        }
+        return fallback(hrText(L"Desktop Duplication nicht möglich", hr));
     }
-    // Ausschnitt auf den Monitor begrenzen, gerade Maße für H.264
-    RECT r;
-    IntersectRect(&r, &area_, &outputRect_);
-    int w = (r.right - r.left) & ~1, h = (r.bottom - r.top) & ~1;
-    if (w < 64 || h < 64) {
-        err = L"CS2-Fenster liegt nicht sichtbar auf dem Bildschirm";
-        return false;
-    }
-    if (sized_ && (w != w_ || h != h_)) {   // nach einem Wechsel der Auflösung: das Video hat eine feste Größe
-        err = L"Die Bildgröße hat sich während der Aufnahme geändert (Auflösung oder Vollbild gewechselt)";
-        return false;
-    }
-    w_ = w;
-    h_ = h;
-    sized_ = true;
-    area_ = {r.left, r.top, r.left + w_, r.top + h_};
+    if (!fitArea(outputRect_, err)) return false;
     D3D11_TEXTURE2D_DESC td = {};
     td.Width = UINT(w_);
     td.Height = UINT(h_);
@@ -308,6 +411,18 @@ bool ScreenCapture::reopen(std::wstring& err) {
 }
 
 bool ScreenCapture::grab(std::vector<uint8_t>& out, int timeoutMs, std::wstring& err) {
+    if (gdi_) {
+        // ohne CAPTUREBLT (das ließe den Mauszeiger flackern); Spiele im Fenster liefert der Bildschirm fertig zusammengesetzt
+        if (!BitBlt(memDc_, 0, 0, w_, h_, screenDc_, area_.left, area_.top, SRCCOPY)) {
+            err = L"Bild konnte nicht gelesen werden (GDI)";
+            return false;
+        }
+        GdiFlush();
+        out.resize(size_t(w_) * h_ * 4);
+        memcpy(out.data(), bits_, out.size());
+        for (size_t i = 3; i < out.size(); i += 4) out[i] = 255;   // GDI lässt Alpha leer
+        return true;
+    }
     if (!dup_) return false;
     DXGI_OUTDUPL_FRAME_INFO info;
     IDXGIResource* res = nullptr;

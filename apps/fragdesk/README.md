@@ -145,11 +145,13 @@ Fehlen die Tools, zeigt FragDesk unter **Momente** und in den Einstellungen eine
 Bei einem Moment auf **Aufnehmen** (oder mehrere ankreuzen und „Ausgewählte aufnehmen“):
 
 1. FragDesk startet CS2 mit der Demo, springt zum Moment und schaltet auf den Spieler – so, als würdest du selbst die
-   Demo ansehen.
+   Demo ansehen. Zeigt CS2 nach dem Springen den Ladebildschirm, wartet FragDesk, bis wieder das Spiel zu sehen ist.
 2. Es nimmt das CS2-Fenster **von außen** auf, wie OBS: Bild per Bildschirmaufnahme, Ton nur von CS2 (kein Discord,
    keine Musik), gespeichert als MP4 (H.264/AAC, mit dem Hardware-Encoder deiner Grafikkarte, wenn vorhanden).
+   Dafür hält es das CS2-Fenster ganz oben (wie „Immer im Vordergrund“), lässt CS2 auch ohne Fokus in vollem Tempo
+   laufen und schiebt den Mauszeiger aus dem Bild (nur die Position – kein Klick).
 3. Danach beendet es CS2 wieder. **Während der Aufnahme den PC bitte nicht benutzen** – aufgenommen wird, was auf
-   dem Bildschirm zu sehen ist.
+   dem Bildschirm zu sehen ist. Holst du FragDesk zurück (etwa zum Abbrechen), hält es CS2 nicht mehr oben.
 
 Die Videos liegen in **`Videos\FragDesk\<Datum> <Map> <Ergebnis>\`**, z. B. `2026-11-06 Mirage 13-11\R14 3 Kills.mp4`.
 Einstellbar sind Ordner, Auflösung (720p / 1080p / 1440p), 30 oder 60 fps, Qualität, „nur Killfeed“ (übriges HUD
@@ -437,7 +439,8 @@ meldet `install.sh` das und lässt nur diese Funktion aus.
 ## Anti-Cheat und Sicherheit
 
 - FragDesk **liest nur Demo-Dateien**. Es greift nie in ein laufendes Spiel ein: keine Injektion, keine Hooks,
-  keine simulierten Eingaben, kein Lesen fremden Speichers.
+  keine simulierten Eingaben, kein Lesen fremden Speichers. (Bei Aufnahmen schiebt es nur den Mauszeiger aus dem
+  Bild – im eigenen CS2 für die Aufnahme, das mit keinem Server verbunden ist.)
 - CS2 startet es **nur zum Ansehen oder Aufnehmen** – und nur, wenn CS2 gerade nicht läuft. Dabei nutzt es
   ausschließlich offizielle Startoptionen von Valve (`-tools` für den Workshop-Tools-Modus, `+playdemo` und die
   Konsole über `-netconport`), **kein Plugin, keine geänderten Spieldateien**. CS2 spielt dabei nur die Demo auf

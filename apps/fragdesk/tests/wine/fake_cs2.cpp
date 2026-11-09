@@ -10,6 +10,9 @@
 // Hauptmenü, bis "playdemo" über die Konsole kommt). FAKECS2_NO_CONSOLE=1: nie eine Konsole (wie ohne Workshop Tools).
 // FAKECS2_CRASH=load|seek: Absturz wie bei manchen FACEIT-Demos – Meldung "FATAL ERROR: CopyNewEntity: …" kurz nach dem
 // Laden bzw. beim ersten demo_gototick (Fenster "Error", danach Ende des Prozesses).
+// FAKECS2_SEEK_LOADING=<ms>: Springen zeigt so lange den Ladebildschirm (Fenster lila, Zustandswechsel in der Ausgabe),
+// FAKECS2_SEEK_MODE=resume: erst beim nächsten demo_resume. FAKECS2_FOCUS_STALL=1: Ohne Fokus lädt es gar nicht weiter –
+// außer mit engine_no_focus_sleep 0 (Startoption oder Befehl), wie das echte CS2, das sich ohne Fokus schlafen legt.
 //
 // Das Protokoll landet in der Datei aus der Umgebungsvariable FAKECS2_LOG (sonst fake_cs2.log im Arbeitsordner):
 //   ARGS <Befehlszeile> / ENV USRLOCALCSGO=<Wert> / CMD <Befehl> / QUIT / KEINE KONSOLE …
@@ -29,6 +32,13 @@ static SOCKET g_client = INVALID_SOCKET;
 static std::mutex g_mu;
 static bool g_demoStarted = false;
 static std::wstring g_crash;   // FAKECS2_CRASH
+static HWND g_hwnd = nullptr;
+static volatile bool g_loading = false;       // Ladebildschirm nach einem Sprung
+static volatile bool g_noFocusSleep = false;  // engine_no_focus_sleep 0
+static int g_seekLoadingMs = 0;               // FAKECS2_SEEK_LOADING
+static bool g_seekOnResume = false;           // FAKECS2_SEEK_MODE=resume
+static bool g_focusStall = false;             // FAKECS2_FOCUS_STALL
+static bool g_pendingSeek = false;
 
 static void logLine(const std::wstring& text) {
     FILE* f = _wfopen(g_log.c_str(), L"a, ccs=UTF-8");
@@ -80,6 +90,27 @@ static void playDemo() {
     }).detach();
 }
 
+// Ladebildschirm nach einem Sprung: ohne Fokus (und ohne engine_no_focus_sleep 0) geht es mit FAKECS2_FOCUS_STALL nicht weiter
+static void seekLoading() {
+    std::thread([] {
+        out("ChangeGameUIState: CSGO_GAME_UI_STATE_INGAME -> CSGO_GAME_UI_STATE_LOADINGSCREEN\n");
+        g_loading = true;
+        if (g_hwnd) InvalidateRect(g_hwnd, nullptr, TRUE);
+        logLine(L"LADEN");
+        int done = 0, stalled = 0;
+        while (done < g_seekLoadingMs) {
+            Sleep(50);
+            if (g_focusStall && !g_noFocusSleep && GetForegroundWindow() != g_hwnd) stalled += 50;
+            else done += 50;
+        }
+        if (stalled) logLine(L"LADEN STAND " + std::to_wstring(stalled) + L" ms OHNE FOKUS");
+        out("ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\n");
+        g_loading = false;
+        if (g_hwnd) InvalidateRect(g_hwnd, nullptr, TRUE);
+        logLine(L"GELADEN");
+    }).detach();
+}
+
 static void console(int port) {
     Sleep(1500);   // CS2 braucht eine Weile, bis die Konsole offen ist
     WSADATA wsa;
@@ -120,6 +151,15 @@ static void console(int port) {
             out("] " + line + "\n");
             if (line.rfind("playdemo ", 0) == 0) playDemo();
             if (line.rfind("demo_gototick ", 0) == 0 && g_crash == L"seek") crash();
+            if (line.rfind("engine_no_focus_sleep", 0) == 0) g_noFocusSleep = line == "engine_no_focus_sleep 0";
+            if (line.rfind("demo_gototick ", 0) == 0 && g_seekLoadingMs > 0) {
+                if (g_seekOnResume) g_pendingSeek = true;
+                else seekLoading();
+            }
+            if (line == "demo_resume" && g_pendingSeek) {
+                g_pendingSeek = false;
+                seekLoading();
+            }
             if (line == "quit") {
                 logLine(L"QUIT");
                 ExitProcess(0);
@@ -134,14 +174,14 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         HDC dc = BeginPaint(h, &ps);
         RECT r;
         GetClientRect(h, &r);
-        HBRUSH br = CreateSolidBrush(RGB(40, 60, 90));
+        HBRUSH br = CreateSolidBrush(g_loading ? RGB(170, 30, 160) : RGB(40, 60, 90));
         FillRect(dc, &r, br);
         DeleteObject(br);
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, RGB(255, 200, 80));
         wchar_t title[128];
         GetWindowTextW(h, title, 128);
-        std::wstring text = std::wstring(L"Attrappe: ") + title;
+        std::wstring text = std::wstring(g_loading ? L"Ladebildschirm: " : L"Attrappe: ") + title;
         DrawTextW(dc, text.c_str(), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         EndPaint(h, &ps);
         return 0;
@@ -174,7 +214,11 @@ int wmain(int argc, wchar_t** argv) {
         if (a == L"-noassetbrowser") noAssetBrowser = true;
         if (a == L"-condebug") condebug = true;
         if (a == L"+playdemo" && hasNext) playdemo = true;
+        if (a == L"+engine_no_focus_sleep" && hasNext && wcscmp(argv[i + 1], L"0") == 0) g_noFocusSleep = true;
     }
+    g_seekLoadingMs = _wtoi(env(L"FAKECS2_SEEK_LOADING").c_str());
+    g_seekOnResume = env(L"FAKECS2_SEEK_MODE") == L"resume";
+    g_focusStall = env(L"FAKECS2_FOCUS_STALL") == L"1";
     if (condebug) {
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -194,6 +238,7 @@ int wmain(int argc, wchar_t** argv) {
     HWND h = CreateWindowW(L"FakeCS2", L"Counter-Strike 2", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
                            wc.hInstance, nullptr);
     if (!h) return 4;
+    g_hwnd = h;
     if (tools && !noAssetBrowser) {
         logLine(L"ASSET BROWSER (ohne -noassetbrowser)");
         CreateWindowW(L"FakeCS2", L"Asset Browser", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 20, 20, 1700, 1000, nullptr, nullptr, wc.hInstance, nullptr);

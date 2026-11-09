@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 
+#include "../src/core/cs2con.h"
 #include "../src/core/format.h"
 #include "../src/core/heat.h"
 #include "../src/core/model.h"
@@ -593,6 +594,45 @@ static void testCrosshairStats() {
     for (const char* id : findGroup("crosshair")->stats) check(findStat(id) != nullptr, std::string("Kennzahl ") + id);
 }
 
+// Aufnahme: Zustand von CS2 aus der Konsolenausgabe, Mauszeiger aus dem Bild
+static void testCs2Con() {
+    const std::string log =
+        "Loaded map de_mirage\r\n"
+        "ChangeGameUIState: CSGO_GAME_UI_STATE_MAINMENU -> CSGO_GAME_UI_STATE_LOADINGSCREEN\r\n"
+        "] demo_pause\n"
+        "ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\n";
+    check(lastUiState(log) == "INGAME", "Zustand: letzter Wechsel zählt (" + lastUiState(log) + ")");
+    size_t mark = log.size();
+    check(lastUiState(log, mark).empty(), "seit der Marke kein Wechsel");
+    std::string more = log + "] demo_gototick 5000\nChangeGameUIState: CSGO_GAME_UI_STATE_INGAME -> CSGO_GAME_UI_STATE_LOADINGSCREEN\n";
+    check(lastUiState(more, mark) == "LOADINGSCREEN", "Sprung: Ladebildschirm erkannt");
+    check(lastUiState(more + "ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_", mark) == "LOADINGSCREEN",
+          "halbe Zeile zählt noch nicht");
+    check(lastUiState(more + "ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME\r\n", mark) == "INGAME",
+          "Ladebildschirm vorbei");
+    check(lastUiState("Damage -> 27 hp\nfoo -> bar UI_STATE_\n").empty(), "Pfeile ohne Zustand zählen nicht");
+    check(lastUiState(log, log.size() + 10).empty(), "Marke hinter dem Ende");
+
+    // Mauszeiger: ein Bildschirm 1920x1080, CS2-Fenster 1280x720 bei (100, 100)
+    std::vector<IRect> one = {{0, 0, 1920, 1080}};
+    IRect win = {100, 100, 1380, 820};
+    int x = 0, y = 0;
+    check(!cursorParkPoint(win, 1500, 500, 64, one, x, y), "Zeiger neben dem Fenster bleibt");
+    // Spitze knapp links über dem Fenster, das Bild des Zeigers ragt hinein: ein Stück nach links
+    bool moved = cursorParkPoint(win, 40, 90, 64, one, x, y);
+    check(moved && x == 36 && y == 90, "Zeiger ragt ins Fenster: links daneben (" + std::to_string(x) + "," + std::to_string(y) + ")");
+    check(!(x < win.right && x + 64 > win.left && y < win.bottom && y + 64 > win.top), "verschoben: Zeiger samt Bild außerhalb");
+    check(cursorParkPoint(win, 1300, 500, 64, one, x, y) && x == 1380 && y == 500, "nächster Platz: rechts daneben");
+    check(cursorParkPoint(win, 700, 800, 64, one, x, y) && x == 700 && y == 820, "nächster Platz: darunter");
+    // Fenster füllt den einzigen Bildschirm: in die Ecke
+    IRect full = {0, 0, 1920, 1080};
+    check(cursorParkPoint(full, 900, 500, 64, one, x, y) && x == 1919 && y == 1079, "kein Platz: Ecke rechts unten");
+    // zweiter Bildschirm rechts, etwas tiefer: dorthin
+    std::vector<IRect> two = {{0, 0, 1920, 1080}, {1920, 200, 3840, 1280}};
+    check(cursorParkPoint(full, 1900, 500, 64, two, x, y) && x >= 1920 && two[1].contains(x, y), "zweiter Bildschirm");
+    check(cursorParkPoint(full, 1900, 100, 64, two, x, y) && two[1].contains(x, y), "zweiter Bildschirm (Zeile außerhalb)");
+}
+
 int main(int argc, char** argv) {
     testExpr();
     testCountersMerge();
@@ -604,6 +644,7 @@ int main(int argc, char** argv) {
     testRadar();
     testHeat();
     testCrosshairStats();
+    testCs2Con();
     if (argc > 1) {
         testRealFiles(argv[1]);
         testRealReplays(argv[1]);

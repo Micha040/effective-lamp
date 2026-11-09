@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,6 +42,10 @@ private:
     DWORD video_ = 0, audio_ = 0;
     bool hasAudio_ = false, started_ = false, mfStarted_ = false;
     int w_ = 0, h_ = 0, fps_ = 60;
+#ifdef FRAGDESK_TESTHOOKS
+    FILE* test_ = nullptr;   // nur Test-Build (siehe open)
+    std::wstring testShot_;
+#endif
 };
 
 class ScreenCapture {
@@ -56,13 +61,22 @@ public:
 
 private:
     bool reopen(std::wstring& err);
+    // Ersatzweg, wenn Windows keine Desktop Duplication anbietet (manche Laptops mit zwei Grafikkarten, Remotedesktop,
+    // Wine): Bild per GDI vom Bildschirm kopieren – langsamer, aber ebenfalls von außen und ohne Mauszeiger
+    bool openGdi(std::wstring& err);
+    bool fitArea(const RECT& bounds, std::wstring& err);   // Ausschnitt auf bounds begrenzen, gerade Maße für H.264
     ID3D11Device* dev_ = nullptr;
     ID3D11DeviceContext* ctx_ = nullptr;
     IDXGIOutputDuplication* dup_ = nullptr;
     ID3D11Texture2D* staging_ = nullptr;
+    HDC screenDc_ = nullptr, memDc_ = nullptr;
+    HBITMAP bmp_ = nullptr;
+    HGDIOBJ oldBmp_ = nullptr;
+    void* bits_ = nullptr;
     RECT area_{}, outputRect_{};
     int w_ = 0, h_ = 0;
     bool haveImage_ = false, sized_ = false;   // sized_: Größe steht seit dem ersten Öffnen fest
+    bool gdi_ = false;
 };
 
 class ProcessAudio {

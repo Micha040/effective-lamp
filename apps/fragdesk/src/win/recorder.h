@@ -50,6 +50,8 @@ public:
     bool busy() const { return busy_; }
     std::wstring status() const;
     void cancel();
+    // Du holst FragDesk während der Aufnahme zurück: CS2 nicht mehr obenauf halten (UI-Thread)
+    void releaseTopmost();
 
     // CS2 öffnen und zum Moment springen (ohne Aufnahme, mit deinen normalen CS2-Einstellungen)
     bool watch(const SteamInfo& steam, const RecordJob& job, std::wstring& err);
@@ -65,6 +67,8 @@ private:
     HWND hwnd_;
     std::thread thread_;
     std::atomic<bool> busy_{false}, cancel_{false};
+    std::atomic<bool> keepTopmost_{true};   // false, sobald du FragDesk zurückgeholt hast
+    std::atomic<HWND> topmost_{nullptr};    // CS2-Fenster, das gerade obenauf gehalten wird
     mutable std::mutex mu_;
     std::wstring status_;
 };

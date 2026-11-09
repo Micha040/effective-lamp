@@ -16,6 +16,7 @@
 #include <cwchar>
 #include <functional>
 
+#include "../core/cs2con.h"
 #include "../core/vdf.h"
 #include "capture.h"
 #include "common.h"
@@ -106,6 +107,17 @@ public:
 
     bool saw(const char* text) const { return seen_.find(text) != std::string::npos; }
 
+    // Stand der Ausgabe als Marke (etwa vor einem Sprung); zählt weiter, auch wenn vorne Altes wegfällt
+    size_t mark() {
+        drain();
+        return dropped_ + seen_.size();
+    }
+    // Letzter Zustand der Oberfläche seit der Marke ("INGAME", "LOADINGSCREEN" …), leer: seitdem kein Wechsel
+    std::string uiStateSince(size_t m) {
+        drain();
+        return fd::lastUiState(seen_, m > dropped_ ? m - dropped_ : 0);
+    }
+
     // "FATAL ERROR: …" in der Ausgabe (CS2 stürzt ab); liefert die Zeile
     bool fatal(std::wstring& line) {
         drain();
@@ -187,7 +199,14 @@ public:
             CloseHandle(h);
         }
         seen_ += out;
-        if (seen_.size() > (1 << 20)) seen_.erase(0, seen_.size() - (1 << 19));
+        logStates();
+        if (seen_.size() > (1 << 20)) {
+            size_t cut = seen_.size() - (1 << 19);
+            seen_.erase(0, cut);
+            dropped_ += cut;
+            fatalScan_ = fatalScan_ > cut ? fatalScan_ - cut : 0;
+            stateScan_ = stateScan_ > cut ? stateScan_ - cut : 0;
+        }
     }
 
     // Wartet, bis einer der Texte in der Ausgabe auftaucht
@@ -214,6 +233,23 @@ public:
     }
 
 private:
+    // Zustandswechsel von CS2 (Hauptmenü, Ladebildschirm, im Spiel) mit Uhrzeit ins Protokoll: Zeigt später, wie lange CS2
+    // nach einem Sprung geladen hat. Konsole und console.log liefern dieselbe Zeile – kurz hintereinander nur einmal.
+    void logStates() {
+        size_t limit = seen_.rfind('\n');
+        if (limit == std::string::npos || limit < stateScan_) return;
+        for (size_t at = seen_.find("ChangeGameUIState", stateScan_); at != std::string::npos && at < limit;
+             at = seen_.find("ChangeGameUIState", at + 1)) {
+            size_t end = seen_.find_first_of("\r\n", at);
+            std::string line = seen_.substr(at, std::min<size_t>(end - at, 200));
+            if (line == lastState_ && secondsSince(lastStateAt_) < 3) continue;
+            lastState_ = line;
+            lastStateAt_ = Clock::now();
+            logLine(L"  CS2 | %ls", widen(line).c_str());
+        }
+        stateScan_ = limit + 1;
+    }
+
     void readLoop() {
         char b[4096];
         while (run_) {
@@ -250,6 +286,10 @@ private:
     std::mutex mu_;
     std::string buf_, seen_;
     size_t fatalScan_ = 0;   // bis hierhin ist seen_ schon nach "FATAL ERROR" durchsucht
+    size_t stateScan_ = 0;   // … nach Zustandswechseln (logStates)
+    size_t dropped_ = 0;     // vorne aus seen_ entfernt (für mark)
+    std::string lastState_;
+    Clock::time_point lastStateAt_{};
     std::vector<Log> logs_;
 };
 
@@ -336,6 +376,34 @@ bool gameArea(DWORD pid, HWND& win, RECT& area) {
         }
     }
     return best > 0;
+}
+
+// Mauszeiger aus dem Bild: Liegt er (samt Bild des Zeigers) über dem CS2-Fenster, an den nächsten freien Platz daneben
+// schieben – nur die Position, kein Klick, keine Eingabe ans Spiel. Ein CS2 ohne Fokus blendet den Zeiger nicht aus.
+void parkCursor(const RECT& area) {
+    POINT p;
+    if (!GetCursorPos(&p)) return;
+    std::vector<fd::IRect> monitors;
+    EnumDisplayMonitors(
+        nullptr, nullptr,
+        [](HMONITOR, HDC, LPRECT r, LPARAM lp) -> BOOL {
+            reinterpret_cast<std::vector<fd::IRect>*>(lp)->push_back({int(r->left), int(r->top), int(r->right), int(r->bottom)});
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&monitors));
+    int size = std::max(64, 2 * std::max(GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR)));
+    int x = 0, y = 0;
+    if (!fd::cursorParkPoint({int(area.left), int(area.top), int(area.right), int(area.bottom)}, int(p.x), int(p.y), size, monitors, x, y)) return;
+    SetCursorPos(x, y);
+    logLine(L"Mauszeiger aus dem CS2-Fenster geschoben (%d,%d → %d,%d)", int(p.x), int(p.y), x, y);
+}
+
+// CS2 für die Aufnahme nach vorn holen und (topmost) obenauf halten wie „Immer im Vordergrund“: Klickst du währenddessen
+// woanders hin, verdeckt kein anderes Fenster das Bild. Ruft FragDesk auf, solange es selbst noch vorne ist – danach
+// lässt Windows ein Programm kein anderes Fenster mehr aktivieren.
+void bringToFront(HWND win, bool topmost) {
+    if (topmost) SetWindowPos(win, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetForegroundWindow(win);
 }
 
 // Gepackte Demo für CS2 entpacken (fdanalyze -unpack); bricht bei cancel ab
@@ -556,6 +624,12 @@ void Recorder::post(RecordEvent* e) {
 
 void Recorder::cancel() { cancel_ = true; }
 
+void Recorder::releaseTopmost() {
+    keepTopmost_ = false;
+    // asynchron: hängt CS2 gerade, wartet die Oberfläche von FragDesk nicht darauf
+    if (HWND w = topmost_.exchange(nullptr)) SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+}
+
 bool Recorder::watch(const SteamInfo& steam, const RecordJob& job, std::wstring& err) { return start(steam, RecordSettings(), {job}, false, err); }
 
 bool Recorder::record(const SteamInfo& steam, const RecordSettings& rs, std::vector<RecordJob> jobs, std::wstring& err) {
@@ -589,6 +663,8 @@ bool Recorder::start(const SteamInfo& steam, const RecordSettings& rs, std::vect
     }
     if (thread_.joinable()) thread_.join();
     cancel_ = false;
+    keepTopmost_ = true;
+    topmost_ = nullptr;
     busy_ = true;
     thread_ = std::thread(&Recorder::run, this, steam, rs, std::move(jobs), recordVideo);
     return true;
@@ -648,7 +724,8 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             WindowPlan plan = planWindow(rs.height, haveVideoCfg);
             prepareSandboxVideo(steam.steamDir, plan);
             if (!plan.borderless) args += L" -sw -width " + std::to_wstring(plan.w) + L" -height " + std::to_wstring(plan.h);
-            args += L" +demo_ui_mode 0";
+            // Ohne Fokus legt sich CS2 sonst bei jedem Bild schlafen: Laden und Springen ziehen sich dann ewig, das Video ruckelt
+            args += L" +demo_ui_mode 0 +engine_no_focus_sleep 0";
             createDirs(cs2SandboxDir());
             env = environmentWith(L"USRLOCALCSGO", asciiPath(cs2SandboxDir()));   // eigene Einstellungen, nie deine echten
             logLine(L"Aufnahme-Fenster: %dx%d%ls", plan.w, plan.h, plan.borderless ? L" (randlos)" : L"");
@@ -668,6 +745,8 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             break;
         }
         logLine(L"CS2 gestartet: %ls", args.c_str());
+        // Gerade eben hast du in FragDesk geklickt: CS2 darf sein Fenster gleich selbst nach vorn holen
+        AllowSetForegroundWindow(pi.dwProcessId);
         // Kein Vollzugriff auf das Spiel behalten: nur warten und (bei Aufnahmen) zur Not beenden dürfen
         CloseHandle(pi.hThread);
         HANDLE proc = nullptr;
@@ -806,9 +885,11 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             continue;
         }
 
-        // Aufnahme: HUD bis auf den Killfeed aus, kein Röntgenblick, Ton auch ohne Fokus (alles nur im eigenen Einstellungsordner)
+        // Aufnahme: HUD bis auf den Killfeed aus, kein Röntgenblick, Ton und volles Tempo auch ohne Fokus (alles nur im eigenen
+        // Einstellungsordner)
         for (const std::string& c : {std::string("demo_ui_mode 0"), std::string("spec_show_xray 0"),
                                      std::string("cl_draw_only_deathnotices ") + (rs.onlyKillfeed ? "1" : "0"), std::string("snd_mute_losefocus 0"),
+                                     std::string("engine_no_focus_sleep 0"),
                                      std::string("cl_hud_telemetry_frametime_show 0"), std::string("cl_hud_telemetry_ping_show 0"),
                                      std::string("cl_hud_telemetry_net_misdelivery_show 0"),
                                      std::string("cl_hud_telemetry_serverrecvmargin_graph_show 0"), std::string("cl_trueview_show_status 0"),
@@ -821,22 +902,71 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
         RECT area = {};
         for (int i = 0; i < 40 && !gameArea(pid, gameWin, area); ++i) Sleep(250);
 
+        // Nach einem Sprung (demo_gototick) zeigt CS2 oft den Ladebildschirm – manchmal sofort, manchmal erst beim
+        // Weiterspielen. Erst aufnehmen, wenn CS2 wieder „im Spiel“ meldet; nach 90 s Abbruch statt eines Clips vom
+        // Ladebildschirm. Meldet CS2 keinen Wechsel, bleibt es bei den festen Wartezeiten.
+        auto waitWhileLoading = [&](size_t since, const std::wstring& what) -> bool {
+            if (con.uiStateSince(since) != "LOADINGSCREEN") return true;
+            setStatus(what + L" (CS2 lädt …)");
+            auto t0 = Clock::now();
+            while (con.uiStateSince(since) == "LOADINGSCREEN") {
+                if (secondsSince(t0) > 90) {
+                    failure = L"CS2 hängt nach dem Springen im Ladebildschirm fest – Details in fragdesk.log";
+                    con.logTail(30);
+                    return false;
+                }
+                if (!pause(250)) return false;
+            }
+            logLine(L"Ladebildschirm nach %.1f s vorbei", secondsSince(t0));
+            setStatus(what);
+            return pause(1000);   // die ersten Bilder nach dem Laden abwarten
+        };
+        // Zum Tick springen (angehalten), Spieler wählen, abspielen. false: abgebrochen, abgestürzt oder hängt (failure)
+        auto jumpTo = [&](int tick, int slot, const std::wstring& what) -> bool {
+            for (int attempt = 1;; ++attempt) {
+                con.send("demo_pause");
+                size_t jumped = con.mark();
+                con.send("demo_gototick " + std::to_string(std::max(96, tick)));
+                if (!pause(3500) || !waitWhileLoading(jumped, what)) return false;
+                con.send("spec_mode 1");
+                con.send("spec_player " + std::to_string(slot));
+                if (!pause(300)) return false;
+                size_t resumed = con.mark();
+                con.send("demo_resume");
+                if (!pause(1500)) return false;
+                if (con.uiStateSince(resumed) != "LOADINGSCREEN") return true;
+                // CS2 lädt erst beim Weiterspielen, der Vorlauf ist damit weg: abwarten und noch einmal anspringen (beim
+                // zweiten Mal lieber etwas später anfangen als gar nicht)
+                logLine(L"CS2 lädt erst beim Abspielen (Versuch %d)", attempt);
+                if (!waitWhileLoading(resumed, what)) return false;
+                if (attempt >= 2) return true;
+            }
+        };
+
         const int doneBefore = done;
         for (RecordJob* job : group) {
             if (cancel_ || !failure.empty() || !crash.empty()) break;
             ++done;
             double tr = job->tickrate > 0 ? job->tickrate : 64;
-            setStatus(L"Moment " + std::to_wstring(done) + L" von " + std::to_wstring(total) + L": „" + job->title + L"“ – bitte den PC nicht benutzen");
+            const std::wstring momentText =
+                L"Moment " + std::to_wstring(done) + L" von " + std::to_wstring(total) + L": „" + job->title + L"“ – bitte den PC nicht benutzen";
+            setStatus(momentText);
+            if (gameWin) {   // vor dem Minimieren: solange FragDesk vorne ist, lässt Windows das zu
+                bool top = keepTopmost_;
+                bringToFront(gameWin, top);
+                if (top) topmost_ = gameWin;
+            }
             if (!minimized && hwnd_) {
                 ShowWindowAsync(hwnd_, SW_MINIMIZE);
                 minimized = true;
             }
-            if (gameWin) SetForegroundWindow(gameWin);
             Sleep(400);
             if (!gameArea(pid, gameWin, area)) {
                 failure = L"Das Fenster von CS2 ist nicht zu sehen";
                 break;
             }
+            logLine(L"CS2-Fenster %ls, %ls", GetForegroundWindow() == gameWin ? L"im Vordergrund" : L"ohne Fokus (läuft trotzdem in vollem Tempo)",
+                    (GetWindowLongPtrW(gameWin, GWL_EXSTYLE) & WS_EX_TOPMOST) ? L"obenauf" : L"nicht obenauf");
             ScreenCapture cap;
             std::wstring capErr, audioErr, encErr;
             if (!cap.open(area, capErr)) {
@@ -863,15 +993,11 @@ void Recorder::run(SteamInfo steam, RecordSettings rs, std::vector<RecordJob> jo
             for (const auto& seg : job->segments) {
                 if (cancel_ || !failure.empty() || !crash.empty()) break;
                 // anspringen (1,5 s Vorlauf zum Einschwingen der Kamera), Spieler wählen, abspielen
-                con.send("demo_pause");
-                con.send("demo_gototick " + std::to_string(std::max(96, seg.first - int(1.5 * tr))));
-                if (!pause(3500)) break;
-                con.send("spec_mode 1");
+                if (!jumpTo(seg.first - int(1.5 * tr), job->slot, momentText)) break;
                 con.send("spec_player " + std::to_string(job->slot));
-                if (!pause(300)) break;
-                con.send("demo_resume");
-                if (!pause(1500)) break;
-                con.send("spec_player " + std::to_string(job->slot));
+                parkCursor(area);
+                logLine(L"Abschnitt Tick %d–%d wird aufgenommen (CS2 %ls)", seg.first, seg.second,
+                        GetForegroundWindow() == gameWin ? L"im Vordergrund" : L"ohne Fokus");
                 const double length = std::max(0.5, (seg.second - seg.first) / tr);
                 const int64_t segVideoFrames = int64_t(std::ceil(length / frameDur - 1e-9));
                 const int64_t audioMax = int64_t(double(segVideoFrames) * frameDur * 48000);   // Ton genau so lang wie das Bild
