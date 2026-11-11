@@ -4,6 +4,7 @@
 #include <ctime>
 #include <cwctype>
 
+#include "../core/cs2con.h"
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
@@ -125,7 +126,12 @@ std::wstring syncText(Canvas& c, App& app, const SyncStatus& st, const ServerSet
             col = c.th.danger;
             return L"Der Server lässt dieses FragDesk nicht mehr rein (anderer PC verbunden, abgemeldet oder Konto gelöscht). Hol dir in "
                    L"der Handy-App unter Einstellungen einen Link „PC neu verbinden“ (oder vom Admin), kopiere ihn und klicke „Neu verbinden“.";
-        case SyncStatus::PausedCs2: col = c.th.warning; return L"Pausiert – CS2 läuft. Danach geht es von selbst weiter." + done;
+        case SyncStatus::PausedCs2:   // in „Manuell“ nur der Hintergrund – ein Klick läuft trotzdem
+            col = c.th.warning;
+            return (app.settings.cs2Mode == fd::Cs2Mode::Performance
+                        ? std::wstring(L"Pausiert – CS2 läuft. Danach geht es von selbst weiter.")
+                        : std::wstring(L"Pausiert – CS2 läuft. Danach geht es von selbst weiter – oder jetzt gleich mit „Jetzt abgleichen“.")) +
+                   done;
         case SyncStatus::PausedRecording: col = c.th.warning; return L"Pausiert – FragDesk nimmt gerade auf." + done;
         case SyncStatus::Full: col = c.th.danger; return st.error + L" Lösche Videos oder bitte den Admin um mehr Platz.";
         case SyncStatus::Offline: {
@@ -214,8 +220,10 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
             c.button(b, sy.connecting() ? L"Verbindet …" : L"Neu verbinden", "s-rejoin", [&app] { app.sync->connectFromClipboard(); }, Btn::Primary,
                      Icon::Plus, !sy.connecting(), L"Kopiere vorher den neuen Einladungslink");
         else
-            c.button(b, L"Jetzt abgleichen", "s-now", [&app] { app.sync->request(0, true); }, Btn::Secondary, Icon::Refresh,
-                     st.state != SyncStatus::Running, L"Nie während CS2 läuft – dann geht es danach weiter");
+            c.button(b, L"Jetzt abgleichen", "s-now", [&app] { app.sync->request(0, SyncKick::Now); }, Btn::Secondary, Icon::Refresh,
+                     st.state != SyncStatus::Running,
+                     app.settings.cs2Mode == fd::Cs2Mode::Performance ? L"Nie während CS2 läuft – dann geht es danach weiter"
+                                                                      : L"Gleicht sofort ab – auch während CS2 läuft");
         if (app.hwnd && !app.renderMode) SetTimer(app.hwnd, kSyncViewTimer, 30000, nullptr);   // „vor … min“ frisch halten
     }
     h += rh;
@@ -231,11 +239,15 @@ float serverRows(Canvas& c, App& app, float x, float cw, Section* sec) {
     }
     h += 64;
     // 2D-Ansicht (ein älterer Server nimmt keine an: dann steht hier, was zu tun ist)
+    const fd::Cs2Mode mode = app.settings.cs2Mode;
     const std::wstring replays = srv.replays && st.replaysOld
         ? L"Dein Server kennt die 2D-Ansicht noch nicht – führ auf dem Server den Installationsbefehl noch einmal aus (aktualisiert, "
           L"Daten bleiben). Bis dahin erstellt FragDesk dafür nichts im Hintergrund und lädt nichts hoch."
-        : L"Positionen jeder Runde für die 2D-Ansicht in der Handy-App, rund 2 MB pro Match. Neue Matches bekommen sie beim Auswerten, "
-          L"für ältere erstellt FragDesk sie im Hintergrund aus der Demo – eins nach dem anderen und nie, solange CS2 läuft.";
+        : std::wstring(L"Positionen jeder Runde für die 2D-Ansicht in der Handy-App, rund 2 MB pro Match. Neue Matches bekommen sie beim "
+                       L"Auswerten, für ältere erstellt FragDesk sie im Hintergrund aus der Demo – ") +
+              (mode == fd::Cs2Mode::Performance ? L"eins nach dem anderen und nie, solange CS2 läuft."
+               : mode == fd::Cs2Mode::Manual    ? L"eins nach dem anderen; solange CS2 läuft, nur nach „Jetzt abgleichen“."
+                                                : L"eins nach dem anderen, mit niedrigster Priorität.");
     float rr = rowHeight(c, cw, replays, 60, 64);
     if (sec) {
         RectF r = sec->row(L"2D-Ansicht hochladen", replays, rr, 60);
@@ -518,10 +530,14 @@ float mobileCard(Canvas& c, App& app, float x, float y, float cw) {
     MobileHost& mh = *app.mobile;
     MobileSettings& ms = app.settings.mobile;
     const bool server = ms.server;
+    const fd::Cs2Mode mode = app.settings.cs2Mode;
     const std::wstring sub =
-        server ? L"Deine Stats und Clips auf dem Handy – über deinen eigenen Server als Drehscheibe: FragDesk lädt neue Matches und Videos im "
-                 L"Hintergrund hoch und holt, was der Server sonst hat (z. B. selbst bei Valve geladene Matches) – nie, solange CS2 läuft. Das Handy "
-                 L"liest vom Server, auch wenn der PC aus ist. FragDesk selbst nimmt dann keine Verbindungen an."
+        server ? std::wstring(L"Deine Stats und Clips auf dem Handy – über deinen eigenen Server als Drehscheibe: FragDesk lädt neue Matches "
+                              L"und Videos im Hintergrund hoch und holt, was der Server sonst hat (z. B. selbst bei Valve geladene Matches) – ") +
+                     (mode == fd::Cs2Mode::Performance ? L"nie, solange CS2 läuft."
+                      : mode == fd::Cs2Mode::Manual    ? L"solange CS2 läuft, nur nach „Jetzt abgleichen“."
+                                                       : L"auch, während CS2 läuft.") +
+                     L" Das Handy liest vom Server, auch wenn der PC aus ist. FragDesk selbst nimmt dann keine Verbindungen an."
                : L"Deine Stats und Clips auf dem Handy: FragDesk liefert dafür eine kleine Web-App aus, die du auf den Home-Bildschirm legst – "
                  L"nur an Handys, die du hier koppelst. Solange es aus ist, nimmt FragDesk keine Verbindungen an.";
     const std::wstring modeDesc = server ? L"Das Handy liest vom Server – auch unterwegs und wenn der PC aus ist."
@@ -741,8 +757,8 @@ float drawSettings(Canvas& c, App& app, float w) {
     // ---- CS2
     {
         const std::wstring sub =
-            L"Nur zum Ansehen und Aufnehmen von Momenten. FragDesk startet CS2 dafür im Workshop-Tools-Modus (-tools -netconport) und steuert "
-            L"die Demo über dessen Konsole – unter Windows öffnet CS2 diese Konsole nur in dem Modus.";
+            L"Zum Ansehen und Aufnehmen von Momenten startet FragDesk CS2 im Workshop-Tools-Modus (-tools -netconport) und steuert die Demo "
+            L"über dessen Konsole – unter Windows öffnet CS2 diese Konsole nur in dem Modus.";
         bool found = !app.steam.cs2Dir.empty();
         Tools t = found ? app.tools() : Tools::Unknown;
         std::wstring toolsDesc =
@@ -755,7 +771,21 @@ float drawSettings(Canvas& c, App& app, float w) {
         float subH = c.textHeight(sub, F::Small, cw - 40) + 2;
         float descH = c.textHeight(toolsDesc, F::Small, cw - 40 - controlW - 16) + 2;
         float toolsH = std::max(64.0f, 32 + descH + 12);
-        float h = 16 + 26 + subH + 10 + 64 + toolsH + 14;
+        // Performance-Modus: was FragDesk tut, solange CS2 läuft (die Beschreibung sagt, was im gewählten Modus wartet)
+        const std::vector<std::wstring> modes = {L"Performance", L"Manuell", L"Automatisch"};
+        const std::wstring stillClosed = L" Ansehen und Aufnehmen in CS2 gehen weiter nur, wenn CS2 zu ist.";
+        std::wstring modeDesc =
+            s.cs2Mode == fd::Cs2Mode::Manual
+                ? L"Solange CS2 läuft, startet FragDesk im Hintergrund nichts (Abgleich, 2D-Daten). Was du selbst anstößt, läuft aber sofort: "
+                  L"„Jetzt abgleichen“, „Demo von Valve laden“ und alles, was du auf dem Handy öffnest." + stillClosed
+            : s.cs2Mode == fd::Cs2Mode::Auto
+                ? L"Nichts wartet auf CS2: Abgleich, Downloads und Handy-App laufen auch während des Spiels. Hoch- und Herunterladen kann "
+                  L"deinen Ping kosten; Rechenarbeit bleibt auf niedriger Priorität." + stillClosed
+                : L"Solange CS2 läuft, wartet FragDesk mit allem, was Internet oder viel Leistung braucht: Abgleich mit deinem Server, "
+                  L"„Demo von Valve laden“, Videos und 2D-Ansicht fürs Handy. Danach geht es von selbst weiter.";
+        float modesW = c.chipRowWidth(modes), modeCW = std::max(300.0f, modesW);
+        float modeH = rowHeight(c, cw, modeDesc, modeCW, 64);
+        float h = 16 + 26 + subH + 10 + 64 + toolsH + modeH + 14;
         cardBehind(c, x, y, cw, h);
         Section sec(c, x, y, cw, L"Counter-Strike 2", sub);
         RectF r = sec.row(found ? L"Gefunden" : L"Nicht gefunden", found ? app.steam.cs2Dir : L"Wähle den Ordner „Counter-Strike Global Offensive“", 64,
@@ -769,6 +799,16 @@ float drawSettings(Canvas& c, App& app, float w) {
             float pw = c.pillWidth(label, F::SmallSemi);
             c.pill(RectF(r.X + r.Width - pw, r.Y + 20, pw, 24), label, alpha(col, c.th.dark ? 40 : 34), col, F::SmallSemi);
         }
+        r = sec.row(L"Performance-Modus", modeDesc, modeH, modeCW);
+        int mi = s.cs2Mode == fd::Cs2Mode::Manual ? 1 : s.cs2Mode == fd::Cs2Mode::Auto ? 2 : 0;
+        c.chipRow(r.X + r.Width - modesW, r.Y + (modeH - 30) / 2, modes, mi, "cs2mode", [&app](int i) {
+            fd::Cs2Mode m = i == 1 ? fd::Cs2Mode::Manual : i == 2 ? fd::Cs2Mode::Auto : fd::Cs2Mode::Performance;
+            if (app.settings.cs2Mode == m) return;
+            app.settings.cs2Mode = m;
+            app.saveSettings();
+            app.applyCs2Mode();   // gilt sofort: eine Pause wegen CS2 prüft gleich neu
+            app.invalidate();
+        });
         y += h + 16;
     }
 

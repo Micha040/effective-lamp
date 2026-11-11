@@ -35,6 +35,16 @@ bool isProcessRunning(const wchar_t* exeName) {
     return found;
 }
 
+namespace {
+std::atomic<fd::Cs2Mode> g_cs2Mode{fd::Cs2Mode::Performance};   // bis die Einstellungen geladen sind: Rücksicht aufs Spiel
+std::atomic<bool> g_recording{false};
+}
+
+void setCs2Mode(fd::Cs2Mode mode) { g_cs2Mode = mode; }
+fd::Cs2Mode cs2Mode() { return g_cs2Mode.load(); }
+void setRecordingActive(bool on) { g_recording = on; }
+bool recordingActive() { return g_recording.load(); }
+
 std::wstring cs2SandboxDir() { return joinPath(dataDir(), L"cs2"); }
 
 // Umgebung dieses Prozesses plus/ersetzt name=value (für CreateProcess mit CREATE_UNICODE_ENVIRONMENT)
@@ -665,6 +675,7 @@ bool Recorder::start(const SteamInfo& steam, const RecordSettings& rs, std::vect
     cancel_ = false;
     keepTopmost_ = true;
     topmost_ = nullptr;
+    video_ = recordVideo;
     busy_ = true;
     thread_ = std::thread(&Recorder::run, this, steam, rs, std::move(jobs), recordVideo);
     return true;

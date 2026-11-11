@@ -1,10 +1,34 @@
-// FragDesk – Hilfen für Aufnahmen mit CS2 (siehe cs2con.h)
+// FragDesk – Hilfen rund um CS2 (siehe cs2con.h)
 #include "cs2con.h"
 
 #include <algorithm>
 #include <climits>
 
 namespace fd {
+
+Cs2Mode parseCs2Mode(const std::string& name) {
+    if (name == "manual") return Cs2Mode::Manual;
+    if (name == "auto") return Cs2Mode::Auto;
+    return Cs2Mode::Performance;   // fehlt oder unbekannt (z. B. von einer neueren Version): lieber Rücksicht aufs Spiel
+}
+
+const char* cs2ModeName(Cs2Mode mode) {
+    switch (mode) {
+        case Cs2Mode::Manual: return "manual";
+        case Cs2Mode::Auto: return "auto";
+        case Cs2Mode::Performance: break;
+    }
+    return "performance";
+}
+
+bool pausesForCs2(Cs2Mode mode, bool userStarted) {
+    switch (mode) {
+        case Cs2Mode::Manual: return !userStarted;
+        case Cs2Mode::Auto: return false;
+        case Cs2Mode::Performance: break;
+    }
+    return true;
+}
 
 std::string lastUiState(const std::string& text, size_t from) {
     static const char kTok[] = "UI_STATE_";

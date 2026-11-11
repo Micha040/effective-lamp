@@ -448,7 +448,7 @@ LRESULT ServerAutodl::onMessage(WPARAM, LPARAM lp) {
     if (d.checking()) d.startTimer();
     else if (e->req == Req::Get && d.checkPolls > 0 && d.checkPolls < 40) {   // der Server ist fertig: neue Matches gleich holen
         d.checkPolls = 40;
-        app.sync->request(0);
+        app.sync->request(0, SyncKick::User);   // Folge deines Klicks („Jetzt prüfen“, Einschalten): auch in „Manuell“, während CS2 läuft
         d.refreshSteam();
     }
     app.invalidate();

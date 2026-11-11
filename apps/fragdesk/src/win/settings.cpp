@@ -49,6 +49,7 @@ bool Settings::load() {
     watchReplays = v.getBool("watchReplays", true);
     watchDownloads = v.getBool("watchDownloads", true);
     autoAnalyze = v.getBool("autoAnalyze", false);
+    cs2Mode = fd::parseCs2Mode(v.getString("cs2Mode"));
     theme = v.getString("theme");
     folders.clear();
     for (const auto& f : v["folders"].arr)
@@ -113,6 +114,7 @@ bool Settings::save() const {
     o += std::string("  \"watchReplays\": ") + (watchReplays ? "true" : "false") + ",\n";
     o += std::string("  \"watchDownloads\": ") + (watchDownloads ? "true" : "false") + ",\n";
     o += std::string("  \"autoAnalyze\": ") + (autoAnalyze ? "true" : "false") + ",\n";
+    o += std::string("  \"cs2Mode\": \"") + fd::cs2ModeName(cs2Mode) + "\",\n";
     o += "  \"theme\": " + jsonQuote(theme) + ",\n";
     o += "  \"folders\": [";
     for (size_t i = 0; i < folders.size(); ++i) o += (i ? ", " : "") + jsonQuote(narrow(folders[i]));

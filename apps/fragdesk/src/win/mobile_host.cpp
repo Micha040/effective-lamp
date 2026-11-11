@@ -22,6 +22,7 @@
 
 #include "../api/http.h"
 #include "../api/mobile.h"
+#include "../core/cs2con.h"
 #include "../core/radar.h"
 #include "../third_party/qrcodegen.hpp"
 #include "app.h"
@@ -44,7 +45,8 @@ struct Job {
     enum State { Pending, Running, Done, Cancelled } state = Pending;
 };
 
-// 2D-Daten, die das Handy braucht (direkt vom PC): eins zur Zeit im Hintergrund, nie während CS2 läuft
+// 2D-Daten, die das Handy braucht (direkt vom PC): eins zur Zeit im Hintergrund; nie, während FragDesk aufnimmt, und
+// solange CS2 läuft nur, wenn der Performance-Modus Klicks durchlässt (eine Anfrage vom Handy zählt als Klick)
 struct ReplayJobs {
     std::mutex mu;
     std::string running;                         // Prüfsumme, leer = nichts
@@ -61,8 +63,11 @@ struct Shared {
     ReplayJobs replays;
 };
 
-// Läuft CS2? Nur der Name aus der Prozessliste (Toolhelp), höchstens alle maxAgeMs nachsehen
+// Muss eine Anfrage vom Handy warten, weil CS2 läuft? Das Handy fragt nur, wenn du dort etwas antippst – sie zählt
+// als Klick: Pause nur im Performance-Modus „Performance“. Dann nur der Name aus der Prozessliste (Toolhelp), höchstens
+// alle maxAgeMs nachsehen.
 bool cs2Now(Shared& sh, ULONGLONG maxAgeMs) {
+    if (!fd::pausesForCs2(cs2Mode(), true)) return false;
     ULONGLONG now = GetTickCount64();
     if (now - sh.cs2At.load() > maxAgeMs) {
         sh.cs2 = isProcessRunning(L"cs2.exe");
@@ -88,7 +93,8 @@ fdapi::ReplayState prepareReplay(const std::shared_ptr<Shared>& sh, const std::s
         st.error = f->second;
         return with(fdapi::ReplayState::Failed);
     }
-    if (cs2Now(*sh, 2000)) return with(fdapi::ReplayState::WaitCs2);   // nie, solange CS2 läuft
+    if (recordingActive()) return with(fdapi::ReplayState::WaitRecording);   // die Aufnahme soll nicht ruckeln
+    if (cs2Now(*sh, 2000)) return with(fdapi::ReplayState::WaitCs2);   // Modus „Performance“: nie, solange CS2 läuft
     if (!rj.running.empty()) return with(fdapi::ReplayState::Queued);
     std::wstring demoPath = widen(demo), target = replayFile(cs);
     if (demo.empty() || !fileExists(demoPath)) return with(fdapi::ReplayState::NoDemo);
@@ -99,12 +105,14 @@ fdapi::ReplayState prepareReplay(const std::shared_ptr<Shared>& sh, const std::s
     rj.running = cs;
     std::thread([sh, cs, demoPath, target] {
         ULONGLONG t0 = GetTickCount64();
-        // abbrechen, wenn CS2 startet oder die Handy-App aus geht (FragDesk endet, anderer Modus)
-        std::string code = makeReplay(demoPath, target, BELOW_NORMAL_PRIORITY_CLASS, [sh] { return !sh->hwnd.load() || cs2Now(*sh, 2000); });
+        // abbrechen, wenn die Handy-App aus geht (FragDesk endet, anderer Modus), FragDesk aufnimmt oder CS2 startet
+        // (Modus „Performance“)
+        std::string code = makeReplay(demoPath, target, BELOW_NORMAL_PRIORITY_CLASS,
+                                      [sh] { return !sh->hwnd.load() || recordingActive() || cs2Now(*sh, 2000); });
         std::lock_guard<std::mutex> lk(sh->replays.mu);
         sh->replays.running.clear();
         if (code.empty()) logLine(L"Handy-App: 2D-Daten erstellt in %.1f s: %ls", (GetTickCount64() - t0) / 1000.0, target.c_str());
-        else if (code == "CANCELLED") logLine(L"Handy-App: 2D-Daten abgebrochen (CS2 gestartet oder Handy-App aus)");
+        else if (code == "CANCELLED") logLine(L"Handy-App: 2D-Daten abgebrochen (Aufnahme, CS2 gestartet oder Handy-App aus)");
         else {
             sh->replays.failed[cs] = narrow(analysisErrorText(code));
             logLine(L"Handy-App: 2D-Daten für %ls gehen nicht (%hs)", demoPath.c_str(), code.c_str());
@@ -394,8 +402,10 @@ MobileHost::MobileHost(App& app) : d_(std::make_unique<Impl>(app)) {
     host.openFile = openFile;
     host.radar = loadRadar;
     host.thumbnail = [](const fdapi::ClipInfo& clip, std::string& jpeg) { return videoThumbnail(widen(clip.path), clip.id, jpeg); };
-    host.mediaBlocked = [raw]() -> std::string {
-        return cs2Now(*raw, 5000) ? "Auf deinem PC läuft gerade CS2. Damit dein Spiel nicht ruckelt, gibt es Videos erst wieder, wenn CS2 zu ist."
+    host.mediaBlocked = [raw]() -> std::string {   // während einer Aufnahme; wegen CS2 nur im Modus „Performance“ (cs2Now)
+        if (recordingActive()) return "FragDesk nimmt auf deinem PC gerade ein Video auf. Damit es nicht ruckelt, gibt es Videos erst danach wieder.";
+        return cs2Now(*raw, 5000) ? "Auf deinem PC läuft gerade CS2. Damit dein Spiel nicht ruckelt, gibt es Videos erst wieder, wenn CS2 zu ist. "
+                                    "Ändern lässt sich das am PC: Einstellungen › Counter-Strike 2 › Performance-Modus."
                                   : std::string();
     };
     std::weak_ptr<Shared> weak = sh;   // die Funktion gehört zu sh selbst (kein Kreis)

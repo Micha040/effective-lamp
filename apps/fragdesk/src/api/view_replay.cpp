@@ -545,9 +545,9 @@ void noReplay(Host& host, Response& res, const MatchInfo& mi, const std::string&
                            0);
         if (reason == "failed") return message(res, false, kImpossible, "FragDesk konnte aus der Demo dieses Matches keine 2D-Daten erstellen.", 0);
         return message(res, false, "2D-Ansicht noch nicht da",
-                       "Die 2D-Daten dieses Matches lädt FragDesk am PC noch hoch – sobald FragDesk dort offen ist und CS2 nicht läuft. "
-                       "Für ältere Matches erstellt FragDesk sie dafür aus der Demo (Einstellungen › Handy-App › „2D-Ansicht hochladen“ "
-                       "muss an sein).",
+                       "Die 2D-Daten dieses Matches lädt FragDesk am PC noch hoch – sobald FragDesk dort offen ist (je nach Performance-Modus "
+                       "erst, wenn CS2 zu ist). Für ältere Matches erstellt FragDesk sie dafür aus der Demo (Einstellungen › Handy-App › "
+                       "„2D-Ansicht hochladen“ muss an sein).",
                        0, "Nochmal nachsehen");
     }
     ReplayState st = host.prepareReplay(mi.checksum, mi.demo, broken, retry);
@@ -562,8 +562,13 @@ void noReplay(Host& host, Response& res, const MatchInfo& mi, const std::string&
         case ReplayState::WaitCs2:
             return message(res, true, "Wird erstellt, sobald CS2 zu ist",
                            "Solange CS2 läuft, liest FragDesk keine Demos – damit dein Spiel nicht ruckelt. Lass diese Seite offen, dann geht "
-                           "es danach von selbst weiter.",
+                           "es danach von selbst weiter. Ändern lässt sich das am PC: Einstellungen › Counter-Strike 2 › Performance-Modus.",
                            15);
+        case ReplayState::WaitRecording:
+            return message(res, true, "Wird erstellt, sobald die Aufnahme fertig ist",
+                           "FragDesk nimmt am PC gerade ein Video auf. Damit es nicht ruckelt, liest FragDesk solange keine Demos. Lass diese "
+                           "Seite offen, dann geht es danach von selbst weiter.",
+                           10);
         case ReplayState::NoDemo:
             return message(res, false, kImpossible, "Die Demo-Datei ist nicht mehr da – ohne sie lassen sich keine 2D-Daten erstellen.", 0,
                            "Erneut versuchen");

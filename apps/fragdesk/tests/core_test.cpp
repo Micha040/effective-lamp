@@ -633,6 +633,22 @@ static void testCs2Con() {
     check(cursorParkPoint(full, 1900, 100, 64, two, x, y) && two[1].contains(x, y), "zweiter Bildschirm (Zeile außerhalb)");
 }
 
+// Performance-Modus: settings.json hin und zurück, wer wartet, solange CS2 läuft
+static void testCs2Mode() {
+    for (Cs2Mode m : {Cs2Mode::Performance, Cs2Mode::Manual, Cs2Mode::Auto})
+        check(parseCs2Mode(cs2ModeName(m)) == m, std::string("Modus hin und zurück: ") + cs2ModeName(m));
+    check(std::string(cs2ModeName(Cs2Mode::Performance)) == "performance" && std::string(cs2ModeName(Cs2Mode::Manual)) == "manual" &&
+              std::string(cs2ModeName(Cs2Mode::Auto)) == "auto",
+          "Namen wie in settings.json");
+    check(parseCs2Mode("") == Cs2Mode::Performance, "fehlt: Performance");
+    check(parseCs2Mode("Manual") == Cs2Mode::Performance && parseCs2Mode("turbo") == Cs2Mode::Performance && parseCs2Mode(" auto") == Cs2Mode::Performance,
+          "unbekannt: Performance");
+    // Performance: alles wartet; Manuell: nur der Hintergrund; Automatisch: nichts
+    check(pausesForCs2(Cs2Mode::Performance, false) && pausesForCs2(Cs2Mode::Performance, true), "Performance: Hintergrund und Klick warten");
+    check(pausesForCs2(Cs2Mode::Manual, false) && !pausesForCs2(Cs2Mode::Manual, true), "Manuell: Hintergrund wartet, Klick läuft");
+    check(!pausesForCs2(Cs2Mode::Auto, false) && !pausesForCs2(Cs2Mode::Auto, true), "Automatisch: nichts wartet");
+}
+
 int main(int argc, char** argv) {
     testExpr();
     testCountersMerge();
@@ -645,6 +661,7 @@ int main(int argc, char** argv) {
     testHeat();
     testCrosshairStats();
     testCs2Con();
+    testCs2Mode();
     if (argc > 1) {
         testRealFiles(argv[1]);
         testRealReplays(argv[1]);

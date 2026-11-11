@@ -144,6 +144,11 @@ public:
     void chooseAccount(int x, int y);
     void deleteMatch(const std::string& checksum);
     void saveSettings();
+    // Performance-Modus aus settings.cs2Mode übernehmen: für die Hintergrund-Threads, pausierte Arbeit prüft gleich neu
+    void applyCs2Mode();
+    // FragDesk nimmt auf (bzw. startet CS2 zum Ansehen) oder ist fertig: Der Abgleich wartet so lange, bei einer
+    // Aufnahme auch „Demo von Valve laden“ und die Handy-App – in jedem Performance-Modus
+    void recordingChanged(bool on);
 
 private:
     fd::Career career_;

@@ -48,6 +48,7 @@ public:
     ~Recorder();
 
     bool busy() const { return busy_; }
+    bool recordsVideo() const { return busy_ && video_; }   // nimmt gerade auf (nicht bloß Ansehen)
     std::wstring status() const;
     void cancel();
     // Du holst FragDesk während der Aufnahme zurück: CS2 nicht mehr obenauf halten (UI-Thread)
@@ -67,6 +68,7 @@ private:
     HWND hwnd_;
     std::thread thread_;
     std::atomic<bool> busy_{false}, cancel_{false};
+    std::atomic<bool> video_{false};        // der laufende Auftrag nimmt Videos auf (sonst: nur Ansehen)
     std::atomic<bool> keepTopmost_{true};   // false, sobald du FragDesk zurückgeholt hast
     std::atomic<HWND> topmost_{nullptr};    // CS2-Fenster, das gerade obenauf gehalten wird
     mutable std::mutex mu_;
@@ -75,6 +77,17 @@ private:
 
 // Prüft, ob ein Programm läuft (Prozessname per Toolhelp – kein anderes Programm wird geöffnet)
 bool isProcessRunning(const wchar_t* exeName);
+
+// Performance-Modus (Einstellungen › Counter-Strike 2) für alle Threads: Abgleich, „Demo von Valve laden“ und Handy-App
+// lesen ihn bei jeder Prüfung neu. Setzt der UI-Thread beim Start und beim Umschalten (App::applyCs2Mode).
+void setCs2Mode(fd::Cs2Mode mode);
+fd::Cs2Mode cs2Mode();
+
+// FragDesk nimmt gerade Videos auf (mit eigenem CS2): Dann warten „Demo von Valve laden“ und Handy-App in jedem
+// Performance-Modus (der Abgleich ohnehin), damit die Aufnahme nicht ruckelt. Setzt der UI-Thread
+// (App::recordingChanged). Startet FragDesk CS2 nur zum Ansehen, zählt dieses CS2 wie deins.
+void setRecordingActive(bool on);
+bool recordingActive();
 
 // Ordner mit den eigenen CS2-Einstellungen für Aufnahmen (%LOCALAPPDATA%\FragDesk\cs2)
 std::wstring cs2SandboxDir();

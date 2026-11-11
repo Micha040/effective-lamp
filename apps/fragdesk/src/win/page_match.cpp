@@ -3,11 +3,13 @@
 #include <cmath>
 #include <ctime>
 
+#include "../core/cs2con.h"
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
 #include "demo_fetch.h"
 #include "net.h"
+#include "recorder.h"
 
 namespace fdw {
 
@@ -766,12 +768,17 @@ float pulledNote(Canvas& c, App& app, const fd::Match& m, float x, float y, floa
     Color subCol = c.th.text2;
     bool running = mine && (fs.state == DemoFetchState::Running || fs.state == DemoFetchState::Paused);
     double share = mine && fs.total > 0 ? double(fs.done) / double(fs.total) : 0;
+    // Pause: während FragDesk aufnimmt, sonst wegen CS2 nur im Performance-Modus „Performance“ (das Laden startet ein
+    // Klick) – dann sagen, woran es liegt
+    bool cs2Waits = app.settings.cs2Mode == fd::Cs2Mode::Performance;
     if (running && fs.state == DemoFetchState::Paused) {
-        sub = L"Pausiert – CS2 läuft. Danach geht es von selbst an derselben Stelle weiter" + (fs.done > 0 ? L" (" + mb(fs.done) + L" geladen)." : L".");
+        sub = std::wstring(recordingActive() ? L"Pausiert – FragDesk nimmt gerade auf." : L"Pausiert – CS2 läuft (Performance-Modus).") +
+              L" Danach geht es von selbst an derselben Stelle weiter" + (fs.done > 0 ? L" (" + mb(fs.done) + L" geladen)." : L".");
         subCol = c.th.warning;
     } else if (running) {
         sub = L"Wird von Valve geladen … " + (fs.total > 0 ? std::to_wstring(int(share * 100)) + L" % · " + mb(fs.done) + L" von " + mb(fs.total)
-                                                         : mb(fs.done)) + L" – im Hintergrund, nie während CS2 läuft.";
+                                                         : mb(fs.done)) +
+              (cs2Waits ? L" – im Hintergrund, nie während CS2 läuft." : L" – im Hintergrund, auch während CS2 läuft.");
     } else if (mine && fs.state == DemoFetchState::Failed && !expired) {
         sub = fs.error;
         subCol = c.th.danger;

@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 
+#include "../core/cs2con.h"
 #include "../core/format.h"
 #include "app.h"
 #include "common.h"
@@ -57,6 +58,16 @@ bool waitFor(Shared& sh, ULONGLONG ms) {
     return !sh.cv.wait_for(lk, std::chrono::milliseconds(ms), [&] { return sh.cancel.load() || sh.quit.load(); });
 }
 
+// Pause: wartet ms – oder bis abgebrochen wird bzw. weder eine Aufnahme noch der Performance-Modus sie verlangt
+// (DemoFetch::recheckPause weckt); false = abgebrochen
+bool pauseFor(Shared& sh, ULONGLONG ms) {
+    std::unique_lock<std::mutex> lk(sh.mu);
+    sh.cv.wait_for(lk, std::chrono::milliseconds(ms), [&] {
+        return sh.cancel.load() || sh.quit.load() || (!recordingActive() && !fd::pausesForCs2(cs2Mode(), true));
+    });
+    return !sh.cancel && !sh.quit;
+}
+
 void worker(std::shared_ptr<Shared> sh, std::string checksum, WebUrl url, std::wstring file) {
     SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);   // Prozessor und Festplatte: Hintergrund
     auto send = [&](DemoFetchEvent::Kind k, int64_t done, int64_t total, const std::wstring& text = L"", const std::wstring& path = L"") {
@@ -71,7 +82,11 @@ void worker(std::shared_ptr<Shared> sh, std::string checksum, WebUrl url, std::w
     };
     ULONGLONG active = 0, cs2At = 0;
     bool cs2 = false, paused = false;
-    auto cs2Now = [&] {   // nur der Prozessname (Toolhelp), höchstens alle 2 s
+    // Pause? Während FragDesk aufnimmt immer. Wegen CS2 nur im Performance-Modus „Performance“ (das Laden hat ein Klick
+    // gestartet) – und dann nur der Prozessname (Toolhelp), höchstens alle 2 s
+    auto mustWait = [&] {
+        if (recordingActive()) return true;
+        if (!fd::pausesForCs2(cs2Mode(), true)) return false;
         ULONGLONG now = GetTickCount64();
         if (!cs2At || now - cs2At >= 2000) {
             cs2 = isProcessRunning(L"cs2.exe");
@@ -85,13 +100,14 @@ void worker(std::shared_ptr<Shared> sh, std::string checksum, WebUrl url, std::w
     logLine(L"Demo von Valve: lade %ls%hs nach %ls%ls", url.host.c_str(), url.path.c_str(), file.c_str(), done > 0 ? L" (geht weiter)" : L"");
     for (;;) {
         if (sh->cancel || sh->quit) break;
-        if (cs2Now()) {   // CS2 läuft: nichts laden, der Ping soll nicht leiden
-            if (!paused) logLine(L"Demo von Valve: Pause, CS2 läuft");
+        if (mustWait()) {   // nichts laden: die Aufnahme soll nicht ruckeln, der Ping nicht leiden
+            if (!paused) logLine(recordingActive() ? L"Demo von Valve: Pause, FragDesk nimmt auf" : L"Demo von Valve: Pause, CS2 läuft");
             paused = true;
             send(DemoFetchEvent::Paused, done, total);
-            if (!waitFor(*sh, kPauseMs)) break;
+            if (!pauseFor(*sh, kPauseMs)) break;
             continue;
         }
+        if (paused) logLine(L"Demo von Valve: geht weiter");
         paused = false;
         ULONGLONG t0 = GetTickCount64(), lastPost = 0;
         bool timeUp = false;
@@ -101,7 +117,7 @@ void worker(std::shared_ptr<Shared> sh, std::string checksum, WebUrl url, std::w
         rq.maxBytes = kMaxDemo;
         rq.check = looksLikeDemo;
         rq.cancel = [&] {
-            if (sh->cancel || sh->quit || cs2Now()) return true;
+            if (sh->cancel || sh->quit || mustWait()) return true;
             if (active + (GetTickCount64() - t0) > kMaxActiveMs) timeUp = true;
             return timeUp;
         };
@@ -128,7 +144,7 @@ void worker(std::shared_ptr<Shared> sh, std::string checksum, WebUrl url, std::w
             send(DemoFetchEvent::Failed, done, total, L"Nach 30 Minuten angehalten – noch einmal klicken, es geht an der Stelle weiter.");
             return;
         }
-        if (r.cancelled) continue;   // CS2 gestartet: Pause, danach an derselben Stelle weiter
+        if (r.cancelled) continue;   // Aufnahme oder CS2 (Modus „Performance“) gestartet: Pause, danach an derselben Stelle weiter
         if (r.gone) {
             DeleteFileW(part.c_str());
             logLine(L"Demo von Valve: %d – Valve hat die Demo nicht mehr", r.status);
@@ -250,6 +266,13 @@ void DemoFetch::cancel() {
     d.sh->cancel = true;
     d.sh->http.abort();   // bricht ein Warten in WinHTTP sofort ab
     d.sh->cv.notify_all();
+}
+
+void DemoFetch::recheckPause() {
+    Impl& d = *d_;
+    if (!d.sh) return;
+    { std::lock_guard<std::mutex> lk(d.sh->mu); }   // wer gerade in die Pause geht, verpasst das Wecken nicht
+    d.sh->cv.notify_all();   // die Pause prüft neu (ein laufender Download fragt ohnehin laufend)
 }
 
 void DemoFetch::stop() {

@@ -223,10 +223,12 @@ langen Zufallsschlüssel an. Gekoppelte Handys siehst und entfernst du unter Ein
 dabei nur mit deinem Handy im Heimnetz bzw. über Tailscale, nichts geht ins Internet – und mit CS2 oder dem
 Anti-Cheat hat das nichts zu tun.
 
-**Rücksicht aufs Spiel:** Solange CS2 läuft, schickt FragDesk keine Videos (die Stats schon – das sind nur ein paar
-KB), damit dein Ping nicht leidet, und liest keine Demos für die 2D-Ansicht – das Handy zeigt dann „Wird erstellt,
-sobald CS2 zu ist“ und macht danach von selbst weiter. Im Leerlauf kostet die Handy-App nichts; Vorschaubilder der
-Videos entstehen einmal und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
+**Rücksicht aufs Spiel:** Im [Performance-Modus](#performance-modus) „Performance“ (Standard) schickt FragDesk,
+solange CS2 läuft, keine Videos (die Stats schon – das sind nur ein paar KB), damit dein Ping nicht leidet, und liest
+keine Demos für die 2D-Ansicht – das Handy zeigt dann „Wird erstellt, sobald CS2 zu ist“ und macht danach von selbst
+weiter. In „Manuell“ und „Automatisch“ gibt es beides auch während des Spiels: Was du auf dem Handy öffnest, zählt als
+dein Klick. Nur während FragDesk am PC ein Video aufnimmt, wartet beides in jedem Modus. Im Leerlauf kostet die
+Handy-App nichts; Vorschaubilder der Videos entstehen einmal und liegen dann in `%LOCALAPPDATA%\FragDesk\thumbs`.
 
 **HTTPS über Tailscale (für Profis):** `tailscale serve --bg 7420` in einer Eingabeaufforderung auf dem PC liefert eine
 Adresse wie `https://dein-pc.dein-tailnet.ts.net`. Adresse kopieren und in FragDesk bei „Adresse fürs Handy“ auf
@@ -241,7 +243,8 @@ Ein kleiner gemieteter Linux-Server wird zur **Drehscheibe** für deine Stats un
 Freunde. Der Server hat alle Matches: FragDesk am PC lädt seine eigenen hoch und holt sich, was ihm fehlt (z. B. Matches,
 die der Server [selbst bei Valve geladen](#demos-automatisch-laden) hat), die Handy-App liest vom Server – dieselbe App
 mit denselben Ansichten wie oben, aber dein PC muss nicht an sein und Tailscale brauchst du nicht. Hochgeladen und
-geholt wird **nie, während CS2 läuft oder aufgenommen wird**.
+geholt wird **nie, während FragDesk aufnimmt** – und solange CS2 läuft, je nach [Performance-Modus](#performance-modus)
+gar nicht (Standard), nur auf Klick oder ganz normal.
 
 **Was du brauchst:** einen VPS mit Debian oder Ubuntu (x86_64), einer eigenen IPv4-Adresse und SSH-Zugang als root.
 Klein reicht völlig, z. B. der kleinste netcup-VPS („VPS nano“) für rund 3–4 € im Monat samt IPv4 – Preise ändern
@@ -286,10 +289,11 @@ einen QR-Code – jetzt für den Server. Mit dem Schalter „Videos hochladen“
 **2D-Ansicht über den Server:** Der Schalter **„2D-Ansicht hochladen“** (an) lädt die Daten der 2D-Ansicht mit hoch,
 rund 2 MB pro Match. Neue Matches bekommen sie gleich beim Auswerten (im selben Durchgang, kaum langsamer); für ältere
 erstellt FragDesk sie nach und nach aus der Demo – eins nach dem anderen, mit niedrigster Priorität und nie, während
-CS2 läuft oder aufgenommen wird. Matches, deren Demo nicht mehr da ist, bleiben ohne 2D-Ansicht; die Handy-App sagt
-dann, warum. Ausgeschaltet bleibt die 2D-Ansicht am PC, und FragDesk erstellt dafür nichts im Hintergrund. Dafür
-braucht der Server eine aktuelle Version – ein älterer nimmt keine 2D-Daten an; FragDesk sagt das dann in den
-Einstellungen, und der Installationsbefehl von oben, noch einmal ausgeführt, aktualisiert ihn.
+FragDesk aufnimmt (solange CS2 läuft: je nach [Performance-Modus](#performance-modus)). Matches, deren Demo nicht mehr
+da ist, bleiben ohne 2D-Ansicht; die Handy-App sagt dann, warum. Ausgeschaltet bleibt die 2D-Ansicht am PC, und
+FragDesk erstellt dafür nichts im Hintergrund. Dafür braucht der Server eine aktuelle Version – ein älterer nimmt keine
+2D-Daten an; FragDesk sagt das dann in den Einstellungen, und der Installationsbefehl von oben, noch einmal ausgeführt,
+aktualisiert ihn.
 
 **Löschen:** Löschst du in FragDesk ein Match oder Video, verschwindet es beim nächsten Abgleich auch vom Server – auch
 ein [vom Server geholtes](#matches-vom-server-am-pc) Match. Fehlt ein Match nur am PC (neuer PC, Datei verloren), holt
@@ -359,10 +363,12 @@ eigenes Match.
 [selbst bei Valve geholt](#demos-automatisch-laden), kennt er ihre Adresse, und im Match steht ruhig **„Demo nicht auf
 diesem PC“** mit dem Knopf **„Demo von Valve laden“** – solange Valve sie aufhebt (etwa einen Monat nach dem Spiel, das
 Datum steht dabei). FragDesk lädt sie dann im Hintergrund nach `%LOCALAPPDATA%\FragDesk\demos` (meist 50–200 MB,
-höchstens 1 GB) – mit Fortschritt und „Abbrechen“, nie während CS2 läuft: Dann pausiert es und macht danach an
-derselben Stelle weiter. Danach gehört die Demo zum Match wie jede andere (gepackt; entpackt wird erst fürs Ansehen und
-Aufnehmen). Ist sie bei Valve schon weg, sagt FragDesk das – Stats, Heatmap und 2D-Ansicht bleiben. Löschst du das
-Match, löscht FragDesk die geladene Demo mit.
+höchstens 1 GB) – mit Fortschritt und „Abbrechen“. Im [Performance-Modus](#performance-modus) „Performance“ nie, während
+CS2 läuft: Dann pausiert es und macht danach an derselben Stelle weiter; in „Manuell“ und „Automatisch“ lädt es weiter
+(es startet ja nur auf deinen Klick) – nur während FragDesk ein Video aufnimmt, pausiert es in jedem Modus. Danach
+gehört die Demo zum Match wie jede andere (gepackt; entpackt wird erst fürs Ansehen und Aufnehmen). Ist sie bei Valve
+schon weg, sagt FragDesk das – Stats, Heatmap und 2D-Ansicht bleiben. Löschst du das Match, löscht FragDesk die
+geladene Demo mit.
 
 ### Demos automatisch laden
 
@@ -436,11 +442,29 @@ runuser -u fragdesk -- node --jitless /usr/local/lib/fragdesk/fragdesk-fetch.js 
 Node.js 18 oder neuer gibt es in apt z. B. bei Debian 12/13 und Ubuntu 24.04; bei älteren Systemen (Ubuntu 22.04)
 meldet `install.sh` das und lässt nur diese Funktion aus.
 
+## Performance-Modus
+
+Was FragDesk tut, während du CS2 spielst, stellst du unter **Einstellungen › Counter-Strike 2 › Performance-Modus**
+ein. Es gilt sofort – auch für eine Pause, die gerade läuft:
+
+| Modus | Solange CS2 läuft … |
+|---|---|
+| **Performance** (Standard) | … wartet alles: kein Abgleich mit dem [eigenen Server](#eigener-server), kein [„Demo von Valve laden“](#matches-vom-server-am-pc), keine Videos und keine neuen 2D-Daten für die [Handy-App](#handy-app) direkt vom PC. Danach geht es von selbst weiter. |
+| **Manuell** | … wartet nur, was FragDesk von selbst macht (Abgleich beim Start, nach Auswertungen und alle 15 Minuten, 2D-Daten aus älteren Demos). Was du anstößt, läuft sofort: **„Jetzt abgleichen“** (ein ganzer Durchgang: hochladen, holen, Videos, 2D-Daten), **„Jetzt prüfen“** bei [Demos automatisch laden](#demos-automatisch-laden) (die neuen Matches holt FragDesk danach gleich), **„Demo von Valve laden“** (auch, wenn CS2 mittendrin startet) und alles, was du auf dem Handy öffnest. |
+| **Automatisch** | … wartet nichts – alles läuft wie ohne CS2. Hoch- und Herunterladen kann deinen Ping kosten. |
+
+In allen drei Modi gilt: Während FragDesk selbst Videos aufnimmt, wartet all das, damit die Aufnahme nicht ruckelt.
+Rechenarbeit (`fdanalyze.exe`) läuft immer mit niedriger bzw. niedrigster Priorität. Ansehen und Aufnehmen in CS2 gehen
+nur, wenn CS2 zu ist – FragDesk startet dafür ein eigenes CS2. Neue Demos auswerten geht immer. Ob CS2 läuft, erkennt
+FragDesk nur am Prozessnamen `cs2.exe` in der Prozessliste von Windows; das Spiel selbst öffnet oder berührt es dafür
+nie.
+
 ## Anti-Cheat und Sicherheit
 
 - FragDesk **liest nur Demo-Dateien**. Es greift nie in ein laufendes Spiel ein: keine Injektion, keine Hooks,
   keine simulierten Eingaben, kein Lesen fremden Speichers. (Bei Aufnahmen schiebt es nur den Mauszeiger aus dem
-  Bild – im eigenen CS2 für die Aufnahme, das mit keinem Server verbunden ist.)
+  Bild – im eigenen CS2 für die Aufnahme, das mit keinem Server verbunden ist.) Ob CS2 läuft, sieht es nur am
+  Prozessnamen in der Prozessliste von Windows ([Performance-Modus](#performance-modus)).
 - CS2 startet es **nur zum Ansehen oder Aufnehmen** – und nur, wenn CS2 gerade nicht läuft. Dabei nutzt es
   ausschließlich offizielle Startoptionen von Valve (`-tools` für den Workshop-Tools-Modus, `+playdemo` und die
   Konsole über `-netconport`), **kein Plugin, keine geänderten Spieldateien**. CS2 spielt dabei nur die Demo auf
@@ -465,9 +489,10 @@ meldet `install.sh` das und lässt nur diese Funktion aus.
   oder Handy angesehen hast – mit eigenem Server und „2D-Ansicht hochladen“ für alle. Die Demo selbst brauchst du
   danach nur noch zum Ansehen und Aufnehmen in CS2.
 - Mit eigenem Server holt FragDesk fehlende Matches im selben Hintergrund-Thread wie das Hochladen (niedrige
-  Priorität, nie während CS2 läuft oder aufgenommen wird) und gibt sie in Stapeln an die Liste. „Demo von Valve laden“
-  lädt nur auf Klick, eine Demo zur Zeit, mit niedriger Priorität, pausiert, solange CS2 läuft, und hört nach
-  30 Minuten Laden auf (ein Klick macht an der Stelle weiter).
+  Priorität, nie während FragDesk aufnimmt; solange CS2 läuft, je nach [Performance-Modus](#performance-modus)) und
+  gibt sie in Stapeln an die Liste. „Demo von Valve laden“ lädt nur auf Klick, eine Demo zur Zeit, mit niedriger
+  Priorität, pausiert während Aufnahmen und im Modus „Performance“, solange CS2 läuft, und hört nach 30 Minuten Laden auf
+  (ein Klick macht an der Stelle weiter).
 - Die 2D-Ansicht zeichnet nur, solange sie abspielt und das Fenster zu sehen ist (rund 30 Bilder pro Sekunde),
   angehalten oder minimiert kostet sie nichts. Heatmaps rechnet FragDesk nur, wenn sich die Auswahl ändert; die
   Daten vieler Matches liest es im Hintergrund.

@@ -89,7 +89,8 @@ struct ReplayState {
     enum Kind {
         Working,   // wird gerade aus der Demo erstellt
         Queued,    // wartet, bis ein anderes Match fertig ist
-        WaitCs2,   // wird erstellt, sobald CS2 zu ist
+        WaitCs2,   // wird erstellt, sobald CS2 zu ist (nur im Performance-Modus „Performance“)
+        WaitRecording,   // wird erstellt, sobald FragDesk am PC mit der Aufnahme fertig ist (jeder Modus)
         NoDemo,    // Demo-Datei nicht mehr da
         Failed,    // Erstellen ging schief (error: Grund)
     } kind = Failed;
@@ -108,14 +109,16 @@ struct Host {
     std::function<FileReader(const std::string& path, int64_t& size)> openFile;
     // Vorschaubild (JPEG) eines Clips; optional
     std::function<bool(const ClipInfo& clip, std::string& jpeg)> thumbnail;
-    // nicht leer: Grund, warum gerade keine Videos ausgeliefert werden (z. B. CS2 läuft)
+    // nicht leer: Grund, warum gerade keine Videos ausgeliefert werden (FragDesk nimmt auf; CS2 läuft im Performance-Modus
+    // „Performance“)
     std::function<std::string()> mediaBlocked;
     // Radarbild (PNG) einer Karte – name wie fd::RadarMap::name (z. B. "de_nuke"), lower: untere Ebene; false = keins
     std::function<bool(const std::string& name, bool lower, std::string& png)> radar;
     // 2D-Ansicht ohne brauchbare .replay-Datei: FragDesk (direkt vom PC) erstellt sie im Hintergrund aus der Demo (demo:
-    // Pfad laut Auswertung) und sagt, wie weit es ist – nie, solange CS2 läuft. Aus dem Thread der Anfrage, kehrt sofort
-    // zurück. broken: die vorhandene Datei ist unbrauchbar (neu erstellen), retry: nach einem Fehler noch einmal versuchen.
-    // Leer (eigener Server): die Ansicht erklärt selbst, warum es keine gibt.
+    // Pfad laut Auswertung) und sagt, wie weit es ist – nie, während FragDesk aufnimmt, und im Performance-Modus
+    // „Performance“ nie, solange CS2 läuft. Aus dem Thread der Anfrage, kehrt sofort zurück. broken: die vorhandene Datei
+    // ist unbrauchbar (neu erstellen), retry: nach einem Fehler noch einmal versuchen. Leer (eigener Server): die Ansicht
+    // erklärt selbst, warum es keine gibt.
     std::function<ReplayState(const std::string& checksum, const std::string& demo, bool broken, bool retry)> prepareReplay;
 };
 

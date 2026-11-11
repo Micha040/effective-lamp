@@ -155,6 +155,7 @@ void Window::startup() {
     app_.loadClips();
     logLine(L"FragDesk %ls gestartet; Steam: %ls; CS2: %ls; %zu Konten", kVersion, app_.steam.steamDir.c_str(), app_.steam.cs2Dir.c_str(),
             app_.steam.accounts.size());
+    app_.applyCs2Mode();   // vor den Hintergrund-Threads (die starten erst mit dem Fenster)
 }
 
 void Window::openDemos(const std::vector<std::wstring>& files) {
@@ -863,8 +864,8 @@ LRESULT Window::handle(UINT msg, WPARAM wp, LPARAM lp) {
                     app_.notify(e->text, true);
                     break;
             }
-            // eigener Server: Pause während der Aufnahme, danach die neuen Videos hochladen
-            app_.sync->setRecording(app_.recording());
+            // Pause während der Aufnahme (Abgleich, Demo von Valve, Handy-App), danach die neuen Videos hochladen
+            app_.recordingChanged(app_.recording());
             if (e->kind != RecordEvent::Status) app_.sync->request();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;

@@ -16,6 +16,7 @@
 
 #include "../api/jsonw.h"
 #include "../api/mobile.h"
+#include "../core/cs2con.h"
 #include "../core/json.h"
 #include "app.h"
 #include "common.h"
@@ -104,6 +105,7 @@ struct Shared {
     std::condition_variable cv;
     std::shared_ptr<const Snapshot> snap;
     bool pending = false, manual = false;
+    bool user = false;   // der wartende Anstoß kam per Klick (Performance-Modus „Manuell“: läuft auch, solange CS2 läuft)
     ULONGLONG due = 0, backoffUntil = 0;
     int failures = 0;
     bool finished = false;
@@ -122,18 +124,20 @@ void post(Shared& sh, SyncEvent* e) {
     if (!h || !PostMessageW(h, WM_APP_SYNC, 0, reinterpret_cast<LPARAM>(e))) delete e;
 }
 
-// Pause? Nur der Name aus der Prozessliste (Toolhelp) – CS2 selbst wird nie geöffnet
-bool blockedNow(Shared& sh, SyncStatus::State& why) {
+// Pause? FragDesk nimmt auf – oder CS2 läuft und der Performance-Modus lässt diesen Durchgang (user: per Klick
+// angestoßen) dann nicht laufen. Nur der Name aus der Prozessliste (Toolhelp) – CS2 selbst wird nie geöffnet
+bool blockedNow(Shared& sh, bool user, SyncStatus::State& why) {
     if (sh.recording) {
         why = SyncStatus::PausedRecording;
         return true;
     }
+    why = SyncStatus::PausedCs2;
+    if (!fd::pausesForCs2(cs2Mode(), user)) return false;   // CS2 hält das gerade nicht an: Prozessliste gar nicht erst ansehen
     ULONGLONG now = GetTickCount64();
     if (!sh.cs2At || now - sh.cs2At >= kCs2Check) {
         sh.cs2 = isProcessRunning(L"cs2.exe");
         sh.cs2At = now;
     }
-    why = SyncStatus::PausedCs2;
     return sh.cs2;
 }
 
@@ -274,7 +278,8 @@ enum class Fail { None, Cancel, Paused, Net, Auth, Full, Item };
 
 class Pass {
 public:
-    Pass(Shared& sh, const Snapshot& s) : sh_(sh), s_(s) {}
+    // user: per Klick angestoßen – im Performance-Modus „Manuell“ läuft der ganze Durchgang dann auch, solange CS2 läuft
+    Pass(Shared& sh, const Snapshot& s, bool user) : sh_(sh), s_(s), user_(user) {}
     Fail run();
 
     SyncStatus st;                                      // Stand, auch für die Anzeige danach
@@ -304,12 +309,13 @@ private:
 
     Shared& sh_;
     const Snapshot& s_;
+    const bool user_;
     ServerUrl url_;
     ULONGLONG posted_ = 0;
     bool changed_ = false;
 
     bool cancelled() const { return sh_.quit || sh_.epoch != s_.epoch; }
-    bool blocked() { return blockedNow(sh_, pausedBy); }
+    bool blocked() { return blockedNow(sh_, user_, pausedBy); }   // liest den Performance-Modus jedes Mal neu
     HttpResponse call(const wchar_t* method, const std::string& path, const std::string& body = std::string(), const char* type = nullptr,
                       bool stoppable = false);
     Fail check(const HttpResponse& r);
@@ -323,6 +329,7 @@ private:
     Fail markNoReplay(LocalMatch& m, const char* reason);
     bool newRequest() {   // ein neuer Anstoß wartet (z. B. frisch ausgewertetes Match): Erstellen unterbrechen
         std::lock_guard<std::mutex> lk(sh_.mu);
+        if (sh_.pending && user_) sh_.user = true;   // per Klick angestoßen: der nächste Durchgang macht zu Ende, was der Klick wollte
         return sh_.pending;
     }
     Fail uploadClip(const SyncClip& c, int64_t size, const RemoteClip* e, int index, int count);
@@ -659,8 +666,8 @@ Fail Pass::markNoReplay(LocalMatch& m, const char* reason) {
 }
 
 // Fehlende 2D-Daten aus den Demos erstellen und hochladen: neueste Matches zuerst, eins nach dem anderen, mit niedrigster
-// Priorität. Startet CS2 oder nimmt FragDesk auf, bricht fdanalyze ab (Pause, später geht es weiter); wartet ein neuer
-// Anstoß, kommt erst der dran.
+// Priorität (in jedem Performance-Modus). Nimmt FragDesk auf oder startet CS2 (und der Modus pausiert dafür), bricht
+// fdanalyze ab (Pause, später geht es weiter); wartet ein neuer Anstoß, kommt erst der dran.
 Fail Pass::makeReplays(std::vector<LocalMatch>& all) {
     int missing = 0, done = 0;
     for (const auto& m : all)
@@ -782,7 +789,7 @@ Fail Pass::fetchPart(const std::string& checksum, const char* part, size_t maxBy
     rq.path = "api/v1/sync/match/" + checksum + "/" + part;
     rq.token = s_.token;
     rq.maxBody = maxBytes;
-    rq.cancel = [this] { return cancelled() || blocked(); };   // CS2 startet: 2D-Daten (bis 16 MB) nicht zu Ende laden
+    rq.cancel = [this] { return cancelled() || blocked(); };   // CS2 startet (Pause): 2D-Daten (bis 16 MB) nicht zu Ende laden
     HttpResponse r;
     if (cancelled() || blocked()) r.cancelled = true;
     else r = sh_.http.send(url_, rq);
@@ -954,7 +961,7 @@ Fail Pass::uploadClip(const SyncClip& c, int64_t size, const RemoteClip* e, int 
 
 // Vorschaubild wie in der Handy-App direkt vom PC; fehlt es, ist das kein Fehler (nächstes Mal wieder)
 void Pass::uploadThumb(const SyncClip& c) {
-    if (sh_.noThumb.count(c.id) || cancelled() || blocked()) return;   // während CS2 läuft auch kein Video dekodieren
+    if (sh_.noThumb.count(c.id) || cancelled() || blocked()) return;   // in der Pause (CS2, Aufnahme) auch kein Video dekodieren
     std::string jpeg;
     Thumb t = thumbnailWithin(c.path, c.id, jpeg);
     if (t != Thumb::Ok || jpeg.empty() || jpeg.size() > kMaxThumb) {
@@ -1000,8 +1007,8 @@ void postStatus(Shared& sh, uint64_t epoch, const SyncStatus& st) {
     post(sh, e);
 }
 
-// Nächsten Durchgang einplanen (Wartezeit nach Fehlern bzw. Pause)
-void schedule(Shared& sh, ULONGLONG delayMs, bool backoff) {
+// Nächsten Durchgang einplanen (Wartezeit nach Fehlern bzw. Pause). user: ein pausierter Klick bleibt ein Klick
+void schedule(Shared& sh, ULONGLONG delayMs, bool backoff, bool user = false) {
     std::lock_guard<std::mutex> lk(sh.mu);
     ULONGLONG at = GetTickCount64() + delayMs;
     if (backoff) {
@@ -1010,9 +1017,10 @@ void schedule(Shared& sh, ULONGLONG delayMs, bool backoff) {
         else if (!sh.pending) sh.due = at;
     } else if (!sh.pending || at < sh.due) sh.due = at;
     sh.pending = true;
+    if (user) sh.user = true;
 }
 
-void runOnce(Shared& sh, const Snapshot& s) {
+void runOnce(Shared& sh, const Snapshot& s, bool user) {
     if (s.epoch != sh.epoch) return;
     if (!s.token.empty() && s.token == sh.authFailed) {   // der Server kennt den Schlüssel nicht mehr: erst neu verbinden
         SyncStatus st;
@@ -1021,16 +1029,16 @@ void runOnce(Shared& sh, const Snapshot& s) {
         return;
     }
     SyncStatus::State why;
-    if (blockedNow(sh, why)) {   // gar nicht erst anfangen
+    if (blockedNow(sh, user, why)) {   // gar nicht erst anfangen
         SyncStatus st;
         st.state = why;
         postStatus(sh, s.epoch, st);
         if (sh.lastLogged != why) logLine(why == SyncStatus::PausedCs2 ? L"Server: Pause, CS2 läuft" : L"Server: Pause, FragDesk nimmt auf");
         sh.lastLogged = why;
-        schedule(sh, kPausePoll, false);
+        schedule(sh, kPausePoll, false, user);
         return;
     }
-    Pass pass(sh, s);
+    Pass pass(sh, s, user);
     Fail f = pass.run();
     SyncStatus st = pass.st;
     st.current.clear();
@@ -1060,7 +1068,7 @@ void runOnce(Shared& sh, const Snapshot& s) {
             if (sh.lastLogged != st.state)
                 logLine(st.state == SyncStatus::PausedCs2 ? L"Server: Pause, CS2 läuft" : L"Server: Pause, FragDesk nimmt auf");
             sh.lastLogged = st.state;
-            schedule(sh, kPausePoll, false);
+            schedule(sh, kPausePoll, false, user);
             break;
         case Fail::Net: {
             int failures;
@@ -1110,10 +1118,12 @@ void worker(std::shared_ptr<Shared> sh) {
             continue;
         }
         std::shared_ptr<const Snapshot> snap = sh->snap;
+        bool user = sh->user;
         sh->pending = false;
         sh->manual = false;
+        sh->user = false;
         lk.unlock();
-        runOnce(*sh, *snap);
+        runOnce(*sh, *snap, user);
         lk.lock();
     }
     sh->finished = true;
@@ -1291,6 +1301,7 @@ void ServerSync::apply() {
         {
             std::lock_guard<std::mutex> lk(d.sh->mu);
             d.sh->pending = false;
+            d.sh->user = false;
             d.sh->snap.reset();
             d.sh->failures = 0;
             d.sh->backoffUntil = 0;
@@ -1308,7 +1319,7 @@ void ServerSync::apply() {
     }
 }
 
-void ServerSync::request(int delayMs, bool manual) {
+void ServerSync::request(int delayMs, SyncKick kick) {
     Impl& d = *d_;
     if (!active() || !d.app.lib.loaded() || d.sh->quit) return;
     const ServerSettings& srv = d.app.settings.mobile.srv;
@@ -1346,7 +1357,8 @@ void ServerSync::request(int delayMs, bool manual) {
         std::lock_guard<std::mutex> lk(d.sh->mu);
         d.sh->snap = snap;
         ULONGLONG at = GetTickCount64() + ULONGLONG(std::max(0, delayMs));
-        if (manual) {   // „Jetzt abgleichen“: auch während der Wartezeit nach Fehlern
+        if (kick != SyncKick::Background) d.sh->user = true;   // Klick: im Modus „Manuell“ auch, solange CS2 läuft
+        if (kick == SyncKick::Now) {   // „Jetzt abgleichen“: auch während der Wartezeit nach Fehlern
             d.sh->failures = 0;
             d.sh->backoffUntil = 0;
             d.sh->manual = true;
@@ -1381,6 +1393,16 @@ void ServerSync::setRecording(bool on) {
     if (!on) {   // weiter, sobald die Aufnahme fertig ist
         std::lock_guard<std::mutex> lk(d_->sh->mu);
         if (d_->sh->pending) d_->sh->due = std::min(d_->sh->due, std::max(GetTickCount64() + 3000, d_->sh->backoffUntil));
+    }
+    d_->sh->cv.notify_all();
+}
+
+// Ein wartender Durchgang (etwa die Pause wegen CS2, die sonst erst nach 15 s wieder nachsieht) kommt gleich dran und
+// prüft mit dem neuen Modus; ein laufender liest ihn vor jedem Schritt selbst. Die Wartezeit nach Fehlern bleibt.
+void ServerSync::cs2ModeChanged() {
+    {
+        std::lock_guard<std::mutex> lk(d_->sh->mu);
+        if (d_->sh->pending) d_->sh->due = std::min(d_->sh->due, std::max(GetTickCount64(), d_->sh->backoffUntil));
     }
     d_->sh->cv.notify_all();
 }

@@ -5,9 +5,11 @@
 // (Library::linkDemo): Ansehen und Aufnehmen in CS2 und Neu auswerten gehen wie bei jeder Demo auf dem PC – sie bleibt
 // gepackt und wird wie jede .dem.bz2 erst fürs Ansehen entpackt.
 //
-// Rücksicht aufs Spiel: Pause, solange CS2 läuft (nur der Prozessname per Toolhelp), danach geht es von selbst weiter.
-// Grenzen: höchstens 1 GB, 30 Minuten (ohne Pausen), 60 s ohne Daten. Immer nur eine Demo zur Zeit; der Stand kommt als
-// WM_APP_DEMOFETCH zurück (höchstens alle 0,4 s).
+// Rücksicht aufs Spiel: Laden startet immer ein Klick – deshalb pausiert es wegen CS2 nur im Performance-Modus
+// „Performance“, solange CS2 läuft (nur der Prozessname per Toolhelp); in „Manuell“ und „Automatisch“ lädt es weiter,
+// auch wenn CS2 mittendrin startet. Während FragDesk selbst aufnimmt, pausiert es in jedem Modus. Danach geht es von
+// selbst an derselben Stelle weiter. Grenzen: höchstens 1 GB, 30 Minuten (ohne Pausen), 60 s ohne Daten. Immer nur eine
+// Demo zur Zeit; der Stand kommt als WM_APP_DEMOFETCH zurück (höchstens alle 0,4 s).
 #pragma once
 #include <windows.h>
 
@@ -37,6 +39,7 @@ public:
     void start(const std::string& checksum);   // geht es nicht, sagt FragDesk warum (Hinweis)
     void cancel();                             // „Abbrechen“: aufhören, angefangene Datei weg
     void stop();                               // beim Beenden
+    void recheckPause();                       // Performance-Modus umgestellt, Aufnahme fertig: Pause gleich neu prüfen
     const DemoFetchState& state() const;
     bool busy() const;                         // lädt oder wartet (Pause)
 

@@ -8,13 +8,14 @@
 // was in FragDesk gelöscht wurde (macht Platz), dann fehlende eigene Matches (.json, .heat), vorhandene 2D-Daten
 // (.replay), dann holen, was hier fehlt (.json, .heat, mit „2D-Ansicht“ .replay – in Stapeln an die Bibliothek), Videos
 // in Stücken à 4 MB (fortsetzbar), Vorschaubild und „done“. Zum Schluss erstellt er fehlende 2D-Daten aus den Demos –
-// eins nach dem anderen, mit niedrigster Priorität, und nie, solange CS2 läuft oder FragDesk aufnimmt. Geholte Matches
-// (Markierung .src) lädt er nie hoch und löscht sie nie; ist dort eine neuere Fassung, holt er sie neu. Löschen in
-// FragDesk löscht auch dort (wie bei eigenen Matches). Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder
-// Löschung und alle 15 Minuten. Pause, solange CS2 läuft (nur der Prozessname per Toolhelp) oder FragDesk aufnimmt;
-// bei Fehlern neuer Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen Schnappschuss mit;
-// Ergebnisse kommen als WM_APP_SYNC zurück. Die Aktionen der Einstellungen (verbinden, koppeln, einladen, abmelden)
-// laufen in kurzen eigenen Threads, damit sie nicht hinter einem großen Video warten.
+// eins nach dem anderen, mit niedrigster Priorität, und nie, solange FragDesk aufnimmt. Geholte Matches (Markierung
+// .src) lädt er nie hoch und löscht sie nie; ist dort eine neuere Fassung, holt er sie neu. Löschen in FragDesk löscht
+// auch dort (wie bei eigenen Matches). Angestoßen beim Start, nach jeder Auswertung, Aufnahme oder Löschung und alle
+// 15 Minuten. Pause, solange FragDesk aufnimmt – und solange CS2 läuft (nur der Prozessname per Toolhelp), je nach
+// Performance-Modus: „Performance“ immer, „Manuell“ nur ohne Klick (ein Durchgang nach „Jetzt abgleichen“ läuft ganz
+// durch), „Automatisch“ nie. Bei Fehlern neuer Versuch mit wachsender Wartezeit. Der UI-Thread gibt dem Thread einen
+// Schnappschuss mit; Ergebnisse kommen als WM_APP_SYNC zurück. Die Aktionen der Einstellungen (verbinden, koppeln,
+// einladen, abmelden) laufen in kurzen eigenen Threads, damit sie nicht hinter einem großen Video warten.
 #pragma once
 #include <windows.h>
 
@@ -42,6 +43,13 @@ struct SyncStatus {
     int64_t used = -1, limit = 0;   // Speicher in Bytes (−1 = unbekannt; limit 0 = unbegrenzt)
 };
 
+// Wer stößt den Abgleich an? Im Performance-Modus „Manuell“ laufen, solange CS2 läuft, nur Anstöße per Klick.
+enum class SyncKick {
+    Background,   // Start, Auswertung, Aufnahme, Löschen, Einstellung geändert, alle 15 Minuten
+    User,         // Folge eines Klicks (z. B. „Jetzt prüfen“ bei Demos automatisch laden: der Server ist fertig)
+    Now,          // „Jetzt abgleichen“: sofort, auch während einer Wartezeit nach Fehlern
+};
+
 class ServerSync {
 public:
     explicit ServerSync(App& app);
@@ -50,10 +58,11 @@ public:
     // Einstellungen übernehmen (Modus, Konto): Abgleich an oder aus, Zeitgeber für alle 15 Minuten (UI-Thread)
     void apply();
     bool active() const;   // Modus „Eigener Server“ und verbunden
-    // Abgleich anstoßen: Schnappschuss der Matches und Videos jetzt, Abgleich nach delayMs (mehrere Anstöße werden einer).
-    // manual: sofort, auch während einer Wartezeit nach Fehlern
-    void request(int delayMs = 3000, bool manual = false);
+    // Abgleich anstoßen: Schnappschuss der Matches und Videos jetzt, Abgleich nach delayMs (mehrere Anstöße werden einer;
+    // war einer davon ein Klick, zählt der ganze Durchgang als Klick)
+    void request(int delayMs = 3000, SyncKick kick = SyncKick::Background);
     void setRecording(bool on);   // FragDesk nimmt auf: Pause
+    void cs2ModeChanged();        // Performance-Modus umgestellt: eine Pause wegen CS2 gleich neu prüfen
     // In FragDesk gelöscht: beim nächsten Abgleich auch auf dem Server löschen (merkt es sich bis dahin in settings.json).
     // Nur das wird auf dem Server gelöscht – was in FragDesk bloß fehlt (neuer PC), bleibt dort.
     void matchDeleted(const std::string& checksum);

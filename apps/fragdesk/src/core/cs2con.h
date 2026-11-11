@@ -1,10 +1,26 @@
-// FragDesk – Hilfen für Aufnahmen mit CS2, ohne Windows-Abhängigkeit (damit unter Linux testbar)
+// FragDesk – Hilfen rund um CS2 (Aufnahmen, Rücksicht aufs Spiel), ohne Windows-Abhängigkeit (damit unter Linux testbar)
 #pragma once
 #include <cstddef>
 #include <string>
 #include <vector>
 
 namespace fd {
+
+// Performance-Modus (Einstellungen › Counter-Strike 2): was FragDesk tut, solange CS2 läuft. Gilt für den Abgleich mit
+// dem eigenen Server, „Demo von Valve laden“ und die Handy-App direkt vom PC – Auswerten, Aufnehmen und Ansehen in CS2
+// betrifft er nicht.
+enum class Cs2Mode {
+    Performance,   // alles wartet, bis CS2 zu ist (Standard, wie bisher)
+    Manual,        // nur der Hintergrund wartet; was du anstößt (Klick, Anfrage vom Handy), läuft sofort
+    Auto,          // CS2 hält nichts an
+};
+
+// Wie in settings.json: "performance", "manual", "auto"; alles andere (auch leer) ist Performance
+Cs2Mode parseCs2Mode(const std::string& name);
+const char* cs2ModeName(Cs2Mode mode);
+
+// Muss diese Arbeit warten, solange CS2 läuft? userStarted: per Klick oder vom Handy angestoßen (nicht im Hintergrund)
+bool pausesForCs2(Cs2Mode mode, bool userStarted);
 
 // Letzter Zustand der CS2-Oberfläche in der Konsolenausgabe ab Position from: "INGAME", "LOADINGSCREEN", "MAINMENU" …
 // aus Zeilen wie "ChangeGameUIState: CSGO_GAME_UI_STATE_LOADINGSCREEN -> CSGO_GAME_UI_STATE_INGAME". Es zählen nur

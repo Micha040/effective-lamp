@@ -77,6 +77,25 @@ void App::saveSettings() {
     if (!renderMode) settings.save();
 }
 
+void App::applyCs2Mode() {
+    if (cs2Mode() == settings.cs2Mode) return;
+    setCs2Mode(settings.cs2Mode);
+    logLine(L"Performance-Modus: %ls", settings.cs2Mode == fd::Cs2Mode::Manual ? L"Manuell"
+                                       : settings.cs2Mode == fd::Cs2Mode::Auto ? L"Automatisch"
+                                                                               : L"Performance");
+    // wer gerade wegen CS2 wartet, prüft jetzt neu (ein laufender Abgleich oder Download liest den Modus selbst)
+    sync->cs2ModeChanged();
+    demoFetch->recheckPause();
+}
+
+void App::recordingChanged(bool on) {
+    // nur eine echte Aufnahme hält alles an; startet FragDesk CS2 bloß zum Ansehen, zählt es wie dein CS2 (Modus)
+    bool video = on && recorder && recorder->recordsVideo(), was = recordingActive();
+    setRecordingActive(video);
+    sync->setRecording(on);   // der Abgleich wartet wie bisher auch, solange FragDesk CS2 zum Ansehen startet
+    if (was && !video) demoFetch->recheckPause();   // Aufnahme fertig: eine Pause gleich neu prüfen
+}
+
 void App::go(Page p) {
     if (p != Page::Match && p != Page::Replay) backPage = p;
     if (page == Page::Replay && p != Page::Replay) {   // Daten bleiben für die Rückkehr, die großen Bilder nicht
@@ -303,7 +322,7 @@ void App::watch(const MomentRef& ref) {
     recordError.clear();
     if (!recorder->watch(steam, job, err)) notify(err, true);
     else {
-        sync->setRecording(true);   // kein Hochladen, solange CS2 für FragDesk läuft
+        recordingChanged(true);   // kein Hochladen, solange CS2 für FragDesk startet
         notify(L"CS2 startet und springt zu „" + job.title + L"“");
     }
 }
@@ -328,7 +347,7 @@ void App::record(const std::vector<MomentRef>& moments) {
     recordError.clear();
     if (!recorder->record(steam, settings.record, jobs, err)) notify(err, true);
     else {
-        sync->setRecording(true);   // Pause beim Hochladen, bis die Aufnahme fertig ist
+        recordingChanged(true);   // Pause beim Hochladen (und Laden), bis die Aufnahme fertig ist
         selected.clear();
         go(Page::Highlights);
     }

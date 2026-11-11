@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "../core/cs2con.h"
+
 namespace fdw {
 
 struct RecordSettings {
@@ -59,6 +61,7 @@ struct Settings {
     bool watchReplays = true;             // CS2-Ordner "replays"
     bool watchDownloads = true;           // Downloads (FACEIT)
     bool autoAnalyze = false;             // neue Demos sofort auswerten
+    fd::Cs2Mode cs2Mode = fd::Cs2Mode::Performance;   // Performance-Modus: was FragDesk tut, solange CS2 läuft ("cs2Mode")
     bool dark = true;                     // wird beim Start aus Windows übernommen, falls theme leer
     std::string theme;                    // "", "dark", "light"
     std::vector<std::string> ignored;     // Demos, die nicht mehr angeboten werden ("Pfad|Größe")
