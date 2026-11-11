@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
 $AppName       = 'FragDesk'
-$AppVersion    = '1.7.1'
+$AppVersion    = '1.8.0'
 $SourceDir     = $PSScriptRoot
 $InstallDir    = Join-Path $env:LOCALAPPDATA 'Programs\FragDesk'
 $DataDir       = Join-Path $env:LOCALAPPDATA 'FragDesk'
