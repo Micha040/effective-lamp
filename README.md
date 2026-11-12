@@ -60,7 +60,7 @@ Später zeigt der Launcher, was läuft und wofür es ein Update gibt – ein Kli
 | <img src="docs/media/tiles/snowdesk.png" width="40" alt=""> | **[SnowDesk](#snowdesk)** | Schnee, Regen und echtes Wetter auf dem Desktop | 1.1.1 |
 | <img src="docs/media/tiles/triggerswitch.png" width="40" alt=""> | **[TriggerSwitch](#triggerswitch)** | Trigger der Razer Basilisk V3 Pro per Hotkey umschalten | 1.1.0 |
 | <img src="docs/media/tiles/wavemutesync.png" width="40" alt=""> | **[WaveMuteSync](#wavemutesync)** | Wave:3 stummschalten → Discord und Teams stumm | 1.1.0 |
-| <img src="docs/media/tiles/fragdesk.png" width="40" alt=""> | **[FragDesk](#fragdesk)** | CS2-Stats, Premier-Verlauf und Highlight-Videos aus deinen Demos | 1.0.0 |
+| <img src="docs/media/tiles/fragdesk.png" width="40" alt=""> | **[FragDesk](#fragdesk)** | CS2-Stats, Premier-Verlauf und Highlight-Videos aus deinen Demos | 1.8.0 |
 
 ### DeskCats
 
@@ -136,6 +136,8 @@ MP4 auf. Was ausgewertet und was aufgenommen wird, entscheidest du.
 - Kennzahlen nach T- und CT-Seite, Filter nach Modus, Zeitraum und Map, Verlauf als Graphen
 - Videos: CS2 spielt die Demo ab, FragDesk nimmt das Fenster von außen auf (wie OBS) – kein Plugin, keine
   geänderten Spieldateien; braucht die kostenlosen CS2 Workshop Tools (DLC in Steam)
+- Handy-App mit Heatmaps und 2D-Ansicht – direkt vom PC oder über einen eigenen kleinen Server, der auf Wunsch neue
+  Matches selbst bei Valve lädt; der Performance-Modus legt fest, was davon läuft, während du spielst
 
 <p align="center"><img src="docs/media/fragdesk-dashboard.png" width="680" alt="FragDesk: Übersicht mit Premier-Verlauf"></p>
 
@@ -207,6 +209,7 @@ apps/
   triggerswitch/   C#-Quelltext + PowerShell-Setup         app.json
   wavemutesync/    C#-Quelltext + PowerShell-Setup         app.json
   fragdesk/        C++ (Win32 + GDI+) + Go-Analyzer        build.sh · tests/run.sh · setup/ · app.json
+                   server/ (Linux-Server, Node-Helfer) · web/ (Handy-App)
 launcher/          der Launcher (C++, Win32 + GDI+)       build.sh · tests/run.sh
 brand/             Logo, App-Kacheln, Banner (SVG) + make_brand.py
 docs/              Katalog-Format, Entwicklung, Bilder für diese Seite
