@@ -1,0 +1,21 @@
+# STAMMTISCH: Lebenszeichen an die Datenbank. Supabase legt kostenlose Projekte nach einer Woche ohne Zugriffe
+# schlafen – dieser kleine Aufruf zweimal pro Woche verhindert das, auch wenn die Gruppe mal Pause macht.
+name: STAMMTISCH-Wecker
+
+on:
+  schedule:
+    - cron: '23 4 * * 1,4'   # montags und donnerstags gegen halb sechs (Zeitangabe in UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Datenbank wach halten
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lebenszeichen schicken
+        run: node apps/stammtisch/tools/ping.mjs

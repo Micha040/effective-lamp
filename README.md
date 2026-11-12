@@ -22,14 +22,15 @@
 > on your desktop, snow and real weather on your windows, a hotkey for the Razer Basilisk V3 Pro trigger, a mute sync
 > for the Elgato Wave:3 and FragDesk, local CS2 stats and highlight clips from your own demos – plus a launcher that
 > installs, updates and opens all of them straight from this repository's releases. Every download is checked with SHA-256, nothing needs to keep running in the background, and nothing hooks
-> into games. The programs and their documentation are in German.
+> into games. Also in here: STAMMTISCH, a small web app for a weekly meetup group (events, chat, photos). The programs and
+> their documentation are in German.
 
 ---
 
 ## Inhalt
 
 - [Schnellstart](#schnellstart)
-- [Die Programme](#die-programme) – [DeskCats](#deskcats) · [SnowDesk](#snowdesk) · [TriggerSwitch](#triggerswitch) · [WaveMuteSync](#wavemutesync) · [FragDesk](#fragdesk)
+- [Die Programme](#die-programme) – [DeskCats](#deskcats) · [SnowDesk](#snowdesk) · [TriggerSwitch](#triggerswitch) · [WaveMuteSync](#wavemutesync) · [FragDesk](#fragdesk) · [STAMMTISCH](#stammtisch) (Web-App)
 - [Der Launcher](#der-launcher)
 - [Einzeln herunterladen](#einzeln-herunterladen)
 - [Sicherheit, Anti-Cheat und Ressourcen](#sicherheit-anti-cheat-und-ressourcen)
@@ -61,6 +62,7 @@ Später zeigt der Launcher, was läuft und wofür es ein Update gibt – ein Kli
 | <img src="docs/media/tiles/triggerswitch.png" width="40" alt=""> | **[TriggerSwitch](#triggerswitch)** | Trigger der Razer Basilisk V3 Pro per Hotkey umschalten | 1.1.0 |
 | <img src="docs/media/tiles/wavemutesync.png" width="40" alt=""> | **[WaveMuteSync](#wavemutesync)** | Wave:3 stummschalten → Discord und Teams stumm | 1.1.0 |
 | <img src="docs/media/tiles/fragdesk.png" width="40" alt=""> | **[FragDesk](#fragdesk)** | CS2-Stats, Premier-Verlauf und Highlight-Videos aus deinen Demos | 1.8.0 |
+| <img src="docs/media/tiles/stammtisch.png" width="40" alt=""> | **[STAMMTISCH](#stammtisch)** | Web-App fürs Handy: Treffen, Chat und Bilder für die Donnerstagsrunde | 1.0.0 |
 
 ### DeskCats
 
@@ -143,6 +145,23 @@ MP4 auf. Was ausgewertet und was aufgenommen wird, entscheidest du.
 
 [Anleitung](apps/fragdesk/README.md) · [Quellcode](apps/fragdesk) · [ZIP herunterladen](https://github.com/Micha040/effective-lamp/releases/latest/download/FragDesk.zip)
 
+### STAMMTISCH
+
+<img src="docs/media/tiles/stammtisch.png" width="56" align="right" alt="">
+
+**Die App für die Runde, die sich jeden Donnerstag trifft** – kein Windows-Programm, sondern eine Web-App fürs Handy
+(iPhone und Android, ohne App Store). Oben steht das nächste Treffen mit Ort, Karte und Zusagen, dazu gibt es einen
+Chat mit Bildern und Sprachnachrichten und ein Album je Abend. Jeder aus der Gruppe darf alles ändern; was sich ändert,
+steht im Verlauf und lässt sich rückgängig machen.
+
+- Beitreten per Einladungslink – ohne Konto, E-Mail oder Passwort
+- mehrere Gruppen, jede mit eigenen Treffen, Chat und Bildern; sehen kann man nur die eigenen
+- läuft in kostenlosen Tarifen (GitHub Pages, Supabase) und ist auf einen eigenen Server vorbereitet
+
+<p align="center"><img src="docs/media/stammtisch.png" width="680" alt="STAMMTISCH: nächstes Treffen, Chat und Bilder-Alben"></p>
+
+[Anleitung](apps/stammtisch/README.md) · [Quellcode](apps/stammtisch) · [App öffnen](https://micha040.github.io/effective-lamp/stammtisch/) (braucht einen Einladungscode)
+
 ## Der Launcher
 
 <img src="docs/media/logo.png" width="72" align="right" alt="">
@@ -177,6 +196,9 @@ Jedes Programm gibt es auch als ZIP – entpacken und **`Setup.cmd`** doppelklic
 | WaveMuteSync | [WaveMuteSync.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/WaveMuteSync.zip) | Elgato Wave:3 mit Wave Link 3, Discord-App |
 | FragDesk | [FragDesk.zip](https://github.com/Micha040/effective-lamp/releases/latest/download/FragDesk.zip) | für Videos: CS2 mit Workshop Tools |
 
+STAMMTISCH ist eine Web-App und wird nicht heruntergeladen: [im Browser öffnen](https://micha040.github.io/effective-lamp/stammtisch/)
+und zum Home-Bildschirm hinzufügen ([Anleitung](apps/stammtisch/README.md#mitmachen)).
+
 Alle Dateien eines Releases samt Prüfsummen (`SHA256SUMS.txt`) stehen auf der
 [Release-Seite](https://github.com/Micha040/effective-lamp/releases/latest).
 TriggerSwitch und WaveMuteSync werden als lesbarer Quelltext ausgeliefert und erst auf deinem PC mit dem C#-Compiler
@@ -210,6 +232,7 @@ apps/
   wavemutesync/    C#-Quelltext + PowerShell-Setup         app.json
   fragdesk/        C++ (Win32 + GDI+) + Go-Analyzer        build.sh · tests/run.sh · setup/ · app.json
                    server/ (Linux-Server, Node-Helfer) · web/ (Handy-App)
+  stammtisch/      Web-App (HTML, CSS, JavaScript)          tests/run.sh · web/ · supabase/ (Datenbank) – kein app.json
 launcher/          der Launcher (C++, Win32 + GDI+)       build.sh · tests/run.sh
 brand/             Logo, App-Kacheln, Banner (SVG) + make_brand.py
 docs/              Katalog-Format, Entwicklung, Bilder für diese Seite
@@ -218,6 +241,8 @@ tools/             build-all.sh (alles bauen) · package.py (ZIPs + catalog.json
 
 Gebaut wird unter Linux mit MinGW-w64 und Go (`sh tools/build-all.sh`), Release-Pakete erzeugt `tools/package.py`.
 Ein neuer Tag `vX.Y.Z` (oder **Actions › Release › Run workflow**) baut und veröffentlicht automatisch ein Release.
+STAMMTISCH gehört nicht zum Launcher: Die Web-App wird bei jedem Push über GitHub Pages bereitgestellt
+([pages.yml](.github/workflows/pages.yml)), unabhängig von den Releases.
 Details: [docs/entwicklung.md](docs/entwicklung.md) · Aufbau von `catalog.json`: [docs/katalog.md](docs/katalog.md)
 
 ## Lizenz

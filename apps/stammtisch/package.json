@@ -1,0 +1,6 @@
+{
+  "name": "stammtisch",
+  "private": true,
+  "type": "module",
+  "description": "Nur damit Node die Dateien in web/js und tests als ES-Module liest – die App selbst braucht kein npm."
+}

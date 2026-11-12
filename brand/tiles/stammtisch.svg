@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- STAMMTISCH – Bierkrug mit Schaumkrone -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC45E"/>
+      <stop offset="1" stop-color="#E08A00"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <!-- Henkel -->
+  <path d="M164 112h14a26 26 0 0 1 26 26v14a26 26 0 0 1-26 26h-14" fill="none" stroke="#FFFFFF" stroke-width="15" stroke-linecap="round"/>
+  <!-- Krug -->
+  <path d="M66 96h98v90a20 20 0 0 1-20 20H86a20 20 0 0 1-20-20z" fill="#FFFFFF"/>
+  <!-- Schaum -->
+  <path d="M60 100a24 24 0 0 1 12-45 30 30 0 0 1 52-9 26 26 0 0 1 40 10 23 23 0 0 1 6 44z" fill="#FFFFFF"/>
+  <!-- Rillen im Glas -->
+  <g stroke="#E08A00" stroke-width="12" stroke-linecap="round" opacity=".85">
+    <line x1="98" y1="128" x2="98" y2="174"/>
+    <line x1="132" y1="128" x2="132" y2="174"/>
+  </g>
+</svg>

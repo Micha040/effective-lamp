@@ -36,7 +36,12 @@ sh apps/snowdesk/tests/run.sh        # Schnee-Simulation und "Echtes Wetter"
 sh apps/fragdesk/tests/run.sh        # FragDesk: Kennzahlen-Formeln, Karriere, Formatierung, JSON-Modell, Handy-App, Server
 sh apps/fragdesk/tests/server.sh     # nur fragdesk-server: Einzelteile, ganzer Ablauf über HTTP, install.sh im Schein-Wurzelordner
 (cd apps/fragdesk/analyzer && go test ./...)   # Analyzer; mit FRAGDESK_DEMOS=<Ordner> auch gegen echte Demos
+sh apps/stammtisch/tests/run.sh      # STAMMTISCH: Hilfsfunktionen, Demo-Anbindung, Dateien stimmig, Datenbank-Regeln
 ```
+
+Die Datenbank-Tests von STAMMTISCH (`apps/stammtisch/tests/db.sh`) starten einen frischen PostgreSQL nur für diesen
+Lauf (eigener Ordner, eigener Socket, kein Netz), spielen die Migrationen ein und prüfen, wer was sehen und ändern darf.
+Fehlt PostgreSQL, wird dieser Teil mit einem Hinweis übersprungen (`sudo apt-get install postgresql`).
 
 `tests/server.sh` erzeugt künstliche Matches und Videos; mit `FD_TEST_DATA=<Ordner>` (Aufbau wie bei
 `make_testdata.py`: `matches/`, `clips.json`, `videos/`) laufen die Tests mit echten Daten, mit `CADDY_BIN=<caddy>`
@@ -78,6 +83,20 @@ python3 tools/package.py --tag test --base-url "C:\pfad\zu\dist\\"   # Katalog m
 EfficientLamp.exe --render bild.png --theme dark --demo --scale 200      # Fenster als Bild (für die README)
 ```
 
+## STAMMTISCH (Web-App)
+
+STAMMTISCH wird nicht kompiliert und gehört nicht zum Launcher: `apps/stammtisch/web/` ist die fertige App.
+
+```sh
+python3 -m http.server 8080 --directory apps/stammtisch/web   # http://localhost:8080/?demo – Beispieldaten, ohne Anmeldung
+sh apps/stammtisch/tools/render.sh /tmp/bilder                 # jede Seite als PNG (Chrome ohne Fenster), dunkel und hell
+```
+
+Jeder Push auf `main`, der `apps/stammtisch/` ändert, testet und veröffentlicht die App über
+[pages.yml](../.github/workflows/pages.yml) unter <https://micha040.github.io/effective-lamp/stammtisch/> – ein Release
+braucht es dafür nicht. Einmalig muss im Repo unter **Settings › Pages › Source** „GitHub Actions“ gewählt sein.
+Datenbank, Anbindung und der Weg zum eigenen Server stehen in [apps/stammtisch/README.md](../apps/stammtisch/README.md).
+
 ## Ein Release veröffentlichen
 
 1. Versionsnummern anpassen – je Programm in `app.json` und an den Stellen aus `versionCheck`,
@@ -98,6 +117,8 @@ Jeder Push auf `main` und jeder Pull Request läuft durch [build.yml](../.github
 Pakete hängen dort als Artefakt an.
 
 ## Logo und Bilder
+
+Die Symbole von STAMMTISCH (`brand/tiles/stammtisch.svg`) erzeugt `python3 apps/stammtisch/tools/make_icons.py`.
 
 `brand/` enthält die SVG-Quellen (Logo, App-Kacheln). `python3 brand/make_brand.py` erzeugt daraus
 `launcher/res/efficientlamp.ico`, die PNGs für den Launcher und die Bilder in `docs/media/`

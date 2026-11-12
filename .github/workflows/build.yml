@@ -57,6 +57,7 @@ jobs:
           sh apps/deskcats/tests/run.sh
           sh apps/snowdesk/tests/run.sh
           sh apps/fragdesk/tests/run.sh   # auch fragdesk-server: Einzelteile, ganzer Ablauf über HTTP, install.sh
+          sh apps/stammtisch/tests/run.sh # Web-App: Hilfsfunktionen, Demo-Anbindung, Datenbank-Regeln (eigener Wegwerf-PostgreSQL)
           pwsh -NoProfile -File apps/fragdesk/tools/ps_check.ps1 -SetupPath apps/fragdesk/setup/Setup.ps1
 
       - name: Bauen (Windows-Programme, Launcher, fragdesk-server, fdanalyze für Linux, fragdesk-fetch)
