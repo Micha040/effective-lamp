@@ -429,6 +429,10 @@ arbeitet ab, was ansteht, und beendet sich – im Leerlauf läuft kein Prozess. 
 50–200 MB), wertet sie mit `fdanalyze` aus (mit niedrigster Priorität: ein paar Sekunden, rund 200 MB Arbeitsspeicher),
 gibt die Ergebnisse dem Server (dieselben Prüfungen und dasselbe Speicherlimit wie beim Hochladen aus FragDesk) und
 löscht die Demo wieder. Immer nur ein Match zur Zeit; ein volles Konto lässt er aus, bis wieder Platz ist.
+Klappt ein Match dreimal nicht (etwa weil Valve die Demo nicht mehr hat), überspringt er es. Kann `fdanalyze` eine Demo
+nicht lesen – meist nach einem CS2-Update, das das Demo-Format ändert –, überspringt er sie nicht, sondern wartet
+(höchstens eine Woche, ohne die Demo jedes Mal neu zu laden), bis `install.sh` ein neues `fdanalyze` geholt hat; die
+Handy-App und FragDesk sagen dann genau das.
 
 **Wenn es nicht geht:** Die Handy-App zeigt, was der Server zuletzt gemeldet hat (z. B. „Authentifizierungscode passt
 nicht“). Auf dem Server:

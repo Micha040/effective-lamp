@@ -9,10 +9,13 @@
 namespace fdw {
 
 constexpr const wchar_t* kAppName = L"FragDesk";
-constexpr const wchar_t* kVersion = L"1.8.0";
-constexpr const char* kVersionA = "1.8.0";
+constexpr const wchar_t* kVersion = L"1.8.1";
+constexpr const char* kVersionA = "1.8.1";
 constexpr const wchar_t* kRepoUrl = L"https://github.com/Micha040/effective-lamp";
 constexpr const wchar_t* kAnalyzerExe = L"fdanalyze.exe";
+// Höchstens so viel Arbeitsspeicher für fdanalyze (Job-Objekt). Normal braucht es rund 200 MB; liest es eine Demo nach
+// einem CS2-Update falsch, könnte es sonst viele Gigabyte anfordern – dann bricht es lieber ab.
+constexpr SIZE_T kAnalyzerMemoryLimit = SIZE_T(3) << 30;
 
 // Nachrichten der Hintergrund-Threads an das Fenster
 constexpr UINT WM_APP_LIBRARY = WM_APP + 1;    // Bibliothek geladen / geändert

@@ -72,7 +72,9 @@ std::wstring analysisErrorText(const std::string& code) {
     if (code == "UNPACK") return L"Entpacken fehlgeschlagen – Datei unvollständig?";
     if (code == "POV") return L"Selbst aufgenommene POV-Demos werden nicht unterstützt";
     if (code == "SOURCE") return L"Diese Demo-Quelle wird nicht unterstützt";
-    if (code == "CORRUPT") return L"Die Demo ist beschädigt";
+    // nach einem CS2-Update liest fdanalyze neue Demos oft erst mit einem FragDesk-Update wieder
+    if (code == "CORRUPT") return L"Die Demo ist beschädigt – oder neuer als dieses FragDesk (nach einem CS2-Update: FragDesk aktualisieren)";
+    if (code == "CRASH") return L"fdanalyze ist abgestürzt – Demo beschädigt oder neuer als dieses FragDesk (nach einem CS2-Update: FragDesk aktualisieren)";
     if (code == "EMPTY") return L"Die Demo enthält keine vollständige Runde";
     if (code == "MISSING") return L"fdanalyze.exe fehlt – bitte FragDesk neu installieren";
     if (code == "START") return L"Auswertung konnte nicht gestartet werden";
@@ -557,9 +559,10 @@ void Library::onEvent(AnalysisEvent* e) {
 void Library::worker() {
     std::wstring exe = joinPath(selfDir(), kAnalyzerExe);
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
-    if (job) {   // fdanalyze endet mit FragDesk
+    if (job) {   // fdanalyze endet mit FragDesk und bekommt höchstens kAnalyzerMemoryLimit Arbeitsspeicher
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = {};
-        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        li.ProcessMemoryLimit = kAnalyzerMemoryLimit;
         SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof li);
     }
     int counter = 0;
@@ -653,7 +656,7 @@ void Library::worker() {
                 CloseHandle(pi.hThread);
                 CloseHandle(pi.hProcess);
                 if (exitCode != 0 || done.empty()) {
-                    failText = analysisErrorText(code.empty() ? "INTERNAL" : code);
+                    failText = analysisErrorText(code.empty() ? (exitCode != 0 ? "CRASH" : "INTERNAL") : code);
                     if (code.empty()) logLine(L"fdanalyze endete mit %lu", exitCode);
                 }
             }

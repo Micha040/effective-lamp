@@ -15,9 +15,10 @@ namespace {
 HANDLE analyzerJob() {
     static HANDLE job = [] {
         HANDLE j = CreateJobObjectW(nullptr, nullptr);
-        if (j) {
+        if (j) {   // … und bekommt höchstens kAnalyzerMemoryLimit Arbeitsspeicher
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = {};
-            li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            li.ProcessMemoryLimit = kAnalyzerMemoryLimit;
             SetInformationJobObject(j, JobObjectExtendedLimitInformation, &li, sizeof li);
         }
         return j;
@@ -133,7 +134,7 @@ std::string makeReplay(const std::wstring& demo, const std::wstring& target, DWO
     CloseHandle(pi.hProcess);
     std::string result;
     if (cancelled) result = "CANCELLED";
-    else if (exitCode != 0 || done.empty()) result = code.empty() ? "INTERNAL" : code;
+    else if (exitCode != 0 || done.empty()) result = code.empty() ? (exitCode != 0 ? "CRASH" : "INTERNAL") : code;
     else if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) result = "WRITE";
     cleanup();
     return result;

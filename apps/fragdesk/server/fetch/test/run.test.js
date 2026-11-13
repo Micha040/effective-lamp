@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const {Runner, demoName} = require('../src/run');
+const {Runner, demoName, PARSER_HOLD_SECONDS} = require('../src/run');
 const {LocalApi} = require('../src/local-api');
 const fake = require('../src/steam-fake');
 const {abort, decodeShareCode, now, decodeJwt} = require('../src/util');
@@ -27,7 +27,7 @@ const AUTH_B = 'DDDD-EEEEE-FFFF';
 const KEY = '0123456789ABCDEF0123456789ABCDEF';
 const OLD = now() - 5 * 86400;   // vor 5 Tagen gespielt
 
-const codes = Array.from({length: 30}, (_, i) => shareCode(i + 1));
+const codes = Array.from({length: 34}, (_, i) => shareCode(i + 1));
 const demoBytes = (code) => Buffer.concat([Buffer.from('BZh91AY&SY'), Buffer.from(code), Buffer.alloc(3000, code.charCodeAt(7))]);
 
 let demos;
@@ -516,6 +516,65 @@ test('Server weg mitten im Lauf: Lauf endet mit Fehler, Sperre frei; nächster L
 		await ctx.run();
 		assert.strictEqual(ctx.server.job.accounts[0].knownCode, c2);
 	} finally {
+		await ctx.done();
+	}
+});
+
+test('fdanalyze liest die Demo nicht (CS2-Update?): kein Überspringen, kein neuer Download – bis ein neues fdanalyze da ist', async () => {
+	let [c0, c1, c2] = codes.slice(30, 33);
+	let an = writeFakeAnalyzer(fs.mkdtempSync(path.join(root, 'fdanalyze-')));
+	let url = serve(c1);
+	let hits = () => demos.hits[new URL(url).pathname] || 0;
+	let gc = {[c1]: {url, matchtime: OLD}, [c2]: {url: serve(c2), matchtime: OLD + 60}};
+	let ctx = await setup({accounts: [account(A, SID_A, AUTH_A, c0)], webapi: {[SID_A]: {chain: [c0, c1, c2]}}, gc});
+	let h0 = hits();
+	process.env.FAKE_ANALYZER = 'error';
+	try {
+		for (let n = 1; n <= 4; n++) {
+			await ctx.run(an);
+			let s = ctx.lastState(A);
+			assert.strictEqual(s.knownCode, c0, `Lauf ${n}: knownCode bleibt`);
+			assert.match(s.lastError, /^Match vom .*: fdanalyze kann die Demo nicht lesen \(Auswertung: .*kaputte Testdemo\)\. Vermutlich hat ein CS2-Update .*install\.sh/);
+			assert.ok(!ctx.helperState().accounts[A].attempts, `Lauf ${n}: kein Fehlversuch gezählt`);
+			assert.strictEqual(ctx.helperState().accounts[A].parserHold.code, c1);
+		}
+		assert.strictEqual(hits() - h0, 1, 'die Demo nur einmal geladen');
+		assert.strictEqual(ctx.server.files[A], undefined, 'nichts hochgeladen');
+
+		// install.sh holt ein neues fdanalyze (neue Änderungszeit), das die Demos lesen kann: beide Matches kommen
+		delete process.env.FAKE_ANALYZER;
+		let t = new Date(Date.now() + 120000);
+		fs.utimesSync(an, t, t);
+		await ctx.run(an);
+		let s = ctx.lastState(A);
+		assert.strictEqual(s.knownCode, c2);
+		assert.strictEqual(s.lastError, '');
+		assert.ok(!ctx.helperState().accounts[A].parserHold, 'Warten beendet');
+		assert.strictEqual(Object.keys(ctx.server.files[A]).length, 2);
+	} finally {
+		delete process.env.FAKE_ANALYZER;
+		await ctx.done();
+	}
+});
+
+test('fdanalyze liest die Demo nicht, eine Woche lang: dann wie jeder Fehler (3 Versuche, überspringen)', async () => {
+	let [c0, c1] = codes.slice(32, 34);
+	let an = writeFakeAnalyzer(fs.mkdtempSync(path.join(root, 'fdanalyze-')));
+	let ctx = await setup({accounts: [account(A, SID_A, AUTH_A, c0)], webapi: {[SID_A]: {chain: [c0, c1]}}, gc: {[c1]: {url: serve(c1), matchtime: OLD}}});
+	process.env.FAKE_ANALYZER = 'crash';   // Absturz ohne Meldung (wie nach einem CS2-Update): zählt genauso
+	try {
+		await ctx.run(an);
+		let file = path.join(ctx.data, 'fetch', 'state.json');
+		let st = JSON.parse(fs.readFileSync(file, 'utf8'));
+		assert.strictEqual(st.accounts[A].parserHold.code, c1);
+		st.accounts[A].parserHold.since -= PARSER_HOLD_SECONDS + 60;
+		fs.writeFileSync(file, JSON.stringify(st));
+		await ctx.run(an);
+		assert.match(ctx.lastState(A).lastError, /\(Versuch 1 von 3 – der nächste Lauf versucht es wieder\)$/);
+		assert.ok(!ctx.helperState().accounts[A].parserHold, 'Warten vorbei');
+		assert.strictEqual(ctx.helperState().accounts[A].attempts.count, 1);
+	} finally {
+		delete process.env.FAKE_ANALYZER;
 		await ctx.done();
 	}
 });

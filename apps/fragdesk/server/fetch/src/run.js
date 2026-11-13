@@ -24,6 +24,11 @@ const {botErrorText, rawReason} = require('./texts');
 const {now, sleep, fmtBytes, fmtDuration, fmtDate, decodeShareCode, decodeJwt, maskCode, SHARE_RE, abort} = require('./util');
 
 const MAX_FAILURES = 3;              // Fehlversuche je Freigabecode, dann überspringen
+// fdanalyze kann eine Demo nicht lesen – meist, weil ein CS2-Update das Format geändert hat und erst ein neues fdanalyze
+// sie versteht. Dann den Code nicht nach 3 Versuchen überspringen (das Match wäre verloren), sondern warten, bis install.sh
+// ein neues fdanalyze geholt hat (ohne die Demo jedes Mal neu zu laden) – höchstens so lange, danach wie jeder Fehler.
+const PARSER_HOLD_SECONDS = 7 * 86400;
+const PARSER_CODES = new Set(['CORRUPT', 'FORMAT', 'INTERNAL', 'EXIT', 'SIGNAL']);
 const MAX_NEW_CODES = 10;            // je Konto und Lauf
 const FRESH_SECONDS = 3 * 3600;      // so jung: fehlende Demo heißt „noch nicht bereit“, nicht „gelöscht“
 const SOFT_LIMIT_MS = 100 * 60000;   // danach kein neues Match mehr anfangen (systemd beendet nach 2 h)
@@ -389,6 +394,19 @@ class Runner {
 		return {infos, error, text};
 	}
 
+	// Kennung des installierten fdanalyze (Größe und Änderungszeit): ändert sich, sobald install.sh ein neues holt
+	analyzerId() {
+		if (this._analyzerId === undefined) {
+			try {
+				let st = fs.statSync(this.analyzer);
+				this._analyzerId = `${st.size}:${Math.floor(st.mtimeMs)}`;
+			} catch (e) {
+				this._analyzerId = '';
+			}
+		}
+		return this._analyzerId;
+	}
+
 	// ---- 6. ein Konto -------------------------------------------------------------------------------------------------------
 	// Ist der Server weg, wirft das und beendet den Lauf – knownCode wurde dann nicht weitergezählt, der nächste Lauf
 	// macht an derselben Stelle weiter (ein schon hochgeladenes Match wird einfach noch einmal ersetzt).
@@ -431,6 +449,17 @@ class Runner {
 			// im Protokoll mit Match-ID, in der Handy-App (lastError) nur mit Datum
 			let label = `Match ${id}${info.matchtime ? ` (${fmtDate(info.matchtime)})` : ''}`;
 			let userLabel = info.matchtime ? `Match vom ${fmtDate(info.matchtime)}` : `Match ${id}`;
+			let hold = this.state.parserHold(acc.id);
+			if (hold && hold.code == code) {
+				if (hold.analyzer == this.analyzerId() && now() - hold.since < PARSER_HOLD_SECONDS) {
+					lastError = hold.text;   // dasselbe fdanalyze: die Demo gar nicht erst wieder laden
+					log.info(`${label}: wartet auf ein neues fdanalyze (install.sh).`);
+					break;
+				}
+				if (hold.analyzer != this.analyzerId()) {
+					log.info(`${label}: neues fdanalyze – neuer Versuch.`);
+				}
+			}
 			let r = await this.match(acc, code, info, label);
 			if (r.gone) {
 				return;   // Konto weg – kein Stand mehr
@@ -438,6 +467,7 @@ class Runner {
 			if (r.ok || r.skip) {
 				known = code;
 				this.state.clearFailures(acc.id);
+				this.state.clearParserHold(acc.id);
 				let body = {knownCode: code, from, lastCheck: now(), lastError: ''};
 				if (r.ok) {
 					fetched++;
@@ -462,6 +492,17 @@ class Runner {
 			}
 			// Fehlschlag
 			this.stats.failed++;
+			if (r.parser) {
+				let since = hold && hold.code == code ? hold.since : now();
+				if (now() - since < PARSER_HOLD_SECONDS) {
+					lastError = `${userLabel}: fdanalyze kann die Demo nicht lesen (${r.fail}). Vermutlich hat ein CS2-Update das Demo-Format geändert – auf dem Server install.sh noch einmal ausführen (holt das neue fdanalyze), dann geht es hier von selbst weiter.`;
+					this.state.setParserHold(acc.id, {code, analyzer: this.analyzerId(), since, text: lastError});
+					this.state.save();
+					log.warn(`${label}: fdanalyze kann die Demo nicht lesen (${r.fail}) – kein Überspringen, wartet bis zu 7 Tage auf ein neues fdanalyze.`);
+					break;
+				}
+				this.state.clearParserHold(acc.id);   // eine Woche gewartet: jetzt wie jeder andere Fehler
+			}
 			if (!r.counted) {
 				lastError = `${userLabel}: ${r.fail}`;
 				log.warn(`${label}: ${r.fail}`);
@@ -629,7 +670,7 @@ class Runner {
 				log.error(`fdanalyze: ${err.message}`);
 				return {fail: err.message, counted: false};
 			}
-			return {fail: `Auswertung: ${err.message}`, counted: true};
+			return {fail: `Auswertung: ${err.message}`, counted: true, parser: PARSER_CODES.has(err.code)};
 		} finally {
 			// Demo und entpackte Fassung sofort weg, nur die Ergebnisse bleiben bis zum Ende des Laufs
 			fs.rmSync(demo, {force: true});
@@ -662,4 +703,4 @@ function demoName(url, matchId) {
 	}
 }
 
-module.exports = {Runner, demoName, MAX_FAILURES};
+module.exports = {Runner, demoName, MAX_FAILURES, PARSER_HOLD_SECONDS};

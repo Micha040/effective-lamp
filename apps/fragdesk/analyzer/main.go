@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	version     = "1.8.0"
-	csdaVersion = "1.13.0"
+	version     = "1.8.1"
+	csdaVersion = "1.14.1"
 )
 
 func main() {

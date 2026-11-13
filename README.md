@@ -61,7 +61,7 @@ Später zeigt der Launcher, was läuft und wofür es ein Update gibt – ein Kli
 | <img src="docs/media/tiles/snowdesk.png" width="40" alt=""> | **[SnowDesk](#snowdesk)** | Schnee, Regen und echtes Wetter auf dem Desktop | 1.1.1 |
 | <img src="docs/media/tiles/triggerswitch.png" width="40" alt=""> | **[TriggerSwitch](#triggerswitch)** | Trigger der Razer Basilisk V3 Pro per Hotkey umschalten | 1.1.0 |
 | <img src="docs/media/tiles/wavemutesync.png" width="40" alt=""> | **[WaveMuteSync](#wavemutesync)** | Wave:3 stummschalten → Discord und Teams stumm | 1.1.0 |
-| <img src="docs/media/tiles/fragdesk.png" width="40" alt=""> | **[FragDesk](#fragdesk)** | CS2-Stats, Premier-Verlauf und Highlight-Videos aus deinen Demos | 1.8.0 |
+| <img src="docs/media/tiles/fragdesk.png" width="40" alt=""> | **[FragDesk](#fragdesk)** | CS2-Stats, Premier-Verlauf und Highlight-Videos aus deinen Demos | 1.8.1 |
 | <img src="docs/media/tiles/stammtisch.png" width="40" alt=""> | **[STAMMTISCH](#stammtisch)** | Web-App fürs Handy: Treffen, Chat und Bilder für die Donnerstagsrunde | 1.0.0 |
 
 ### DeskCats

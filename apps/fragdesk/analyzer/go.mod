@@ -3,10 +3,10 @@ module github.com/Micha040/effective-lamp/apps/fragdesk/analyzer
 go 1.27.0
 
 require (
-	github.com/akiver/cs-demo-analyzer v1.13.0
+	github.com/akiver/cs-demo-analyzer v1.14.1
 	github.com/golang/geo v0.0.0-20250516193853-92f93c4cb289
 	github.com/klauspost/compress v1.18.7
-	github.com/markus-wa/demoinfocs-golang/v4 v4.5.2-0.20261019222625-b5a02b17ce7a
+	github.com/markus-wa/demoinfocs-golang/v4 v4.5.2-0.20261112153901-decf1a65caee
 )
 
 require (

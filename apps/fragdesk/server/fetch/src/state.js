@@ -166,6 +166,23 @@ class HelperState {
 		}
 	}
 
+	// fdanalyze kann die Demo eines Codes nicht lesen (CS2-Update?): {code, analyzer, since, text} – siehe run.js
+	parserHold(id) {
+		let a = this.data.accounts[id];
+		return a && a.parserHold && typeof a.parserHold == 'object' ? a.parserHold : null;
+	}
+
+	setParserHold(id, hold) {
+		this.account(id).parserHold = hold;
+	}
+
+	clearParserHold(id) {
+		if (this.data.accounts[id] && this.data.accounts[id].parserHold) {
+			delete this.data.accounts[id].parserHold;
+			this.save();
+		}
+	}
+
 	// 403/412: nicht weiter fragen, solange die Angaben gleich sind (höchstens 6 Stunden)
 	blocked(id, key) {
 		let a = this.data.accounts[id];
